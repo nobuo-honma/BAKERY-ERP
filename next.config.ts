@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+<<<<<<< HEAD
   /* 静的エクスポートを有効化（GitHub Pagesには必須） */
   output: 'export',
 
@@ -17,3 +18,10 @@ const nextConfig: NextConfig = {
 };
 
 export default nextConfig;
+=======
+  /* config options here */
+  reactCompiler: true,
+};
+
+export default nextConfig;
+>>>>>>> fcc6ded (Initial commit from Create Next App)
