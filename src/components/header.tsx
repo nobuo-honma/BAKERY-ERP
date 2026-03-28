@@ -2,12 +2,13 @@
 
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetTrigger } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
-import { Menu, Home, ShoppingCart, Factory, Package, ArrowDownToLine, Truck, Database } from "lucide-react";
+// ▼ 修正1: 'BookOpen' アイコンを追加で読み込む
+import { Menu, Home, ShoppingCart, Factory, Package, ArrowDownToLine, Truck, Database, BookOpen } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
 export default function Header() {
-  const menuItems = [
+  const menuItems =[
     { title: "ダッシュボード", href: "/", icon: Home },
     { title: "受注管理", href: "/orders", icon: ShoppingCart },
     { title: "製造管理", href: "/production", icon: Factory },
@@ -15,6 +16,8 @@ export default function Header() {
     { title: "入荷管理", href: "/arrivals", icon: ArrowDownToLine },
     { title: "出荷管理", href: "/shipments", icon: Truck },
     { title: "マスタ管理", href: "/master", icon: Database },
+    // ▼ 修正2: メニューの一番下にマニュアルを追加
+    { title: "マニュアル", href: "/manual", icon: BookOpen },
   ];
 
   const [open, setOpen] = useState(false);
