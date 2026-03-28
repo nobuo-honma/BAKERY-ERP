@@ -6,7 +6,7 @@ const nextConfig: NextConfig = {
 
   /* リポジトリ名に応じたベースパスの設定 */
   // 例: https://<username>.github.io/my-repo/ の場合、'/my-repo' と記述
-  basePath: 'https://github.com/nobuo-honma/BAKERY-ERP.git',
+  basePath: '/BAKERY-ERP',
 
   /* 画像最適化の無効化（GitHub PagesのサーバーではNext.jsの画像変換機能が動かないため） */
   images: {
