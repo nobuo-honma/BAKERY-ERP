@@ -1,19 +1,18 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* 静的エクスポートを有効化 */
+  /* 静的エクスポートを有効化（GitHub Pagesには必須） */
   output: 'export',
 
-  /* リポジトリ名に応じたベースパスの設定 */
-  // 例: https://<username>.github.io/my-repo/ の場合、'/my-repo' と記述
+  /* リポジトリ名「BAKERY-ERP」をベースパスに設定 */
   basePath: '/BAKERY-ERP',
 
-  /* 画像最適化の無効化（GitHub PagesのサーバーではNext.jsの画像変換機能が動かないため） */
+  /* 画像最適化の無効化（GitHub Pagesの制限対応） */
   images: {
     unoptimized: true,
   },
 
-  /* 末尾のスラッシュを強制（ルーティングの整合性を保つため推奨） */
+  /* URLの末尾にスラッシュを付与（ルーティングの安定化） */
   trailingSlash: true,
 };
 
