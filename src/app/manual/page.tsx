@@ -35,7 +35,7 @@ export default function ManualPage() {
         <div className="bg-white min-h-[80vh] rounded-xl shadow-sm border border-slate-200 relative print:border-none print:shadow-none print:bg-white">
 
             {/* --- 印刷専用スタイル (画面表示時は無視されます) --- */}
-            <style dangerouslySetInlineStyle={{
+            <style dangerouslySetInnerHTML={{
                 __html: `
         @media print {
           @page { size: A4 portrait; margin: 15mm; }
