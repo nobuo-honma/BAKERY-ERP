@@ -1,265 +1,955 @@
 "use client";
 
 import { useState } from "react";
-import { BookOpen, ArrowRight, Printer, Menu as MenuIcon, X, CheckCircle2, ChevronRight, AlertCircle } from "lucide-react";
+import {
+    BookOpen, Printer, MenuIcon, Settings, Info,
+    ChevronDown, AlertCircle, CheckCircle2, FileText,
+    AlertTriangle, HelpCircle, Shield, BookMarked,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 
+// ─────────────────────────────────────────────
+type TabKey = "user" | "tech";
+
+// ─────────────────────────────────────────────
+//  目次
+// ─────────────────────────────────────────────
+const USER_TOC = [
+    { id: "glossary", title: "用語集" },
+    { id: "roles", title: "権限ロール一覧" },
+    { id: "intro", title: "はじめに" },
+    { id: "swimlane", title: "1. 業務フロー（スイムレーン）" },
+    { id: "master", title: "2. マスタ管理" },
+    { id: "order", title: "3. 受注管理" },
+    { id: "arrival", title: "4. 入荷管理" },
+    { id: "production", title: "5. 製造管理" },
+    { id: "inventory", title: "6. 在庫管理・棚卸" },
+    { id: "shipment", title: "7. 出荷管理" },
+    { id: "calendar", title: "8. カレンダー" },
+    { id: "haccp", title: "9. HACCP・マニュアル" },
+    { id: "errors", title: "エラー・警告の対処法" },
+    { id: "trouble", title: "トラブルシューティング" },
+];
+
+const TECH_TOC = [
+    { num: "01", label: "システム・アーキテクチャ" },
+    { num: "02", label: "Lot 番号の自動生成ルール" },
+    { num: "03", label: "ケース・ピース混在管理" },
+    { num: "04", label: "データベース・テーブル構成" },
+];
+
+// ─────────────────────────────────────────────
+//  部品
+// ─────────────────────────────────────────────
+function TocRow({ label, onClick }: { label: string; onClick?: () => void }) {
+    return (
+        <button onClick={onClick} className="w-full flex items-baseline gap-1 py-1.5 group text-left">
+            <span className="text-[10px] text-slate-400 shrink-0">›</span>
+            <span className="flex-1 border-b border-dotted border-slate-300 mb-0.5" />
+            <span className="text-xs text-slate-600 group-hover:text-blue-700 transition-colors shrink-0 text-right leading-tight max-w-[130px]">
+                {label}
+            </span>
+        </button>
+    );
+}
+
+function SectionTitle({ id, children }: { id: string; children: React.ReactNode }) {
+    return (
+        <h2 id={id} className="text-xl md:text-2xl font-black text-slate-800 border-b-2 border-slate-200 pb-2 mb-5 scroll-mt-20">
+            {children}
+        </h2>
+    );
+}
+
+function SubTitle({ children }: { children: React.ReactNode }) {
+    return (
+        <h3 className="text-base md:text-lg font-bold text-blue-800 border-l-4 border-blue-500 pl-3 mb-3 mt-6">
+            {children}
+        </h3>
+    );
+}
+
+function StepBadge({ n, label }: { n: number; label: string }) {
+    return (
+        <div className="flex items-start gap-3">
+            <span className="bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center font-bold shrink-0 text-xs mt-0.5">
+                {n}
+            </span>
+            <span className="text-sm text-slate-800">{label}</span>
+        </div>
+    );
+}
+
+function InfoBox({ color, icon, title, children }: {
+    color: "blue" | "amber" | "red" | "green";
+    icon: React.ReactNode;
+    title: string;
+    children: React.ReactNode;
+}) {
+    const styles = {
+        blue: "bg-blue-50 border-blue-200 text-blue-900",
+        amber: "bg-amber-50 border-amber-200 text-amber-900",
+        red: "bg-red-50 border-red-200 text-red-900",
+        green: "bg-green-50 border-green-200 text-green-900",
+    };
+    return (
+        <div className={`border rounded-lg p-4 ${styles[color]}`}>
+            <div className="flex items-center gap-2 font-bold mb-2 text-sm">
+                {icon}{title}
+            </div>
+            <div className="text-sm">{children}</div>
+        </div>
+    );
+}
+
+// ─────────────────────────────────────────────
+//  スイムレーン図
+// ─────────────────────────────────────────────
+const LANES = [
+    { label: "営業 / 管理者", color: "bg-blue-100 border-blue-300 text-blue-800" },
+    { label: "製造担当", color: "bg-amber-100 border-amber-300 text-amber-800" },
+    { label: "倉庫担当", color: "bg-green-100 border-green-300 text-green-800" },
+    { label: "システム\n(自動)", color: "bg-slate-100 border-slate-300 text-slate-700" },
+];
+
+const SWIM_STEPS = [
+    // [ lane-index, label, sub ]
+    [0, "受注登録", "製品・数量・納期を入力"],
+    [3, "BOM 計算", "必要資材・不足を自動計算"],
+    [0, "資材発注登録", "不足資材を入荷管理に登録"],
+    [2, "資材受入", "届いた資材を「入荷済」に"],
+    [3, "原料在庫 +加算", "item_stocks が自動更新"],
+    [1, "製造計画登録", "製造日・kg 数を入力"],
+    [3, "Lot・賞味期限 自動発行", "lot-generator.ts が計算"],
+    [1, "製造開始ボタン", "実作業スタート"],
+    [3, "原料在庫 −減算", "BOM に基づき自動処理"],
+    [1, "製造完了ボタン", "パン完成"],
+    [3, "製品在庫 +加算", "Lot 付きで product_stocks へ"],
+    [2, "棚卸確認", "月次で実数と照合"],
+    [0, "出荷引き当て", "Lot を選び数量を手入力"],
+    [3, "製品在庫 −減算", "product_stocks が自動更新"],
+    [2, "出荷・納品", "取引完了"],
+];
+
+function SwimlaneChart() {
+    return (
+        <div className="overflow-x-auto -mx-4 px-4">
+            <div className="min-w-[640px]">
+                {/* レーンヘッダー */}
+                <div className="grid grid-cols-4 gap-1 mb-1">
+                    {LANES.map((l) => (
+                        <div key={l.label} className={`border rounded px-2 py-1.5 text-xs font-bold text-center whitespace-pre-line ${l.color}`}>
+                            {l.label}
+                        </div>
+                    ))}
+                </div>
+                {/* ステップ行 */}
+                <div className="space-y-1">
+                    {SWIM_STEPS.map(([laneIdx, label, sub], i) => (
+                        <div key={i} className="grid grid-cols-4 gap-1">
+                            {[0, 1, 2, 3].map((col) => {
+                                if (col !== laneIdx) return <div key={col} className="border border-dashed border-slate-200 rounded h-12" />;
+                                const lane = LANES[laneIdx as number];
+                                return (
+                                    <div key={col} className={`border rounded px-2 py-1 ${lane.color} relative`}>
+                                        <div className="text-xs font-bold leading-tight">{label as string}</div>
+                                        <div className="text-[10px] opacity-70 leading-tight">{sub as string}</div>
+                                        {i < SWIM_STEPS.length - 1 && (
+                                            <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 text-slate-400 text-[10px] z-10">▼</div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ─────────────────────────────────────────────
+//  メイン
+// ─────────────────────────────────────────────
 export default function ManualPage() {
-    const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+    const [tab, setTab] = useState<TabKey>("user");
+    const [mobileTocOpen, setMobileTocOpen] = useState(false);
+    const [techTocOpen, setTechTocOpen] = useState(false);
 
-    // 目次の項目定義
-    const tableOfContents = [
-        { id: "intro", title: "はじめに" },
-        { id: "flow", title: "1. 全体の業務フロー (受注〜出荷)" },
-        { id: "master", title: "2. マスタ管理 (初期設定)" },
-        { id: "order", title: "3. 受注管理 (注文の登録と計算)" },
-        { id: "arrival", title: "4. 入荷管理 (資材の発注と受入)" },
-        { id: "production", title: "5. 製造管理 (計画とLot自動発行)" },
-        { id: "inventory", title: "6. 在庫管理・棚卸 (実数調整)" },
-        { id: "shipment", title: "7. 出荷管理 (手動引き当て)" },
-        { id: "calendar", title: "8. 予定表(カレンダー)の活用" },
-    ];
-
-    // スムーズスクロール機能
     const scrollTo = (id: string) => {
         const el = document.getElementById(id);
-        if (el) {
-            // ヘッダーの高さ分(約80px)を引いてスクロール
-            const y = el.getBoundingClientRect().top + window.scrollY - 80;
-            window.scrollTo({ top: y, behavior: 'smooth' });
-            setIsMobileMenuOpen(false); // スマホメニューを閉じる
-        }
+        if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 80, behavior: "smooth" });
+        setMobileTocOpen(false);
+    };
+
+    const scrollToTech = (num: string) => {
+        const el = document.getElementById(`tech-${num}`);
+        if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 80, behavior: "smooth" });
+        setTechTocOpen(false);
     };
 
     return (
-        <div className="bg-white min-h-[80vh] rounded-xl shadow-sm border border-slate-200 relative print:border-none print:shadow-none print:bg-white">
-
-            {/* --- 印刷専用スタイル (画面表示時は無視されます) --- */}
-            <style dangerouslySetInnerHTML={{
-                __html: `
+        <div className="bg-white min-h-[80vh] rounded-xl shadow-sm border border-slate-200 print:border-none print:shadow-none">
+            <style>{`
         @media print {
           @page { size: A4 portrait; margin: 15mm; }
-          header, nav { display: none !important; }
-          body { background-color: white !important; color: black !important; }
           .print-hidden { display: none !important; }
           .page-break { page-break-before: always; }
           .avoid-break { page-break-inside: avoid; }
-          main { padding: 0 !important; margin: 0 !important; max-width: 100% !important; }
         }
-      `}} />
+      `}</style>
 
-            {/* --- ヘッダー領域 --- */}
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center p-6 md:p-8 border-b print:border-b-2 print:border-black">
-                <div className="flex items-center gap-4 mb-4 md:mb-0">
-                    <div className="bg-blue-100 p-3 rounded-lg print:hidden">
-                        <BookOpen className="h-8 w-8 text-blue-700" />
+            {/* ── ヘッダー ── */}
+            <header className="border-b border-slate-200 px-4 md:px-8 py-4">
+                <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                        <div className="bg-blue-100 p-2 md:p-3 rounded-lg print:hidden shrink-0">
+                            <BookOpen className="h-5 w-5 md:h-7 md:w-7 text-blue-700" />
+                        </div>
+                        <div>
+                            <div className="flex items-center gap-2 mb-0.5">
+                                <span className="font-mono text-[9px] tracking-widest px-1.5 py-0.5 border rounded-sm uppercase text-blue-700 border-blue-400 hidden sm:inline">
+                                    取扱説明書
+                                </span>
+                                <span className="font-mono text-[9px] text-slate-400 tracking-widest">REV. 2.0.0</span>
+                            </div>
+                            <h1 className="text-lg md:text-2xl font-black text-slate-800 tracking-tight leading-tight">
+                                システム取り扱い説明書
+                            </h1>
+                            <p className="text-xs text-slate-500 mt-0.5 font-bold hidden sm:block">
+                                災害備蓄用パン 製造・HACCP 統合管理システム
+                            </p>
+                        </div>
                     </div>
-                    <div>
-                        <h1 className="text-2xl md:text-3xl font-black text-slate-800 tracking-tight">システム取り扱い説明書</h1>
-                        <p className="text-sm md:text-base text-slate-500 mt-1 font-bold">災害備蓄用パン 製造・HACCP統合管理システム</p>
-                    </div>
-                </div>
-                <Button onClick={() => window.print()} className="bg-slate-800 hover:bg-slate-900 text-white font-bold print-hidden shadow-sm">
-                    <Printer className="h-4 w-4 mr-2" /> マニュアルを印刷する
-                </Button>
-            </div>
-
-            <div className="flex flex-col md:flex-row">
-                {/* --- 左側：目次ナビゲーション (PC表示) --- */}
-                <div className="hidden md:block w-1/4 p-6 border-r bg-slate-50 print-hidden min-h-screen sticky top-16">
-                    <h2 className="font-bold text-slate-700 mb-4 flex items-center gap-2"><MenuIcon className="h-5 w-5" /> 目次</h2>
-                    <nav className="space-y-1">
-                        {tableOfContents.map((item) => (
-                            <button
-                                key={item.id} onClick={() => scrollTo(item.id)}
-                                className="block w-full text-left px-3 py-2.5 text-sm font-bold text-slate-600 hover:bg-white hover:text-blue-700 rounded-md transition-colors"
-                            >
-                                {item.title}
-                            </button>
-                        ))}
-                    </nav>
-                </div>
-
-                {/* --- スマホ用目次トグル --- */}
-                <div className="md:hidden p-4 border-b bg-slate-50 print-hidden sticky top-16 z-40">
-                    <Button variant="outline" onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="w-full justify-between bg-white font-bold border-slate-300">
-                        <span className="flex items-center gap-2"><MenuIcon className="h-4 w-4" /> {isMobileMenuOpen ? "目次を閉じる" : "目次を開く"}</span>
-                        {isMobileMenuOpen ? <X className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                    <Button
+                        onClick={() => window.print()}
+                        className="print-hidden shrink-0 bg-slate-800 hover:bg-slate-900 text-white font-bold shadow-sm text-xs md:text-sm px-3 md:px-4"
+                    >
+                        <Printer className="h-4 w-4 mr-1 md:mr-2" />
+                        <span className="hidden sm:inline">印刷する</span>
+                        <span className="sm:hidden">印刷</span>
                     </Button>
-                    {isMobileMenuOpen && (
-                        <nav className="mt-2 bg-white border rounded-lg shadow-lg overflow-hidden divide-y">
-                            {tableOfContents.map((item) => (
-                                <button
-                                    key={item.id} onClick={() => scrollTo(item.id)}
-                                    className="block w-full text-left px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50"
-                                >
-                                    {item.title}
-                                </button>
-                            ))}
-                        </nav>
-                    )}
                 </div>
 
-                {/* --- 右側：マニュアル本文 --- */}
-                <div className="w-full md:w-3/4 p-6 md:p-10 space-y-16 print:p-4 print:space-y-10">
+                {/* タブ */}
+                <div className="flex gap-2 mt-4 print-hidden">
+                    {([
+                        { key: "user", icon: <Info className="h-4 w-4" />, label: "操作マニュアル" },
+                        { key: "tech", icon: <Settings className="h-4 w-4" />, label: "技術仕様" },
+                    ] as const).map((t) => (
+                        <button
+                            key={t.key}
+                            onClick={() => setTab(t.key)}
+                            className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-bold transition-colors"
+                            style={tab === t.key
+                                ? { background: "#1d4ed8", color: "#fff" }
+                                : { background: "#f1f5f9", color: "#475569" }}
+                        >
+                            {t.icon}{t.label}
+                        </button>
+                    ))}
+                </div>
+            </header>
 
-                    {/* はじめに */}
-                    <section id="intro" className="avoid-break">
-                        <h2 className="text-xl font-bold text-blue-800 border-l-4 border-blue-600 pl-3 mb-4">はじめに</h2>
-                        <p className="text-slate-700 leading-relaxed mb-4">
-                            本システムは、災害備蓄用パンの「受注〜製造〜出荷」に至るすべてのモノの流れ（サプライチェーン）を一元管理し、在庫の自動計算やLot番号の自動採番を行うことで、業務効率化とミス防止を実現するシステムです。
-                        </p>
-                        <div className="bg-amber-50 border border-amber-200 p-4 rounded-lg flex gap-3 text-sm text-amber-800 font-bold">
-                            <AlertCircle className="h-5 w-5 shrink-0" />
-                            <p>システム内の在庫数は、各画面のステータス更新（「製造中」や「出荷済」にする操作）と完全に連動して増減します。必ず実際の作業と同時にシステムのステータスを更新するようにしてください。</p>
-                        </div>
-                    </section>
+            {/* ══════════════════════════════════════
+          操作マニュアル
+      ══════════════════════════════════════ */}
+            {tab === "user" && (
+                <div className="flex flex-col md:flex-row">
 
-                    {/* 1. 業務フロー */}
-                    <section id="flow" className="avoid-break">
-                        <h2 className="text-2xl font-black text-slate-800 mb-6 border-b pb-2">1. 全体の業務フロー (受注〜出荷)</h2>
-                        <div className="space-y-4">
-                            <div className="flex gap-4 p-4 bg-slate-50 border rounded-lg items-start">
-                                <div className="bg-blue-600 text-white w-8 h-8 rounded-full flex items-center justify-center font-bold shrink-0">1</div>
-                                <div>
-                                    <h3 className="font-bold text-lg text-blue-900 mb-1">【受注管理】 注文の登録</h3>
-                                    <p className="text-slate-700 text-sm">お客様からの注文を入力します。この時、システムが自動的にBOM（レシピ）を計算し、必要な原材料と資材の不足分を知らせてくれます。</p>
-                                </div>
+                    {/* PC サイドバー */}
+                    <aside className="hidden md:block w-56 shrink-0 border-r border-slate-200 p-4 sticky top-0 self-start max-h-screen overflow-y-auto print-hidden">
+                        <p className="font-mono text-[9px] tracking-[0.2em] text-slate-400 uppercase mb-2">目次</p>
+                        {USER_TOC.map((item) => (
+                            <TocRow key={item.id} label={item.title} onClick={() => scrollTo(item.id)} />
+                        ))}
+                    </aside>
+
+                    {/* モバイル 目次 */}
+                    <div className="md:hidden border-b border-slate-200 print-hidden">
+                        <button
+                            className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 text-sm font-bold text-slate-700"
+                            onClick={() => setMobileTocOpen(!mobileTocOpen)}
+                        >
+                            <span className="flex items-center gap-2"><MenuIcon className="h-4 w-4" />目次</span>
+                            <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${mobileTocOpen ? "rotate-180" : ""}`} />
+                        </button>
+                        {mobileTocOpen && (
+                            <nav className="px-4 pb-3 bg-white divide-y divide-slate-100">
+                                {USER_TOC.map((item) => (
+                                    <button key={item.id} onClick={() => scrollTo(item.id)}
+                                        className="block w-full text-left py-2 text-sm font-bold text-slate-700 hover:text-blue-700">
+                                        {item.title}
+                                    </button>
+                                ))}
+                            </nav>
+                        )}
+                    </div>
+
+                    {/* 本文 */}
+                    <main className="flex-1 p-4 md:p-10 space-y-14 min-w-0 print:p-4">
+
+                        {/* ── 用語集 ── */}
+                        <section id="glossary" className="avoid-break scroll-mt-20">
+                            <SectionTitle id="glossary">
+                                <BookMarked className="inline h-6 w-6 mr-2 text-blue-600" />用語集
+                            </SectionTitle>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm border-collapse">
+                                    <thead>
+                                        <tr className="bg-blue-700 text-white text-xs">
+                                            <th className="px-3 py-2 border border-blue-600 text-left w-28">用語</th>
+                                            <th className="px-3 py-2 border border-blue-600 text-left">意味</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {[
+                                            ["Lot（ロット）", "一度の製造バッチに付与される識別番号。賞味期限管理とトレーサビリティに使用します。"],
+                                            ["BOM（ビル・オブ・マテリアル）", "製品を作るためのレシピ（部品表）。どの原料を何kg使うかが登録されています。"],
+                                            ["c/s（ケース）", "製品の出荷単位。1ケースに入るピース数は製品マスタの unit_per_cs で管理します。"],
+                                            ["p（ピース）", "製品の最小単位（1個）。棚卸・出荷時にケース未満の端数として入力します。"],
+                                            ["引き当て", "受注に対して、倉庫の製品在庫（Lot）を割り当て・確保すること。"],
+                                            ["棚卸", "実際の在庫数を数えてシステムの数値と照合し、ズレを修正する作業。"],
+                                            ["マスタ", "製品・原料・得意先など、業務の基本情報を登録した設定データ。"],
+                                            ["HACCP", "食品製造における危害分析・重要管理点方式。衛生管理記録の根拠文書。"],
+                                            ["管理者モード", "データの編集・登録・削除ができる権限。ヘッダーのスイッチで切り替え。"],
+                                            ["閲覧者モード", "データの参照のみ可能。誤操作防止のためフィールド作業時に推奨。"],
+                                        ].map(([term, desc], i) => (
+                                            <tr key={term as string} className={i % 2 === 0 ? "bg-slate-50" : "bg-white"}>
+                                                <td className="px-3 py-2 border border-slate-200 font-bold text-blue-800 text-xs align-top">{term as string}</td>
+                                                <td className="px-3 py-2 border border-slate-200 text-slate-600">{desc as string}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
                             </div>
-                            <div className="flex justify-center text-slate-300 print-hidden"><ArrowRight className="rotate-90 md:rotate-0" /></div>
+                        </section>
 
-                            <div className="flex gap-4 p-4 bg-slate-50 border rounded-lg items-start">
-                                <div className="bg-blue-600 text-white w-8 h-8 rounded-full flex items-center justify-center font-bold shrink-0">2</div>
-                                <div>
-                                    <h3 className="font-bold text-lg text-blue-900 mb-1">【入荷管理】 資材の発注・受け入れ</h3>
-                                    <p className="text-slate-700 text-sm">不足している原料・資材の発注を登録します。実際にモノが届いたら「入荷済」ボタンを押すことで、システムの原材料在庫が増加します。</p>
-                                </div>
+                        {/* ── 権限ロール ── */}
+                        <section id="roles" className="avoid-break scroll-mt-20">
+                            <SectionTitle id="roles">
+                                <Shield className="inline h-6 w-6 mr-2 text-blue-600" />権限ロール別 操作可否一覧
+                            </SectionTitle>
+                            <p className="text-sm text-slate-600 mb-4">
+                                ヘッダー右上の「👑 管理者 / 👀 閲覧者」スイッチで切り替えます。<br />
+                                フィールド作業中は必ず<strong>閲覧者モード</strong>にしておくことを推奨します。
+                            </p>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm border-collapse">
+                                    <thead>
+                                        <tr className="bg-slate-700 text-white text-xs">
+                                            <th className="px-3 py-2 border border-slate-600 text-left">操作</th>
+                                            <th className="px-3 py-2 border border-slate-600 text-center">管理者</th>
+                                            <th className="px-3 py-2 border border-slate-600 text-center">閲覧者</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="text-slate-700">
+                                        {[
+                                            ["各画面の閲覧・印刷", true, true],
+                                            ["マスタ（製品・原料・得意先）の編集", true, false],
+                                            ["受注の新規登録・編集", true, false],
+                                            ["入荷予定の登録", true, false],
+                                            ["入荷済ボタン（在庫加算）", true, false],
+                                            ["製造計画の登録・分割", true, false],
+                                            ["製造開始ボタン（原料減算）", true, false],
+                                            ["製造完了ボタン（製品加算）", true, false],
+                                            ["棚卸の実行・保存", true, false],
+                                            ["出荷引き当て・確定", true, false],
+                                            ["カレンダーへのイベント追加", true, false],
+                                            ["HACCP 資料の新規登録", true, false],
+                                        ].map(([op, admin, viewer]) => (
+                                            <tr key={op as string} className="even:bg-slate-50">
+                                                <td className="px-3 py-2 border border-slate-200">{op as string}</td>
+                                                <td className="px-3 py-2 border border-slate-200 text-center">
+                                                    {admin ? <span className="text-green-600 font-bold">✓</span> : <span className="text-red-400">—</span>}
+                                                </td>
+                                                <td className="px-3 py-2 border border-slate-200 text-center">
+                                                    {viewer ? <span className="text-green-600 font-bold">✓</span> : <span className="text-red-400">—</span>}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
                             </div>
-                            <div className="flex justify-center text-slate-300 print-hidden"><ArrowRight className="rotate-90 md:rotate-0" /></div>
+                        </section>
 
-                            <div className="flex gap-4 p-4 bg-slate-50 border rounded-lg items-start">
-                                <div className="bg-blue-600 text-white w-8 h-8 rounded-full flex items-center justify-center font-bold shrink-0">3</div>
-                                <div>
-                                    <h3 className="font-bold text-lg text-blue-900 mb-1">【製造管理】 計画立案と製造の実行</h3>
-                                    <p className="text-slate-700 text-sm">受注データから製造計画（何日に何kg作るか）を立てます。この時、<strong>Lot番号と賞味期限が自動で発行</strong>されます。<br />予定表から「製造を開始」すると<strong>原料在庫が減り</strong>、「完了」すると完成した<strong>製品在庫が増えます</strong>。</p>
-                                </div>
+                        {/* ── はじめに ── */}
+                        <section id="intro" className="avoid-break scroll-mt-20">
+                            <SectionTitle id="intro">はじめに</SectionTitle>
+                            <p className="text-sm text-slate-700 leading-relaxed mb-4">
+                                本システムは、災害備蓄用パンの「受注〜製造〜出荷」に至るすべてのモノの流れ（サプライチェーン）を一元管理し、在庫の自動計算やLot番号の自動採番を行うことで、業務効率化とミス防止を実現するシステムです。
+                            </p>
+                            <InfoBox color="amber" icon={<AlertCircle className="h-4 w-4 shrink-0" />} title="重要：在庫との連動ルール">
+                                <p>システム内の在庫数は、各画面のステータス更新と<strong>完全に連動</strong>して増減します。</p>
+                                <ul className="list-disc pl-4 mt-2 space-y-1">
+                                    <li>「入荷済」ボタン → 原料在庫 <span className="text-green-700 font-bold">＋加算</span></li>
+                                    <li>「製造開始」ボタン → 原料在庫 <span className="text-red-600 font-bold">－減算</span></li>
+                                    <li>「製造完了」ボタン → 製品在庫 <span className="text-green-700 font-bold">＋加算</span></li>
+                                    <li>「出荷確定」ボタン → 製品在庫 <span className="text-red-600 font-bold">－減算</span></li>
+                                </ul>
+                                <p className="mt-2">必ず実際の作業と<strong>同時</strong>にシステムを操作してください。</p>
+                            </InfoBox>
+                        </section>
+
+                        <div className="page-break" />
+
+                        {/* ── スイムレーン ── */}
+                        <section id="swimlane" className="avoid-break scroll-mt-20">
+                            <SectionTitle id="swimlane">1. 業務フロー（スイムレーン図）</SectionTitle>
+                            <p className="text-sm text-slate-600 mb-4">
+                                担当者ごとに縦に色分けし、システムが自動処理するステップを右端レーンに表示しています。
+                            </p>
+                            <SwimlaneChart />
+                            <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                                {LANES.map((l) => (
+                                    <div key={l.label} className={`border rounded px-2 py-1 text-center font-bold ${l.color}`}>
+                                        {l.label.replace("\n", " ")}
+                                    </div>
+                                ))}
                             </div>
-                            <div className="flex justify-center text-slate-300 print-hidden"><ArrowRight className="rotate-90 md:rotate-0" /></div>
+                        </section>
 
-                            <div className="flex gap-4 p-4 bg-slate-50 border rounded-lg items-start">
-                                <div className="bg-blue-600 text-white w-8 h-8 rounded-full flex items-center justify-center font-bold shrink-0">4</div>
-                                <div>
-                                    <h3 className="font-bold text-lg text-blue-900 mb-1">【出荷管理】 製品の出荷</h3>
-                                    <p className="text-slate-700 text-sm">出荷日が来たら、倉庫にある製品（Lot）の中から古いものを選んで出荷数を入力します。確定すると製品在庫が減り、一連の取引が完了します。</p>
-                                </div>
-                            </div>
-                        </div>
-                    </section>
-
-                    <div className="page-break"></div>
-
-                    {/* 2. マスタ管理 */}
-                    <section id="master" className="avoid-break">
-                        <h2 className="text-2xl font-black text-slate-800 mb-4 border-b pb-2">2. マスタ管理 (初期設定)</h2>
-                        <p className="text-slate-700 mb-4 text-sm">システムを正しく動かすための「基礎データ」を登録・編集する画面です。</p>
-                        <div className="bg-slate-50 p-5 rounded-lg border space-y-3 text-sm">
-                            <div><strong className="text-blue-800">■ 編集方法</strong><br />Excelのように、一覧表の<strong>文字（セル）を直接クリック</strong>すると入力枠に変わり、書き換えてEnterキーを押すだけで保存されます。</div>
-                            <hr className="border-slate-200" />
-                            <div><strong className="text-blue-800">■ 製品マスタの重要項目</strong><br />「1kgあたり個数」と「1c/sあたり入数」は、システムが裏側で自動計算を行うための非常に重要な数値です。必ず正しい値を設定してください。</div>
-                            <hr className="border-slate-200" />
-                            <div><strong className="text-blue-800">■ BOM (部品表) の設定</strong><br />製品1ケース（または1kg）を作るのに必要な材料の「使用率」を登録します。</div>
-                        </div>
-                    </section>
-
-                    {/* 3. 受注管理 */}
-                    <section id="order" className="avoid-break">
-                        <h2 className="text-2xl font-black text-slate-800 mb-4 border-b pb-2">3. 受注管理 (注文の登録)</h2>
-                        <p className="text-slate-700 mb-4 text-sm">お客様からの注文をシステムに入力する最初のステップです。</p>
-                        <ul className="list-decimal pl-5 space-y-3 text-sm text-slate-800 font-bold">
-                            <li>画面右上の「新規受注登録」ボタンを押します。</li>
-                            <li>希望納期、出荷先、製品名、種類(味)、受注数(c/s)を入力します。<br /><span className="text-xs text-slate-500 font-normal">※出荷先は名前の一部を入力するだけで検索できます。</span></li>
-                            <li><strong className="text-blue-600 bg-blue-50 px-1">【重要】BOMシミュレーションの確認:</strong> 数を入力した瞬間に、右側に「必要な資材と原料」が計算され、現在の在庫から引き算されます。<strong>赤色で「不足!」と出た品目は、すぐに発注（入荷管理）が必要です。</strong></li>
-                            <li>「受注を確定する」を押して保存します。</li>
-                        </ul>
-                    </section>
-
-                    {/* 4. 入荷管理 */}
-                    <section id="arrival" className="avoid-break">
-                        <h2 className="text-2xl font-black text-slate-800 mb-4 border-b pb-2">4. 入荷管理 (資材の発注と受入)</h2>
-                        <p className="text-slate-700 mb-4 text-sm">原料や資材の発注記録と、届いた際の「在庫を増やす」処理を行います。</p>
-                        <ul className="list-decimal pl-5 space-y-3 text-sm text-slate-800 font-bold">
-                            <li>左側のフォームから、発注した品目と「入荷予定日」「数量」を登録します。</li>
-                            <li>実際にモノが工場に届いたら、右側のリスト（または予定表）から該当のデータを見つけて「確認」を押します。</li>
-                            <li>ダイアログ内の緑色の<strong>「入荷済にする (在庫に加算)」</strong>ボタンを押します。<br /><span className="text-xs text-red-600 font-normal">※このボタンを押さないと、システムの在庫は増えません！</span></li>
-                        </ul>
-                    </section>
-
-                    <div className="page-break"></div>
-
-                    {/* 5. 製造管理 */}
-                    <section id="production" className="avoid-break">
-                        <h2 className="text-2xl font-black text-slate-800 mb-4 border-b pb-2">5. 製造管理 (計画とLot自動発行)</h2>
-                        <p className="text-slate-700 mb-4 text-sm">いつ・何を製造するかのスケジュールを立て、実際に在庫を動かすシステムの心臓部です。</p>
-
-                        <div className="bg-blue-50 p-4 rounded-lg border border-blue-200 mb-4">
-                            <h3 className="font-bold text-blue-900 mb-2 flex items-center gap-2"><CheckCircle2 className="h-4 w-4" /> 計画の立て方</h3>
-                            <ol className="list-decimal pl-5 space-y-2 text-sm text-slate-800">
-                                <li>左側の「未計画の残数がある受注」リストから、製造したい注文をクリックします。</li>
-                                <li>右側の「製造予定日」と「製造量(kg)」を入力します。<br /><span className="font-normal text-slate-600">※一度に全て作れない場合は、少ないkg数を入力して「分割」して登録することも可能です。</span></li>
-                                <li>自動計算された「製造Lot番号」と「賞味期限」を確認し、「計画を追加する」を押します。</li>
+                        {/* ── マスタ管理 ── */}
+                        <section id="master" className="avoid-break scroll-mt-20">
+                            <SectionTitle id="master">2. マスタ管理（初期設定）</SectionTitle>
+                            <SubTitle>■ 編集方法</SubTitle>
+                            <ol className="space-y-2 text-sm">
+                                <StepBadge n={1} label='メニューから「マスタ管理」を開きます。' />
+                                <StepBadge n={2} label='一覧表の編集したいセルを直接クリックします。入力枠に変わります。' />
+                                <StepBadge n={3} label='値を書き換えて Enter キー、または入力枠の外をクリックすると自動保存されます。' />
                             </ol>
-                        </div>
 
-                        <div className="bg-amber-50 p-4 rounded-lg border border-amber-200">
-                            <h3 className="font-bold text-amber-900 mb-2 flex items-center gap-2"><CheckCircle2 className="h-4 w-4" /> 製造の実行 (在庫連動)</h3>
-                            <p className="text-sm text-slate-700 mb-2">計画を立てただけでは在庫は動きません。実際の作業に合わせてステータスを進めます。</p>
-                            <ul className="list-disc pl-5 space-y-2 text-sm text-slate-800">
-                                <li>予定表(カレンダー)から計画カードをクリックします。</li>
-                                <li>製造開始時：<strong>「製造を開始する」</strong>ボタンを押します。<br /><span className="font-normal text-red-600">⇒ 使用する原料・資材が在庫から自動でマイナスされます。</span></li>
-                                <li>パン完成時：<strong>「製造を完了する」</strong>ボタンを押します。<br /><span className="font-normal text-blue-600">⇒ 完成したパンが、Lot番号付きで製品在庫に自動でプラスされます。</span></li>
+                            <SubTitle>■ 主要マスタと登録項目</SubTitle>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-xs border-collapse">
+                                    <thead>
+                                        <tr className="bg-slate-100 text-slate-700">
+                                            <th className="px-3 py-2 border text-left">マスタ名</th>
+                                            <th className="px-3 py-2 border text-left">主な登録項目</th>
+                                            <th className="px-3 py-2 border text-left">注意点</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="text-slate-600">
+                                        {[
+                                            ["製品マスタ", "製品名 / 種類(味) / unit_per_cs（1ケース入数）/ unit_per_kg", "unit_per_cs を間違えると在庫計算が狂う。変更時は棚卸を実施すること。"],
+                                            ["品目マスタ（原料・資材）", "品目名 / 種別 / 単位 / 安全在庫数量", "安全在庫を設定すると在庫不足の警告が早めに出るようになる。"],
+                                            ["BOM（レシピ）", "製品ID / 品目ID / 使用量 / 基準（kg or c/s）", "製品1種類につき複数の品目を登録可能。変更は次回製造計画から反映。"],
+                                            ["得意先マスタ", "得意先名 / 住所 / 電話番号", "受注登録時のプルダウンに連動する。"],
+                                        ].map(([name, fields, note]) => (
+                                            <tr key={name as string} className="even:bg-slate-50">
+                                                <td className="px-3 py-2 border font-bold text-blue-800">{name as string}</td>
+                                                <td className="px-3 py-2 border">{fields as string}</td>
+                                                <td className="px-3 py-2 border text-amber-700">{note as string}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <div className="mt-4">
+                                <InfoBox color="blue" icon={<Info className="h-4 w-4" />} title="権限ロックについて">
+                                    マスタ編集は<strong>管理者モード</strong>のみ可能です。ヘッダーの「👑 管理者」スイッチを ON にしてから操作してください。
+                                </InfoBox>
+                            </div>
+                        </section>
+
+                        <div className="page-break" />
+
+                        {/* ── 受注管理 ── */}
+                        <section id="order" className="avoid-break scroll-mt-20">
+                            <SectionTitle id="order">3. 受注管理（注文の登録）</SectionTitle>
+
+                            <SubTitle>■ 新規受注の登録手順</SubTitle>
+                            <div className="space-y-2 text-sm mb-4">
+                                <StepBadge n={1} label='画面右上の「新規受注登録」ボタンを押します。（管理者モード時のみ表示）' />
+                                <StepBadge n={2} label='以下の項目を入力します：' />
+                                <div className="ml-9 bg-slate-50 border border-slate-200 rounded-lg p-4 text-sm space-y-2">
+                                    {[
+                                        ["希望納期", "カレンダーから選択", "必須"],
+                                        ["出荷先", "得意先マスタから選択", "必須"],
+                                        ["製品名", "製品マスタから選択", "必須"],
+                                        ["種類（味）", "製品名を選ぶと自動で絞り込まれる", "必須"],
+                                        ["受注数 (c/s)", "ケース単位で数値入力", "必須"],
+                                        ["備考", "自由記入", "任意"],
+                                    ].map(([field, hint, req]) => (
+                                        <div key={field as string} className="flex items-start gap-2">
+                                            <span className="font-bold text-blue-800 shrink-0 w-28">{field as string}</span>
+                                            <span className="text-slate-600 flex-1">{hint as string}</span>
+                                            <span className={`text-xs font-bold shrink-0 ${req === "必須" ? "text-red-600" : "text-slate-400"}`}>{req as string}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                                <StepBadge n={3} label='数量を入力した瞬間、BOMシミュレーション結果が右側（またはその下）に表示されます。' />
+                                <StepBadge n={4} label='BOM 確認後、「受注を確定する」ボタンを押して保存します。' />
+                            </div>
+
+                            <SubTitle>■ BOM シミュレーション（在庫確認）の見方</SubTitle>
+                            <div className="grid sm:grid-cols-2 gap-3 text-sm">
+                                <InfoBox color="green" icon={<CheckCircle2 className="h-4 w-4" />} title="在庫が足りている場合">
+                                    <p>必要量・現在庫・過不足が<span className="font-bold text-green-700">緑色</span>で表示されます。そのまま確定できます。</p>
+                                </InfoBox>
+                                <InfoBox color="red" icon={<AlertTriangle className="h-4 w-4" />} title="在庫が不足している場合">
+                                    <p>不足品目が<span className="font-bold text-red-700">赤色</span>で警告表示されます。受注登録は可能ですが、製造前に<strong>入荷管理</strong>で調達を行ってください。</p>
+                                </InfoBox>
+                            </div>
+                        </section>
+
+                        {/* ── 入荷管理 ── */}
+                        <section id="arrival" className="avoid-break scroll-mt-20">
+                            <SectionTitle id="arrival">4. 入荷管理（資材の発注と受入）</SectionTitle>
+
+                            <SubTitle>■ 発注登録の手順</SubTitle>
+                            <div className="space-y-2 text-sm mb-4">
+                                <StepBadge n={1} label='「入荷管理」画面を開きます。' />
+                                <StepBadge n={2} label='左側フォームから「品目」「入荷予定日」「発注数量」を入力します。' />
+                                <StepBadge n={3} label='「発注登録」ボタンを押すと右側リストに追加されます。在庫は未加算です。' />
+                            </div>
+
+                            <SubTitle>■ 入荷受け入れの手順（在庫加算）</SubTitle>
+                            <div className="space-y-2 text-sm mb-4">
+                                <StepBadge n={1} label='実際に資材が届いたら、右側リストの該当行の「確認」ボタンを押します。' />
+                                <StepBadge n={2} label='確認ダイアログが開きます。実際の入荷数量を確認または修正します。' />
+                                <StepBadge n={3} label='緑色の「入荷済にする（在庫に加算）」ボタンを押します。' />
+                                <StepBadge n={4} label='item_stocks の数量が即時更新され、在庫管理画面に反映されます。' />
+                            </div>
+
+                            <InfoBox color="amber" icon={<AlertCircle className="h-4 w-4" />} title="注意">
+                                <p>「確認」ボタンを押しただけでは在庫に加算されません。必ず<strong>「入荷済にする」</strong>まで押してください。</p>
+                            </InfoBox>
+                        </section>
+
+                        <div className="page-break" />
+
+                        {/* ── 製造管理 ── */}
+                        <section id="production" className="avoid-break scroll-mt-20">
+                            <SectionTitle id="production">5. 製造管理（計画と Lot 自動発行）</SectionTitle>
+
+                            <SubTitle>■ 製造計画の登録手順</SubTitle>
+                            <div className="space-y-2 text-sm mb-4">
+                                <StepBadge n={1} label='「製造管理」画面を開きます。' />
+                                <StepBadge n={2} label='左側「未計画の残数がある受注」リストから、製造したい受注をクリックします。' />
+                                <StepBadge n={3} label='右側フォームに以下を入力します：' />
+                                <div className="ml-9 bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-2">
+                                    {[
+                                        ["製造予定日", "カレンダーから選択", "必須"],
+                                        ["製造量 (kg)", "数値入力。受注全量を一度に製造しない場合は分割量を入力", "必須"],
+                                        ["製造 Lot 番号", "自動生成（変更不可）", "自動"],
+                                        ["賞味期限", "製造日 ＋ 5年6ヶ月を自動計算（変更不可）", "自動"],
+                                    ].map(([field, hint, req]) => (
+                                        <div key={field as string} className="flex items-start gap-2 text-sm">
+                                            <span className="font-bold text-blue-800 shrink-0 w-32">{field as string}</span>
+                                            <span className="text-slate-600 flex-1">{hint as string}</span>
+                                            <span className={`text-xs font-bold shrink-0 ${req === "必須" ? "text-red-600" : req === "自動" ? "text-blue-500" : "text-slate-400"}`}>{req as string}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                                <StepBadge n={4} label='「計画を追加する」ボタンを押します。この時点では在庫は動きません。' />
+                                <StepBadge n={5} label='残数がゼロになるまで繰り返して分割登録できます。' />
+                            </div>
+
+                            <SubTitle>■ 製造実行（在庫連動）の手順</SubTitle>
+                            <div className="space-y-2 text-sm mb-4">
+                                <StepBadge n={1} label='カレンダー（予定表）から対象の製造計画カードをクリックします。' />
+                                <StepBadge n={2} label='詳細ダイアログが開きます。' />
+                                <StepBadge n={3} label='製造を開始する際：「製造を開始する」ボタンを押します。' />
+                                <div className="ml-9">
+                                    <InfoBox color="red" icon={<AlertTriangle className="h-4 w-4" />} title="原料在庫が自動でマイナスされます">
+                                        BOMに登録されたすべての原料・資材が item_stocks から即時減算されます。操作は取り消せません。
+                                    </InfoBox>
+                                </div>
+                                <StepBadge n={4} label='パンが完成したら：「製造を完了する」ボタンを押します。' />
+                                <div className="ml-9">
+                                    <InfoBox color="green" icon={<CheckCircle2 className="h-4 w-4" />} title="製品在庫が自動でプラスされます">
+                                        完成した製品が Lot 番号・賞味期限付きで product_stocks に加算されます。
+                                    </InfoBox>
+                                </div>
+                            </div>
+
+                            <SubTitle>■ ステータスの流れ</SubTitle>
+                            <div className="flex flex-wrap gap-2 items-center text-xs font-bold mt-2">
+                                {[
+                                    { label: "計画済", color: "bg-blue-100 text-blue-800 border-blue-300" },
+                                    { label: "→", color: "text-slate-400 border-0 bg-transparent" },
+                                    { label: "製造中", color: "bg-orange-100 text-orange-800 border-orange-300" },
+                                    { label: "→", color: "text-slate-400 border-0 bg-transparent" },
+                                    { label: "完了", color: "bg-green-100 text-green-800 border-green-300" },
+                                ].map((s, i) => (
+                                    <span key={i} className={`px-3 py-1 border rounded-full ${s.color}`}>{s.label}</span>
+                                ))}
+                            </div>
+                        </section>
+
+                        {/* ── 在庫管理 ── */}
+                        <section id="inventory" className="avoid-break scroll-mt-20">
+                            <SectionTitle id="inventory">6. 在庫管理・棚卸（実数調整）</SectionTitle>
+
+                            <SubTitle>■ 在庫予測カレンダーの見方</SubTitle>
+                            <ul className="list-disc pl-5 space-y-2 text-sm text-slate-700 mb-4">
+                                <li>今後 30 日分の在庫推移を自動計算して表示します。</li>
+                                <li>製造計画による消費予定と入荷予定を考慮した予測値です。</li>
+                                <li>安全在庫を下回る日付は<span className="text-red-600 font-bold">赤色</span>でハイライトされます。</li>
                             </ul>
-                        </div>
-                    </section>
 
-                    {/* 6. 在庫管理 */}
-                    <section id="inventory" className="avoid-break">
-                        <h2 className="text-2xl font-black text-slate-800 mb-4 border-b pb-2">6. 在庫管理・棚卸 (実数調整)</h2>
-                        <p className="text-slate-700 mb-4 text-sm">システム上の在庫と、倉庫の実際の在庫がズレた場合に修正を行う画面です。スマホでの操作に最適化されています。</p>
-                        <ul className="list-decimal pl-5 space-y-3 text-sm text-slate-800 font-bold">
-                            <li>スマホで画面を開き、<strong>「一括棚卸を開始」</strong>ボタンを押します。</li>
-                            <li>全ての項目に入力枠が現れます。実際の在庫を数えながら、ズレている項目の数値を書き換えます。（製品はケースとピースを別々に入力できます）</li>
-                            <li>変更した箇所は黄色くハイライトされます。最後に<strong>「一括保存」</strong>ボタンを押します。</li>
-                            <li><span className="font-normal text-slate-600">※変更内容はすべて「調整履歴」タブに記録されるため、後から確認が可能です。</span></li>
-                        </ul>
-                    </section>
+                            <SubTitle>■ 一括棚卸の手順</SubTitle>
+                            <div className="space-y-2 text-sm mb-4">
+                                <StepBadge n={1} label='「在庫管理」画面を開き、「一括棚卸を開始」ボタンを押します。' />
+                                <StepBadge n={2} label='全項目に入力枠が現れます。実際に在庫を数えながら、ズレている項目を書き換えます。' />
+                                <StepBadge n={3} label='製品在庫はケース (c/s) とピース (p) を別々の枠に入力できます。システム内では総ピース数に変換して保存されます。' />
+                                <StepBadge n={4} label='変更した項目は黄色くハイライトされます。内容を確認したら「一括保存」ボタンを押します。' />
+                                <StepBadge n={5} label='調整履歴（変更前・変更後・差分・日時）が inventory_adjustments テーブルに自動記録されます。' />
+                            </div>
 
-                    {/* 7. 出荷管理 */}
-                    <section id="shipment" className="avoid-break">
-                        <h2 className="text-2xl font-black text-slate-800 mb-4 border-b pb-2">7. 出荷管理 (手動引き当て)</h2>
-                        <p className="text-slate-700 mb-4 text-sm">完成品をお客様へ出荷し、在庫を減らす最終工程です。</p>
-                        <ul className="list-decimal pl-5 space-y-3 text-sm text-slate-800 font-bold">
-                            <li>左側のリストから出荷対象の注文を選びます。</li>
-                            <li>右側に、その製品の「出荷可能なLot一覧」が<strong>古い順</strong>で表示されます。</li>
-                            <li>お客様の納品条件（賞味期限の残月数など）を満たすLotを選び、出荷する数量（c/sとp）を手入力します。複数のLotから少しずつ出荷することも可能です。</li>
-                            <li>「出荷を確定」ボタンを押すと、製品在庫が正確に減算され、取引完了となります。</li>
-                        </ul>
-                    </section>
+                            <InfoBox color="blue" icon={<Info className="h-4 w-4" />} title="棚卸の推奨タイミング">
+                                月末、製造前後、入荷後の確認として実施することを推奨します。
+                            </InfoBox>
+                        </section>
 
-                    <div className="page-break"></div>
+                        <div className="page-break" />
 
-                    {/* 8. 予定表の活用 */}
-                    <section id="calendar" className="avoid-break">
-                        <h2 className="text-2xl font-black text-slate-800 mb-4 border-b pb-2">8. 予定表(カレンダー)の活用と印刷</h2>
-                        <p className="text-slate-700 mb-4 text-sm">製造管理および入荷管理画面にある「予定表（カレンダー）」は、工場全体のスケジュールボードとして活躍します。</p>
-                        <ul className="list-disc pl-5 space-y-3 text-sm text-slate-800 font-bold">
-                            <li><strong>ステータスの色分け:</strong> 計画(青)・製造中(オレンジ)・完了(緑)が一目でわかります。</li>
-                            <li><strong>イベントの追加:</strong> カレンダー上の「＋」ボタンから、会議や清掃、来客予定などを自由に書き込めます。</li>
-                            <li><strong>印刷機能:</strong> 右上の「予定表を印刷」ボタンを押すと、メニューなどが消え、<strong>白黒印刷で綺麗にA4用紙に収まる専用レイアウト</strong>で印刷されます。毎朝印刷して現場に掲示する運用を推奨します。</li>
-                        </ul>
-                    </section>
+                        {/* ── 出荷管理 ── */}
+                        <section id="shipment" className="avoid-break scroll-mt-20">
+                            <SectionTitle id="shipment">7. 出荷管理（手動引き当て）</SectionTitle>
 
+                            <SubTitle>■ 出荷手順</SubTitle>
+                            <div className="space-y-2 text-sm mb-4">
+                                <StepBadge n={1} label='「出荷管理」画面を開きます。' />
+                                <StepBadge n={2} label='左側リストから出荷する受注をクリックして選択します。' />
+                                <StepBadge n={3} label='右側に「出荷可能な Lot 一覧」が古い順（先入れ先出し）で表示されます。' />
+                                <StepBadge n={4} label='出荷するLotにチェックを入れ、出荷数量（c/s と p）を手入力します。複数 Lot にまたがる場合は複数行に入力してください。' />
+                                <StepBadge n={5} label='画面下部の合計数が受注数量と一致することを確認します。' />
+                                <StepBadge n={6} label='「出荷を確定」ボタンを押します。該当 Lot の product_stocks が即時減算されます。' />
+                            </div>
+
+                            <div className="grid sm:grid-cols-2 gap-3">
+                                <InfoBox color="amber" icon={<AlertCircle className="h-4 w-4" />} title="顧客の残存賞味期限要求に注意">
+                                    古い Lot を優先しつつ、お客様が要求する残存賞味期限を下回らない Lot を選んでください。
+                                </InfoBox>
+                                <InfoBox color="red" icon={<AlertTriangle className="h-4 w-4" />} title="出荷確定は取り消せません">
+                                    確定後に在庫を戻す場合は棚卸（手動調整）で対応してください。
+                                </InfoBox>
+                            </div>
+                        </section>
+
+                        {/* ── カレンダー ── */}
+                        <section id="calendar" className="avoid-break scroll-mt-20">
+                            <SectionTitle id="calendar">8. 予定表（カレンダー）の活用</SectionTitle>
+
+                            <SubTitle>■ 基本の見方</SubTitle>
+                            <div className="flex flex-wrap gap-2 text-xs font-bold mb-4">
+                                {[
+                                    { label: "計画済（青）", color: "bg-blue-100 text-blue-800 border-blue-300" },
+                                    { label: "製造中（オレンジ）", color: "bg-orange-100 text-orange-800 border-orange-300" },
+                                    { label: "完了（緑）", color: "bg-green-100 text-green-800 border-green-300" },
+                                    { label: "社内イベント（グレー）", color: "bg-slate-100 text-slate-700 border-slate-300" },
+                                ].map((s) => (
+                                    <span key={s.label} className={`px-3 py-1 border rounded-full ${s.color}`}>{s.label}</span>
+                                ))}
+                            </div>
+
+                            <SubTitle>■ イベントの追加手順</SubTitle>
+                            <div className="space-y-2 text-sm mb-4">
+                                <StepBadge n={1} label='カレンダー上の日付右側にある「＋」ボタンをクリックします。' />
+                                <StepBadge n={2} label='タイトル・メモを入力して「保存」を押します。' />
+                                <StepBadge n={3} label='登録されたイベントは events テーブルに保存され、全員の画面に表示されます。' />
+                            </div>
+
+                            <SubTitle>■ 印刷の手順</SubTitle>
+                            <div className="space-y-2 text-sm">
+                                <StepBadge n={1} label='カレンダー右上の「予定表を印刷」ボタンを押します。' />
+                                <StepBadge n={2} label='ブラウザの印刷ダイアログが開きます。用紙サイズは A4 縦を推奨します。' />
+                                <StepBadge n={3} label='「印刷プレビュー」で白黒専用レイアウトを確認してから印刷してください。' />
+                            </div>
+                        </section>
+
+                        {/* ── HACCP ── */}
+                        <section id="haccp" className="avoid-break scroll-mt-20">
+                            <SectionTitle id="haccp">9. HACCP・各種マニュアル閲覧</SectionTitle>
+                            <p className="text-sm text-slate-600 mb-4">
+                                HACCP関連書類や機械の取扱説明書（PDF等）を一元管理するポータル画面です。
+                            </p>
+
+                            <SubTitle>■ 閲覧手順</SubTitle>
+                            <div className="space-y-2 text-sm mb-4">
+                                <StepBadge n={1} label='メニューから「HACCP 資料」を開きます。' />
+                                <StepBadge n={2} label='カテゴリでフィルタして目的の資料を探します。' />
+                                <StepBadge n={3} label='「閲覧する」ボタンを押すと別タブで資料が開きます。' />
+                            </div>
+
+                            <SubTitle>■ 資料登録手順（管理者のみ）</SubTitle>
+                            <div className="space-y-2 text-sm mb-4">
+                                <StepBadge n={1} label='Google ドライブ等に PDF をアップロードし、共有リンクを取得します。' />
+                                <StepBadge n={2} label='「新規資料の登録」ボタンを押します。' />
+                                <StepBadge n={3} label='タイトル・カテゴリ・バージョン・URL を入力して保存します。' />
+                            </div>
+                        </section>
+
+                        <div className="page-break" />
+
+                        {/* ── エラー対処 ── */}
+                        <section id="errors" className="avoid-break scroll-mt-20">
+                            <SectionTitle id="errors">
+                                <AlertTriangle className="inline h-6 w-6 mr-2 text-amber-500" />エラー・警告メッセージの対処法
+                            </SectionTitle>
+                            <div className="space-y-4">
+                                {[
+                                    {
+                                        color: "red" as const,
+                                        msg: "原料・資材の在庫が不足しています（赤色表示）",
+                                        cause: "BOM 計算の結果、現在庫が必要量に満たない。",
+                                        action: "入荷管理から不足品目を発注・受け入れてから再度操作してください。",
+                                    },
+                                    {
+                                        color: "amber" as const,
+                                        msg: "製造計画が未計画の状態です",
+                                        cause: "受注は登録されているが製造計画がまだない。",
+                                        action: "製造管理画面で製造予定日・kg数を入力して計画を追加してください。",
+                                    },
+                                    {
+                                        color: "amber" as const,
+                                        msg: "出荷可能な Lot がありません",
+                                        cause: "製品在庫に該当製品の Lot が存在しない。",
+                                        action: "製造管理で「製造完了」まで処理されているか確認してください。",
+                                    },
+                                    {
+                                        color: "red" as const,
+                                        msg: "保存に失敗しました（ネットワークエラー）",
+                                        cause: "インターネット接続切断または Neon DB タイムアウト。",
+                                        action: "ページをリロードして再度操作してください。データは入力前の状態に戻ります。",
+                                    },
+                                    {
+                                        color: "amber" as const,
+                                        msg: "在庫がマイナスになっています",
+                                        cause: "棚卸漏れ、または二重操作による数値のズレ。",
+                                        action: "在庫管理の棚卸機能で実数を入力し直してください。調整履歴が残ります。",
+                                    },
+                                ].map((e) => (
+                                    <InfoBox key={e.msg} color={e.color} icon={<AlertTriangle className="h-4 w-4 shrink-0" />} title={e.msg}>
+                                        <p><span className="font-bold">原因：</span>{e.cause}</p>
+                                        <p className="mt-1"><span className="font-bold">対処：</span>{e.action}</p>
+                                    </InfoBox>
+                                ))}
+                            </div>
+                        </section>
+
+                        {/* ── トラブルシューティング ── */}
+                        <section id="trouble" className="avoid-break scroll-mt-20">
+                            <SectionTitle id="trouble">
+                                <HelpCircle className="inline h-6 w-6 mr-2 text-blue-500" />トラブルシューティング Q&A
+                            </SectionTitle>
+                            <div className="space-y-4">
+                                {[
+                                    {
+                                        q: "受注登録ボタンが表示されない",
+                                        a: "ヘッダーのスイッチが「👀 閲覧者」になっています。「👑 管理者」に切り替えてください。",
+                                    },
+                                    {
+                                        q: "Lot 番号が重複してしまった",
+                                        a: "同一日・同一製品で複数計画を立てると連番で区別されます。重複している場合は管理者がマスタの連番カウンターをリセットしてください（技術仕様を参照）。",
+                                    },
+                                    {
+                                        q: "製造完了したのに製品在庫が増えていない",
+                                        a: "「製造完了」ボタンではなく「製造開始」で止まっていないか確認してください。カレンダーのカードを開いてステータスを確認できます。",
+                                    },
+                                    {
+                                        q: "棚卸で保存したのに数値が元に戻った",
+                                        a: "「一括保存」を押す前にブラウザがリロードされた可能性があります。保存後に調整履歴に記録されているか確認してください。",
+                                    },
+                                    {
+                                        q: "スマホで画面が崩れる",
+                                        a: "ブラウザのズームを 100% に戻してください。推奨ブラウザは Chrome・Safari の最新版です。",
+                                    },
+                                    {
+                                        q: "印刷するとカレンダーが白黒で潰れる",
+                                        a: "ブラウザの印刷設定で「背景のグラフィック」を有効にしてください。または PDF 出力してから印刷すると綺麗に出力されます。",
+                                    },
+                                    {
+                                        q: "HACCP 資料のリンクを押しても開かない",
+                                        a: "Google ドライブの共有設定が「リンクを知っている全員」になっているか確認してください。社内限定設定だと外部からアクセスできません。",
+                                    },
+                                ].map((qa) => (
+                                    <div key={qa.q} className="border border-slate-200 rounded-lg overflow-hidden">
+                                        <div className="bg-slate-100 px-4 py-2 font-bold text-sm text-slate-800 flex items-center gap-2">
+                                            <HelpCircle className="h-4 w-4 text-blue-500 shrink-0" />
+                                            Q. {qa.q}
+                                        </div>
+                                        <div className="px-4 py-3 text-sm text-slate-700 bg-white">
+                                            <span className="font-bold text-blue-700">A. </span>{qa.a}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </section>
+
+                    </main>
                 </div>
-            </div>
+            )}
+
+            {/* ══════════════════════════════════════
+          技術仕様
+      ══════════════════════════════════════ */}
+            {tab === "tech" && (
+                <div className="flex flex-col md:flex-row">
+                    <aside className="hidden md:block w-56 shrink-0 border-r border-slate-200 p-4 sticky top-0 self-start">
+                        <p className="font-mono text-[9px] tracking-[0.2em] text-slate-400 uppercase mb-2">目次</p>
+                        {TECH_TOC.map((row) => (
+                            <TocRow key={row.num} label={`${row.num}. ${row.label}`} onClick={() => scrollToTech(row.num)} />
+                        ))}
+                    </aside>
+
+                    <div className="md:hidden border-b border-slate-200">
+                        <button
+                            className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 text-sm font-bold text-slate-700"
+                            onClick={() => setTechTocOpen(!techTocOpen)}
+                        >
+                            <span className="font-mono text-[10px] tracking-[0.2em] text-slate-400 uppercase">目次</span>
+                            <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${techTocOpen ? "rotate-180" : ""}`} />
+                        </button>
+                        {techTocOpen && (
+                            <div className="px-4 pb-3 bg-white divide-y divide-slate-100">
+                                {TECH_TOC.map((row) => (
+                                    <button key={row.num} onClick={() => scrollToTech(row.num)}
+                                        className="block w-full text-left py-2.5 text-sm font-bold text-slate-700 hover:text-blue-700">
+                                        {row.num}. {row.label}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    <main className="flex-1 p-4 md:p-10 space-y-12 min-w-0">
+
+                        <section id="tech-01" className="scroll-mt-20">
+                            <SectionTitle id="tech-01-h">01. システム・アーキテクチャ</SectionTitle>
+                            <div className="bg-slate-800 text-white rounded-xl p-4 md:p-6">
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+                                    {[
+                                        { label: "フロントエンド", items: ["Next.js 15 (App Router) + React", "TypeScript", "Tailwind CSS + shadcn/ui"] },
+                                        { label: "バックエンド / DB", items: ["Neon (Serverless PostgreSQL)", "Drizzle ORM", "NextAuth v5"] },
+                                        { label: "インフラ", items: ["Vercel（ホスティング）", "GitHub（ソース管理）", "Google Drive（HACCP 資料）"] },
+                                    ].map((col) => (
+                                        <div key={col.label} className="bg-slate-700/50 rounded border border-slate-600 p-3">
+                                            <div className="font-bold text-blue-300 mb-2 text-xs tracking-widest uppercase">{col.label}</div>
+                                            {col.items.map((it) => <div key={it} className="text-slate-300 text-sm">{it}</div>)}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </section>
+
+                        <section id="tech-02" className="scroll-mt-20">
+                            <SectionTitle id="tech-02-h">02. Lot 番号の自動生成ルール</SectionTitle>
+                            <p className="text-sm text-slate-600 mb-3">
+                                <code className="bg-slate-100 px-1 rounded text-slate-700 text-xs">src/lib/lot-generator.ts</code> にて制御。
+                            </p>
+                            <div className="border border-slate-200 rounded-lg overflow-hidden divide-y divide-slate-200">
+                                {[
+                                    { type: "通常品（例: SB）", rule: "カタカナ (日付) + 月 alpha + 年2桁 + 製品 ID", note: "変換表: 日付 (タ行抜き ア〜ヤ)、月 (A〜L)", example: "2026年2月13日 ⇒ ス(13)+B(2)+26+SB ⇒", result: "スB26SB" },
+                                    { type: "MA / FD 複合製品", rule: "yy (年2桁) + MA/FD + 連番2桁", note: "", example: "2026年製造 ⇒", result: "26MA01" },
+                                    { type: "YC50 / YO50", rule: "dd (日付2桁) + 月 alpha + 年2桁 + 製品 ID", note: "", example: "2026年2月13日 ⇒", result: "13B26YC50" },
+                                ].map((row) => (
+                                    <div key={row.type} className="p-4">
+                                        <div className="font-bold text-blue-800 mb-1 text-sm">【{row.type}】</div>
+                                        <div className="text-slate-600 text-sm">ルール: <code className="bg-slate-100 px-1 rounded text-xs break-all">{row.rule}</code></div>
+                                        {row.note && <div className="text-slate-500 text-xs mt-0.5">{row.note}</div>}
+                                        <div className="mt-2 bg-slate-50 border border-slate-200 rounded px-3 py-2 font-mono text-xs break-all">
+                                            {row.example} <strong className="text-slate-900">{row.result}</strong>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </section>
+
+                        <section id="tech-03" className="scroll-mt-20">
+                            <SectionTitle id="tech-03-h">03. ケース・ピース混在管理</SectionTitle>
+                            <p className="text-sm text-slate-600 mb-3">繰り下がりバグを防ぐため、DB と画面でデータの持ち方を分けています。</p>
+                            <div className="grid sm:grid-cols-2 gap-4 text-sm">
+                                <div className="border border-slate-200 rounded-lg p-4 bg-slate-50">
+                                    <div className="font-bold text-blue-800 mb-2">DB（Neon）</div>
+                                    <p className="text-slate-600 mb-2"><code className="bg-white px-1 rounded border text-xs">product_stocks.total_pieces</code> に総ピース数で保存</p>
+                                    <div className="bg-white border rounded px-3 py-2 font-mono text-xs">例: 10 c/s + 5 p → <strong>245</strong></div>
+                                </div>
+                                <div className="border border-slate-200 rounded-lg p-4 bg-slate-50">
+                                    <div className="font-bold text-blue-800 mb-2">フロントエンド（表示時変換）</div>
+                                    <div className="font-mono text-xs space-y-1 bg-white border rounded px-3 py-2 break-all">
+                                        <div><span className="text-blue-600">cs</span> = Math.floor( total_pieces / unit_per_cs )</div>
+                                        <div><span className="text-blue-600">p</span>  = total_pieces % unit_per_cs</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
+
+                        <section id="tech-04" className="scroll-mt-20">
+                            <SectionTitle id="tech-04-h">04. データベース・テーブル構成</SectionTitle>
+                            <div className="sm:hidden space-y-2">
+                                {[
+                                    ["products", "製品マスタ", "id, name, variant_name, unit_per_cs, unit_per_kg"],
+                                    ["items", "品目マスタ（原料・資材）", "id, item_type, unit_size, safety_stock"],
+                                    ["bom", "部品表（レシピ）", "product_id(FK), item_id(FK), usage_rate, basis_type"],
+                                    ["customers", "得意先マスタ", "id, name, address, phone"],
+                                    ["orders", "受注データ", "id, customer_id(FK), product_id(FK), quantity, status"],
+                                    ["production_plans", "製造計画・実績", "id, order_id(FK), production_date, planned_cs, lot_code, status"],
+                                    ["item_stocks", "原料・資材の現在庫", "item_id(FK), quantity"],
+                                    ["product_stocks", "完成品の現在庫（Lot 別）", "id, lot_code, product_id(FK), total_pieces, expiry_date"],
+                                    ["arrivals", "入荷予定・発注", "id, item_id(FK), expected_date, quantity, status"],
+                                    ["shipments", "出荷実績（引き当て）", "id, order_id(FK), lot_code, qty_cs, qty_piece"],
+                                    ["inventory_adjustments", "棚卸・調整履歴", "id, adjusted_at, item_id/product_id, before/after_qty, diff, reason"],
+                                    ["events", "社内イベント（カレンダー）", "id, event_date, title, notes"],
+                                    ["haccp_documents", "HACCP / 機械マニュアル等", "id, title, category, file_url, version"],
+                                ].map(([name, role, cols]) => (
+                                    <div key={name as string} className="border border-slate-200 rounded-lg p-3 bg-slate-50">
+                                        <div className="font-mono text-xs font-bold text-blue-700 mb-0.5">{name as string}</div>
+                                        <div className="text-sm text-slate-600 mb-1">{role as string}</div>
+                                        <div className="font-mono text-[11px] text-slate-400 break-all">{cols as string}</div>
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="hidden sm:block overflow-x-auto">
+                                <table className="w-full text-sm border-collapse">
+                                    <thead>
+                                        <tr className="bg-blue-700 text-white text-xs">
+                                            <th className="px-3 py-2 border border-blue-600 text-left">テーブル名</th>
+                                            <th className="px-3 py-2 border border-blue-600 text-left">役割</th>
+                                            <th className="px-3 py-2 border border-blue-600 text-left">主要カラム / リレーション</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="text-slate-600">
+                                        {[
+                                            ["products", "製品マスタ（完成品）", "id, name, variant_name, unit_per_cs, unit_per_kg"],
+                                            ["items", "品目マスタ（原料・資材）", "id, item_type, unit_size, safety_stock"],
+                                            ["bom", "部品表（レシピ）", "product_id(FK), item_id(FK), usage_rate, basis_type(kg/cs基準)"],
+                                            ["customers", "得意先マスタ", "id, name, address, phone"],
+                                            ["orders", "受注データ", "id, customer_id(FK), product_id(FK), quantity, status(received/in_production/shipped)", true],
+                                            ["production_plans", "製造計画・実績", "id, order_id(FK), production_date, planned_cs, lot_code, status", true, "#fef9c3"],
+                                            ["item_stocks", "原料・資材の現在庫", "item_id(FK), quantity"],
+                                            ["product_stocks", "完成品の現在庫（Lot 別）", "id, lot_code, product_id(FK), total_pieces, expiry_date"],
+                                            ["arrivals", "入荷予定・発注", "id, item_id(FK), expected_date, quantity, status"],
+                                            ["shipments", "出荷実績（引き当て）", "id, order_id(FK), lot_code, qty_cs, qty_piece"],
+                                            ["inventory_adjustments", "棚卸・調整履歴", "id, adjusted_at, item_id/product_id, before_qty, after_qty, diff, reason"],
+                                            ["events", "社内イベント（カレンダー）", "id, event_date, title, notes"],
+                                            ["haccp_documents", "HACCP / 機械マニュアル等", "id, title, category, file_url, version", true, "#d1fae5"],
+                                        ].map(([name, role, cols, highlight, bg], i) => (
+                                            <tr key={name as string}
+                                                style={highlight ? { background: (bg as string) ?? "#eff6ff" } : undefined}
+                                                className={i % 2 === 0 && !highlight ? "bg-slate-50" : "bg-white"}>
+                                                <td className="px-3 py-2 border border-slate-200 font-bold font-mono text-xs text-slate-800">{name as string}</td>
+                                                <td className="px-3 py-2 border border-slate-200">{role as string}</td>
+                                                <td className="px-3 py-2 border border-slate-200 font-mono text-xs text-slate-500">{cols as string}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </section>
+
+                    </main>
+                </div>
+            )}
+
+            {/* ── フッター ── */}
+            <footer className="border-t border-slate-200 px-4 md:px-8 py-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-1 text-[10px] font-mono text-slate-400">
+                <span>災害備蓄用パン 製造・HACCP 統合管理システム</span>
+                <span>取扱説明書 — REV. 2.0.0</span>
+            </footer>
         </div>
     );
 }
