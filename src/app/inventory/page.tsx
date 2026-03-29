@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -9,26 +9,24 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import { Package, Wheat, Box, Boxes, ClipboardEdit, ArrowRight, Save, Loader2, AlertCircle, CheckCircle2, ListChecks, TrendingUp, Filter } from "lucide-react";
+import { Package, Wheat, Box, Boxes, ClipboardEdit, ArrowRight, Save, Loader2, AlertCircle, CheckCircle2, ListChecks, TrendingUp, Filter, Lock } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
 
-// --- 型定義 ---
 type ItemStock = { id: string; name: string; item_type: string; unit: string; safety_stock: number; current_qty: number; };
 type ProductStock = { id: string; lot_code: string; product_id: string; total_pieces: number; expiry_date: string; products: { name: string; variant_name: string; unit_per_cs: number }; };
 type AdjustmentHistory = { id: string; adjusted_at: string; items?: { name: string }; products?: { name: string }; lot_code?: string; before_qty: number; after_qty: number; diff: number; reason: string; };
 
 export default function InventoryPage() {
+  const { canEdit } = useAuth(); // ★権限チェック
   const [loading, setLoading] = useState(true);
-  const [rawMaterials, setRawMaterials] = useState<ItemStock[]>([]);
+  const[rawMaterials, setRawMaterials] = useState<ItemStock[]>([]);
   const [materials, setMaterials] = useState<ItemStock[]>([]);
   const [productStocks, setProductStocks] = useState<ProductStock[]>([]);
   const [histories, setHistories] = useState<AdjustmentHistory[]>([]);
 
-  // 予測用データState
-  const [boms, setBoms] = useState<any[]>([]);
+  const[boms, setBoms] = useState<any[]>([]);
   const [pendingPlans, setPendingPlans] = useState<any[]>([]);
   const [pendingArrivals, setPendingArrivals] = useState<any[]>([]);
-
-  // ★追加: 予測カレンダーのフィルタリング用State ('all', 'raw_material', 'material')
   const [forecastFilter, setForecastFilter] = useState<'all' | 'raw_material' | 'material'>('all');
 
   const [adjustmentModal, setAdjustmentModal] = useState<{ isOpen: boolean; type: 'item' | 'product'; targetId: string; targetName: string; currentQty: number; unit: string; lotCode?: string; productId?: string }>({ isOpen: false, type: 'item', targetId: '', targetName: '', currentQty: 0, unit: '' });
@@ -36,19 +34,16 @@ export default function InventoryPage() {
   const [adjReason, setAdjReason] = useState("定例棚卸");
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const [isBatchMode, setIsBatchMode] = useState(false);
+  const[isBatchMode, setIsBatchMode] = useState(false);
   const [batchInputs, setBatchInputs] = useState<Record<string, number | "">>({});
   const [batchReason, setBatchReason] = useState("定例棚卸");
 
-  useEffect(() => { fetchInventory(); }, []);
-
-  const fetchInventory = async () => {
+  const fetchInventory = useCallback(async () => {
     setLoading(true);
     const { data: itemsData } = await supabase.from("items").select(`*, item_stocks ( quantity )`).order('id');
     const { data: pStocksData } = await supabase.from("product_stocks").select(`*, products ( name, variant_name, unit_per_cs )`).order("expiry_date", { ascending: true });
     const { data: histData } = await supabase.from("inventory_adjustments").select(`*, items(name), products(name)`).order("adjusted_at", { ascending: false }).limit(50);
-
-    // 予測(MRP)用データの取得
+    
     const { data: bData } = await supabase.from("bom").select("*");
     const { data: plData } = await supabase.from("production_plans").select("*").eq("status", "planned");
     const { data: aData } = await supabase.from("arrivals").select("*").eq("status", "pending");
@@ -66,15 +61,17 @@ export default function InventoryPage() {
     if (bData) setBoms(bData);
     if (plData) setPendingPlans(plData);
     if (aData) setPendingArrivals(aData);
-
+    
     setLoading(false);
-  };
+  },[]);
+
+  useEffect(() => { fetchInventory(); },[fetchInventory]);
 
   const getStockStatus = (current: number, safety: number) => {
     if (safety === 0) return { label: "設定なし", color: "bg-slate-100 text-slate-600 border-none", icon: null };
-    if (current < safety) return { label: "不足(発注!)", color: "bg-red-500 text-white border-none", icon: <AlertCircle className="w-3 h-3 mr-1" /> };
-    if (current < safety * 1.5) return { label: "注意", color: "bg-amber-400 text-white border-none", icon: <AlertCircle className="w-3 h-3 mr-1" /> };
-    return { label: "充足", color: "bg-green-100 text-green-800 border-none", icon: <CheckCircle2 className="w-3 h-3 mr-1" /> };
+    if (current < safety) return { label: "不足(発注!)", color: "bg-red-500 text-white border-none", icon: <AlertCircle className="w-3 h-3 mr-1"/> };
+    if (current < safety * 1.5) return { label: "注意", color: "bg-amber-400 text-white border-none", icon: <AlertCircle className="w-3 h-3 mr-1"/> };
+    return { label: "充足", color: "bg-green-100 text-green-800 border-none", icon: <CheckCircle2 className="w-3 h-3 mr-1"/> };
   };
 
   const handleAdjustmentSubmit = async () => {
@@ -110,7 +107,7 @@ export default function InventoryPage() {
   const handleBatchSubmit = async () => {
     setIsProcessing(true);
     try {
-      const itemUpdates = []; const productUpdates = []; const historyInserts = [];
+      const itemUpdates =[]; const productUpdates = []; const historyInserts =[];
 
       for (const item of [...rawMaterials, ...materials]) {
         const newVal = batchInputs[item.id];
@@ -142,15 +139,10 @@ export default function InventoryPage() {
     setIsProcessing(false);
   };
 
-  // =================================================================================
-  // MRP(資材所要量計画) ベースの在庫予測カレンダー計算ロジック
-  // =================================================================================
   const forecastResult = useMemo(() => {
-    const dates = Array.from({ length: 30 }, (_, i) => {
-      const d = new Date(); d.setDate(d.getDate() + i); return d.toISOString().split('T')[0];
-    });
+    const dates = Array.from({length: 30}, (_, i) => { const d = new Date(); d.setDate(d.getDate() + i); return d.toISOString().split('T')[0]; });
     const todayStr = dates[0];
-
+    
     const fData: Record<string, any> = {};
     [...rawMaterials, ...materials].forEach(item => {
       fData[item.id] = { item, days: {} };
@@ -187,17 +179,15 @@ export default function InventoryPage() {
     });
 
     return { dates, fData };
-  }, [rawMaterials, materials, boms, pendingPlans, pendingArrivals]);
+  },[rawMaterials, materials, boms, pendingPlans, pendingArrivals]);
 
-  // ★追加: フィルタリングされた予測データ
   const filteredForecastData = useMemo(() => {
     const allData = Object.values(forecastResult.fData) as any[];
     if (forecastFilter === 'all') return allData;
     return allData.filter((f) => f.item.item_type === forecastFilter);
-  }, [forecastResult.fData, forecastFilter]);
+  },[forecastResult.fData, forecastFilter]);
 
 
-  // --- アイテム表示共通ロジック ---
   const renderItemTab = (itemList: ItemStock[]) => (
     <>
       <div className="hidden md:block bg-white border rounded-lg overflow-x-auto shadow-sm">
@@ -217,15 +207,18 @@ export default function InventoryPage() {
                   <TableCell className="text-right font-black text-xl text-slate-700">
                     {isBatchMode ? (
                       <div className="flex justify-end items-center gap-2">
-                        <Input type="number" inputMode="decimal" min="0" step="0.1" value={batchInputs[item.id] !== undefined ? batchInputs[item.id] : ""} onChange={e => setBatchInputs({ ...batchInputs, [item.id]: e.target.value === "" ? "" : Number(e.target.value) })} className={`w-28 text-right font-bold h-9 ${isChanged ? 'border-amber-400 bg-white ring-2 ring-amber-200' : 'border-blue-300 shadow-sm'}`} />
+                        <Input type="number" inputMode="decimal" min="0" step="0.1" value={batchInputs[item.id] !== undefined ? batchInputs[item.id] : ""} onChange={e => setBatchInputs({...batchInputs,[item.id]: e.target.value === "" ? "" : Number(e.target.value)})} className={`w-28 text-right font-bold h-9 ${isChanged ? 'border-amber-400 bg-white ring-2 ring-amber-200' : 'border-blue-300 shadow-sm'}`} />
                         {isChanged && <span className="text-xs text-amber-600 font-bold ml-1 w-6 block">変更</span>}
                       </div>
-                    ) : item.current_qty.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+                    ) : item.current_qty.toLocaleString(undefined, {maximumFractionDigits:1})}
                   </TableCell>
                   <TableCell className="text-slate-500 text-xs">{item.unit}</TableCell>
                   <TableCell className="text-right text-slate-500 text-sm">{item.safety_stock.toLocaleString()}</TableCell>
                   <TableCell className="text-center"><Badge className={`px-2 py-1 shadow-sm ${status.color}`}>{status.icon} {status.label}</Badge></TableCell>
-                  <TableCell className="text-center pr-4"><Button disabled={isBatchMode} variant="outline" size="sm" onClick={() => setAdjustmentModal({ isOpen: true, type: 'item', targetId: item.id, targetName: item.name, currentQty: item.current_qty, unit: item.unit })} className="gap-1 border-blue-200 text-blue-700 hover:bg-blue-50"><ClipboardEdit className="w-3 h-3" /> 個別棚卸</Button></TableCell>
+                  <TableCell className="text-center pr-4">
+                    {/* ★権限ロック: 管理者のみ棚卸ボタン表示 */}
+                    {canEdit && <Button disabled={isBatchMode} variant="outline" size="sm" onClick={() => setAdjustmentModal({ isOpen: true, type: 'item', targetId: item.id, targetName: item.name, currentQty: item.current_qty, unit: item.unit })} className="gap-1 border-blue-200 text-blue-700 hover:bg-blue-50"><ClipboardEdit className="w-3 h-3" /> 個別棚卸</Button>}
+                  </TableCell>
                 </TableRow>
               );
             })}
@@ -246,12 +239,13 @@ export default function InventoryPage() {
               {isBatchMode ? (
                 <div className="bg-white p-3 rounded-lg border shadow-inner flex flex-col gap-2">
                   <div className="flex justify-between items-center text-sm font-bold text-slate-600"><span>実数入力 (現在: {item.current_qty})</span>{isChanged && <span className="text-xs text-amber-600 font-black">変更あり</span>}</div>
-                  <div className="flex items-center gap-2"><Input type="number" inputMode="decimal" min="0" step="0.1" value={batchInputs[item.id] !== undefined ? batchInputs[item.id] : ""} onChange={e => setBatchInputs({ ...batchInputs, [item.id]: e.target.value === "" ? "" : Number(e.target.value) })} className={`flex-1 text-right font-black text-2xl h-14 ${isChanged ? 'border-amber-400 bg-amber-50 focus-visible:ring-amber-500' : 'border-blue-300'}`} /><span className="font-bold text-slate-500 text-lg w-8">{item.unit}</span></div>
+                  <div className="flex items-center gap-2"><Input type="number" inputMode="decimal" min="0" step="0.1" value={batchInputs[item.id] !== undefined ? batchInputs[item.id] : ""} onChange={e => setBatchInputs({...batchInputs,[item.id]: e.target.value === "" ? "" : Number(e.target.value)})} className={`flex-1 text-right font-black text-2xl h-14 ${isChanged ? 'border-amber-400 bg-amber-50 focus-visible:ring-amber-500' : 'border-blue-300'}`} /><span className="font-bold text-slate-500 text-lg w-8">{item.unit}</span></div>
                 </div>
               ) : (
                 <div className="flex justify-between items-end mt-2 pt-2 border-t">
-                  <div className="font-black text-3xl text-blue-900">{item.current_qty.toLocaleString(undefined, { maximumFractionDigits: 1 })} <span className="text-base font-normal text-slate-500">{item.unit}</span></div>
-                  <Button variant="outline" size="sm" onClick={() => setAdjustmentModal({ isOpen: true, type: 'item', targetId: item.id, targetName: item.name, currentQty: item.current_qty, unit: item.unit })} className="border-blue-300 text-blue-700 bg-blue-50 shadow-sm"><ClipboardEdit className="w-4 h-4 mr-1" /> 棚卸</Button>
+                  <div className="font-black text-3xl text-blue-900">{item.current_qty.toLocaleString(undefined, {maximumFractionDigits:1})} <span className="text-base font-normal text-slate-500">{item.unit}</span></div>
+                  {/* ★権限ロック */}
+                  {canEdit && <Button variant="outline" size="sm" onClick={() => setAdjustmentModal({ isOpen: true, type: 'item', targetId: item.id, targetName: item.name, currentQty: item.current_qty, unit: item.unit })} className="border-blue-300 text-blue-700 bg-blue-50 shadow-sm"><ClipboardEdit className="w-4 h-4 mr-1" /> 棚卸</Button>}
                 </div>
               )}
             </Card>
@@ -266,9 +260,10 @@ export default function InventoryPage() {
   return (
     <div className="bg-slate-50 min-h-screen md:bg-transparent -mx-4 px-4 md:mx-0 md:px-0">
       <div className="flex justify-between items-center mb-4 md:mb-6 pt-4 md:pt-0">
-        <h1 className="text-xl md:text-2xl font-black flex items-center gap-2 text-slate-800">
-          <Package className="h-6 w-6 text-blue-600" /> 在庫管理・棚卸
-        </h1>
+        <div className="flex items-center gap-4">
+          <h1 className="text-xl md:text-2xl font-black flex items-center gap-2 text-slate-800"><Package className="h-6 w-6 text-blue-600" /> 在庫管理・棚卸</h1>
+          {!canEdit && <Badge variant="outline" className="bg-slate-100 text-slate-500 border-slate-300 px-3 py-1 shadow-sm hidden md:flex"><Lock className="w-3 h-3 mr-1"/> 閲覧モード</Badge>}
+        </div>
       </div>
 
       <Tabs defaultValue="raw" className="w-full">
@@ -278,34 +273,33 @@ export default function InventoryPage() {
               <TabsTrigger value="raw" className="font-bold py-2.5 px-4 md:px-6 text-sm md:text-md rounded-lg data-[state=active]:bg-white data-[state=active]:text-blue-700 data-[state=active]:shadow-sm"><Wheat className="w-4 h-4 mr-1.5" /> 原材料</TabsTrigger>
               <TabsTrigger value="material" className="font-bold py-2.5 px-4 md:px-6 text-sm md:text-md rounded-lg data-[state=active]:bg-white data-[state=active]:text-blue-700 data-[state=active]:shadow-sm"><Box className="w-4 h-4 mr-1.5" /> 資材</TabsTrigger>
               <TabsTrigger value="product" className="font-bold py-2.5 px-4 md:px-6 text-sm md:text-md rounded-lg data-[state=active]:bg-white data-[state=active]:text-blue-700 data-[state=active]:shadow-sm"><Boxes className="w-4 h-4 mr-1.5" /> 製品</TabsTrigger>
-              <TabsTrigger value="forecast" className="font-bold py-2.5 px-4 md:px-6 text-sm md:text-md rounded-lg data-[state=active]:bg-white data-[state=active]:text-blue-700 data-[state=active]:shadow-sm bg-blue-100 text-blue-800 ml-2">
-                <TrendingUp className="w-4 h-4 mr-1.5" /> 在庫予測
-              </TabsTrigger>
+              <TabsTrigger value="forecast" className="font-bold py-2.5 px-4 md:px-6 text-sm md:text-md rounded-lg data-[state=active]:bg-white data-[state=active]:text-blue-700 data-[state=active]:shadow-sm bg-blue-100 text-blue-800 ml-2"><TrendingUp className="w-4 h-4 mr-1.5" /> 在庫予測</TabsTrigger>
               <TabsTrigger value="history" className="font-bold py-2.5 px-4 md:px-6 text-sm md:text-md rounded-lg data-[state=active]:bg-white data-[state=active]:text-slate-700 data-[state=active]:shadow-sm ml-auto"><ClipboardEdit className="w-4 h-4 mr-1.5" /> 履歴</TabsTrigger>
             </TabsList>
           </div>
 
-          <div className={`flex flex-col sm:flex-row items-center gap-2 bg-white p-2 md:p-3 rounded-xl border-2 shadow-sm sticky top-16 z-40 transition-colors ${isBatchMode ? 'border-amber-400 bg-amber-50/30' : 'border-blue-100'}`}>
-            {isBatchMode ? (
-              <div className="flex flex-col sm:flex-row w-full items-center gap-2">
-                <div className="flex items-center justify-between w-full sm:w-auto"><span className="text-sm font-black text-amber-700 animate-pulse flex items-center"><ListChecks className="w-4 h-4 mr-1" />一括入力モード</span></div>
-                <select value={batchReason} onChange={e => setBatchReason(e.target.value)} className="border rounded p-1.5 text-sm font-bold bg-white shadow-sm"><option value="定例棚卸">定例棚卸</option><option value="入力もれ補正">入力もれ補正</option><option value="その他">その他</option></select>
-                <div className="flex w-full sm:w-auto gap-2 mt-2 sm:mt-0 ml-auto">
-                  <Button onClick={toggleBatchMode} variant="outline" className="flex-1 sm:flex-none border-slate-300 text-slate-600 bg-white">中止</Button>
-                  <Button onClick={handleBatchSubmit} disabled={isProcessing} className="flex-1 sm:flex-none bg-green-600 hover:bg-green-700 text-white font-bold shadow-md">{isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4 mr-1" />} 一括保存</Button>
+          {/* ★権限ロック: 一括棚卸ボタンは管理者のみ */}
+          {canEdit && (
+            <div className={`flex flex-col sm:flex-row items-center gap-2 bg-white p-2 md:p-3 rounded-xl border-2 shadow-sm sticky top-16 z-40 transition-colors ${isBatchMode ? 'border-amber-400 bg-amber-50/30' : 'border-blue-100'}`}>
+              {isBatchMode ? (
+                <div className="flex flex-col sm:flex-row w-full items-center gap-2">
+                  <div className="flex items-center justify-between w-full sm:w-auto"><span className="text-sm font-black text-amber-700 animate-pulse flex items-center"><ListChecks className="w-4 h-4 mr-1"/>一括入力モード</span></div>
+                  <select value={batchReason} onChange={e=>setBatchReason(e.target.value)} className="border rounded p-1.5 text-sm font-bold bg-white shadow-sm"><option value="定例棚卸">定例棚卸</option><option value="入力もれ補正">入力もれ補正</option><option value="その他">その他</option></select>
+                  <div className="flex w-full sm:w-auto gap-2 mt-2 sm:mt-0 ml-auto">
+                    <Button onClick={toggleBatchMode} variant="outline" className="flex-1 sm:flex-none border-slate-300 text-slate-600 bg-white">中止</Button>
+                    <Button onClick={handleBatchSubmit} disabled={isProcessing} className="flex-1 sm:flex-none bg-green-600 hover:bg-green-700 text-white font-bold shadow-md">{isProcessing ? <Loader2 className="w-4 h-4 animate-spin"/> : <Save className="w-4 h-4 mr-1"/>} 一括保存</Button>
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <Button onClick={toggleBatchMode} className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-sm h-10"><ListChecks className="w-5 h-5 mr-2" /> スマホで一括棚卸を開始</Button>
-            )}
-          </div>
+              ) : (
+                <Button onClick={toggleBatchMode} className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-sm h-10"><ListChecks className="w-5 h-5 mr-2"/> スマホで一括棚卸を開始</Button>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* 1 & 2 & 3. 既存タブ */}
         <TabsContent value="raw" className="mt-0">{renderItemTab(rawMaterials)}</TabsContent>
         <TabsContent value="material" className="mt-0">{renderItemTab(materials)}</TabsContent>
         <TabsContent value="product" className="mt-0">
-          {/* PC表示 */}
           <div className="hidden md:block bg-white border rounded-lg overflow-x-auto shadow-sm">
             <Table className="min-w-[1000px]">
               <TableHeader className="bg-slate-50"><TableRow>
@@ -328,7 +322,7 @@ export default function InventoryPage() {
                         {isBatchMode ? (
                           <div className="flex items-center justify-end gap-1">
                             {isChanged && <span className="text-xs text-amber-600 font-bold mr-2">変更</span>}
-                            <Input type="number" inputMode="numeric" min="0" value={cs} onChange={e => setBatchInputs({ ...batchInputs, [stock.id]: (Number(e.target.value === "" ? 0 : e.target.value) * unit_per_cs) + piece })} className={`w-20 text-right font-bold h-9 ${isChanged ? 'border-amber-400 bg-white ring-2 ring-amber-200' : 'border-blue-300'}`} />
+                            <Input type="number" inputMode="numeric" min="0" value={cs} onChange={e => setBatchInputs({...batchInputs, [stock.id]: (Number(e.target.value === "" ? 0 : e.target.value) * unit_per_cs) + piece})} className={`w-20 text-right font-bold h-9 ${isChanged ? 'border-amber-400 bg-white ring-2 ring-amber-200' : 'border-blue-300'}`} />
                             <span className="text-xs text-slate-500 font-bold">c/s</span>
                           </div>
                         ) : <span className="font-black text-2xl text-blue-900">{cs.toLocaleString()} <span className="text-sm font-normal text-slate-500">c/s</span></span>}
@@ -336,19 +330,21 @@ export default function InventoryPage() {
                       <TableCell className="text-right">
                         {isBatchMode ? (
                           <div className="flex items-center justify-end gap-1">
-                            <Input type="number" inputMode="numeric" min="0" max={unit_per_cs - 1} value={piece} onChange={e => setBatchInputs({ ...batchInputs, [stock.id]: (cs * unit_per_cs) + Number(e.target.value === "" ? 0 : e.target.value) })} className={`w-16 text-right font-bold h-9 ${isChanged ? 'border-amber-400 bg-white ring-2 ring-amber-200' : 'border-blue-300'}`} />
+                            <Input type="number" inputMode="numeric" min="0" max={unit_per_cs - 1} value={piece} onChange={e => setBatchInputs({...batchInputs,[stock.id]: (cs * unit_per_cs) + Number(e.target.value === "" ? 0 : e.target.value)})} className={`w-16 text-right font-bold h-9 ${isChanged ? 'border-amber-400 bg-white ring-2 ring-amber-200' : 'border-blue-300'}`} />
                             <span className="text-xs text-slate-500 font-bold">p</span>
                           </div>
                         ) : <span className="font-bold text-lg text-slate-600">{piece} <span className="text-xs font-normal text-slate-400">p</span></span>}
                       </TableCell>
-                      <TableCell className="text-center pr-4"><Button disabled={isBatchMode} variant="outline" size="sm" onClick={() => setAdjustmentModal({ isOpen: true, type: 'product', targetId: stock.id, targetName: `${stock.products.name} (${stock.lot_code})`, currentQty: stock.total_pieces, unit: 'ピース(総数)', lotCode: stock.lot_code, productId: stock.product_id })} className="gap-1 border-blue-200 text-blue-700 hover:bg-blue-50"><ClipboardEdit className="w-3 h-3" /> 個別棚卸</Button></TableCell>
+                      <TableCell className="text-center pr-4">
+                        {/* ★権限ロック */}
+                        {canEdit && <Button disabled={isBatchMode} variant="outline" size="sm" onClick={() => setAdjustmentModal({ isOpen: true, type: 'product', targetId: stock.id, targetName: `${stock.products.name} (${stock.lot_code})`, currentQty: stock.total_pieces, unit: 'ピース(総数)', lotCode: stock.lot_code, productId: stock.product_id })} className="gap-1 border-blue-200 text-blue-700 hover:bg-blue-50"><ClipboardEdit className="w-3 h-3" /> 個別棚卸</Button>}
+                      </TableCell>
                     </TableRow>
                   );
                 })}
               </TableBody>
             </Table>
           </div>
-          {/* スマホ表示 */}
           <div className="block md:hidden space-y-3 pb-24">
             {productStocks.map((stock) => {
               const unit_per_cs = stock.products.unit_per_cs || 24; const isExpired = new Date(stock.expiry_date) < new Date();
@@ -370,16 +366,16 @@ export default function InventoryPage() {
                     <div className="bg-white p-3 rounded-lg border shadow-inner">
                       <div className="flex justify-between items-center text-sm font-bold text-slate-600 mb-2"><span>実数入力</span>{isChanged && <span className="text-xs text-amber-600 font-black">変更あり</span>}</div>
                       <div className="flex items-center gap-3">
-                        <Input type="number" inputMode="numeric" min="0" value={cs} onChange={e => setBatchInputs({ ...batchInputs, [stock.id]: (Number(e.target.value === "" ? 0 : e.target.value) * unit_per_cs) + piece })} className={`flex-1 text-right font-black text-2xl h-14 ${isChanged ? 'border-amber-400 bg-amber-50 focus-visible:ring-amber-500' : 'border-blue-300'}`} />
+                        <Input type="number" inputMode="numeric" min="0" value={cs} onChange={e => setBatchInputs({...batchInputs,[stock.id]: (Number(e.target.value === "" ? 0 : e.target.value) * unit_per_cs) + piece})} className={`flex-1 text-right font-black text-2xl h-14 ${isChanged ? 'border-amber-400 bg-amber-50 focus-visible:ring-amber-500' : 'border-blue-300'}`} />
                         <span className="font-bold text-slate-500 text-lg w-8">c/s</span>
-                        <Input type="number" inputMode="numeric" min="0" max={unit_per_cs - 1} value={piece} onChange={e => setBatchInputs({ ...batchInputs, [stock.id]: (cs * unit_per_cs) + Number(e.target.value === "" ? 0 : e.target.value) })} className={`flex-1 text-right font-black text-2xl h-14 ${isChanged ? 'border-amber-400 bg-amber-50 focus-visible:ring-amber-500' : 'border-blue-300'}`} />
+                        <Input type="number" inputMode="numeric" min="0" max={unit_per_cs - 1} value={piece} onChange={e => setBatchInputs({...batchInputs, [stock.id]: (cs * unit_per_cs) + Number(e.target.value === "" ? 0 : e.target.value)})} className={`flex-1 text-right font-black text-2xl h-14 ${isChanged ? 'border-amber-400 bg-amber-50 focus-visible:ring-amber-500' : 'border-blue-300'}`} />
                         <span className="font-bold text-slate-500 text-lg w-4">p</span>
                       </div>
                     </div>
                   ) : (
                     <div className="flex justify-between items-end mt-2 pt-2 border-t">
                       <div className="font-black text-3xl text-blue-900">{cs} <span className="text-sm font-normal text-slate-500">c/s</span> <span className="text-xl text-slate-700 ml-1">{piece}</span><span className="text-xs font-normal text-slate-400">p</span></div>
-                      <Button variant="outline" size="sm" onClick={() => setAdjustmentModal({ isOpen: true, type: 'product', targetId: stock.id, targetName: `${stock.products.name} (${stock.lot_code})`, currentQty: stock.total_pieces, unit: 'ピース(総数)', lotCode: stock.lot_code, productId: stock.product_id })} className="border-blue-300 text-blue-700 bg-blue-50 shadow-sm"><ClipboardEdit className="w-4 h-4 mr-1" /> 棚卸</Button>
+                      {canEdit && <Button variant="outline" size="sm" onClick={() => setAdjustmentModal({ isOpen: true, type: 'product', targetId: stock.id, targetName: `${stock.products.name} (${stock.lot_code})`, currentQty: stock.total_pieces, unit: 'ピース(総数)', lotCode: stock.lot_code, productId: stock.product_id })} className="border-blue-300 text-blue-700 bg-blue-50 shadow-sm"><ClipboardEdit className="w-4 h-4 mr-1" /> 棚卸</Button>}
                     </div>
                   )}
                 </Card>
@@ -388,26 +384,19 @@ export default function InventoryPage() {
           </div>
         </TabsContent>
 
-        {/* --- ★変更: MRP在庫予測カレンダー タブ (フィルター付き) --- */}
         <TabsContent value="forecast" className="mt-0">
           <div className="bg-white border rounded-lg shadow-sm">
             <div className="p-4 border-b bg-blue-50/30 flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
-                <h2 className="font-bold text-blue-900 flex items-center gap-2">
-                  <TrendingUp className="w-5 h-5 text-blue-600" />
-                  原料・資材 在庫推移予測 (30日間)
-                </h2>
+                <h2 className="font-bold text-blue-900 flex items-center gap-2"><TrendingUp className="w-5 h-5 text-blue-600" />原料・資材 在庫推移予測 (30日間)</h2>
                 <p className="text-xs text-slate-600 mt-1">製造計画(未着手)と入荷予定から、将来の在庫不足を自動シミュレーションします。</p>
               </div>
-
-              {/* ★追加: 表示フィルターボタン */}
               <div className="flex bg-white rounded-lg border p-1 shadow-sm w-fit shrink-0">
-                <button onClick={() => setForecastFilter('all')} className={`px-4 py-2 text-sm font-bold rounded-md transition-colors flex items-center gap-1 ${forecastFilter === 'all' ? 'bg-blue-100 text-blue-800' : 'text-slate-500 hover:bg-slate-50'}`}><Filter className="w-3 h-3" />すべて</button>
-                <button onClick={() => setForecastFilter('raw_material')} className={`px-4 py-2 text-sm font-bold rounded-md transition-colors ${forecastFilter === 'raw_material' ? 'bg-blue-100 text-blue-800' : 'text-slate-500 hover:bg-slate-50'}`}>原材料のみ</button>
-                <button onClick={() => setForecastFilter('material')} className={`px-4 py-2 text-sm font-bold rounded-md transition-colors ${forecastFilter === 'material' ? 'bg-blue-100 text-blue-800' : 'text-slate-500 hover:bg-slate-50'}`}>資材のみ</button>
+                <button onClick={() => setForecastFilter('all')} className={`px-4 py-2 text-sm font-bold rounded-md transition-colors flex items-center gap-1 ${forecastFilter==='all' ? 'bg-blue-100 text-blue-800' : 'text-slate-500 hover:bg-slate-50'}`}><Filter className="w-3 h-3"/>すべて</button>
+                <button onClick={() => setForecastFilter('raw_material')} className={`px-4 py-2 text-sm font-bold rounded-md transition-colors ${forecastFilter==='raw_material' ? 'bg-blue-100 text-blue-800' : 'text-slate-500 hover:bg-slate-50'}`}>原材料のみ</button>
+                <button onClick={() => setForecastFilter('material')} className={`px-4 py-2 text-sm font-bold rounded-md transition-colors ${forecastFilter==='material' ? 'bg-blue-100 text-blue-800' : 'text-slate-500 hover:bg-slate-50'}`}>資材のみ</button>
               </div>
             </div>
-
             <div className="overflow-x-auto max-h-[60vh]">
               <Table className="min-w-max border-collapse">
                 <TableHeader className="bg-slate-100 sticky top-0 z-20 shadow-sm">
@@ -418,78 +407,55 @@ export default function InventoryPage() {
                       const d = new Date(date); const isWeekend = d.getDay() === 0 || d.getDay() === 6;
                       return (
                         <TableHead key={date} className={`text-center min-w-[80px] border-r px-2 py-1.5 leading-tight ${isWeekend ? 'text-red-600 bg-red-50/50' : 'text-slate-700'}`}>
-                          <div className="font-bold">{d.getMonth() + 1}/{d.getDate()}</div>
-                          <div className="text-[10px] font-normal">{['日', '月', '火', '水', '木', '金', '土'][d.getDay()]}</div>
+                          <div className="font-bold">{d.getMonth()+1}/{d.getDate()}</div><div className="text-[10px] font-normal">{['日','月','火','水','木','金','土'][d.getDay()]}</div>
                         </TableHead>
                       );
                     })}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {/* ★変更: filteredForecastData をマップする */}
                   {filteredForecastData.map((f: any) => (
                     <TableRow key={f.item.id} className="hover:bg-slate-50">
-                      <TableCell className="sticky left-0 bg-white font-bold text-slate-800 border-r z-10 shadow-[2px_0_5px_rgba(0,0,0,0.05)] truncate max-w-[200px]" title={f.item.name}>
-                        {f.item.name} <span className="text-[10px] font-normal text-slate-500 block">({f.item.unit})</span>
-                      </TableCell>
-                      <TableCell className="text-right font-black text-slate-700 border-r bg-slate-50">
-                        {f.item.current_qty.toLocaleString(undefined, { maximumFractionDigits: 1 })}
-                      </TableCell>
+                      <TableCell className="sticky left-0 bg-white font-bold text-slate-800 border-r z-10 shadow-[2px_0_5px_rgba(0,0,0,0.05)] truncate max-w-[200px]" title={f.item.name}>{f.item.name} <span className="text-[10px] font-normal text-slate-500 block">({f.item.unit})</span></TableCell>
+                      <TableCell className="text-right font-black text-slate-700 border-r bg-slate-50">{f.item.current_qty.toLocaleString(undefined, {maximumFractionDigits:1})}</TableCell>
                       {forecastResult.dates.map(date => {
-                        const day = f.days[date];
-                        const isShort = day.endQty < 0;
-                        const isWarning = !isShort && f.item.safety_stock > 0 && day.endQty < f.item.safety_stock;
-
+                        const day = f.days[date]; const isShort = day.endQty < 0; const isWarning = !isShort && f.item.safety_stock > 0 && day.endQty < f.item.safety_stock;
                         return (
                           <TableCell key={date} className={`border-r p-1 align-top ${isShort ? 'bg-red-50 border-red-200' : isWarning ? 'bg-amber-50/50' : ''}`}>
                             <div className="flex flex-col justify-between h-full min-h-12">
-                              <div className="flex justify-between w-full text-[10px] px-1 font-bold">
-                                <span className="text-blue-600">{day.inQty > 0 ? `+${day.inQty.toLocaleString(undefined, { maximumFractionDigits: 1 })}` : ''}</span>
-                                <span className="text-red-500">{day.outQty > 0 ? `-${day.outQty.toLocaleString(undefined, { maximumFractionDigits: 1 })}` : ''}</span>
-                              </div>
-                              <div className={`text-right font-black text-sm px-1 mt-1 ${isShort ? 'text-red-700' : 'text-slate-800'}`}>
-                                {day.endQty.toLocaleString(undefined, { maximumFractionDigits: 1 })}
-                              </div>
+                              <div className="flex justify-between w-full text-[10px] px-1 font-bold"><span className="text-blue-600">{day.inQty > 0 ? `+${day.inQty.toLocaleString(undefined, {maximumFractionDigits:1})}` : ''}</span><span className="text-red-500">{day.outQty > 0 ? `-${day.outQty.toLocaleString(undefined, {maximumFractionDigits:1})}` : ''}</span></div>
+                              <div className={`text-right font-black text-sm px-1 mt-1 ${isShort ? 'text-red-700' : 'text-slate-800'}`}>{day.endQty.toLocaleString(undefined, {maximumFractionDigits:1})}</div>
                             </div>
                           </TableCell>
                         );
                       })}
                     </TableRow>
                   ))}
-                  {filteredForecastData.length === 0 && (
-                    <TableRow><TableCell colSpan={32} className="text-center py-12 text-slate-500">該当する品目データがありません</TableCell></TableRow>
-                  )}
                 </TableBody>
               </Table>
             </div>
-
             <div className="p-4 bg-slate-50 border-t flex flex-wrap gap-4 text-xs text-slate-600">
-              <div className="flex items-center gap-1.5"><span className="w-4 h-4 bg-red-50 border border-red-200 rounded-sm inline-block"></span>在庫がマイナス (欠品確実)</div>
-              <div className="flex items-center gap-1.5"><span className="w-4 h-4 bg-amber-50/80 border border-amber-200 rounded-sm inline-block"></span>安全在庫割れ (発注検討)</div>
-              <div className="flex items-center gap-1.5"><span className="text-blue-600 font-bold">+数値</span>入荷予定 (発注済)</div>
-              <div className="flex items-center gap-1.5"><span className="text-red-500 font-bold">-数値</span>製造による消費予定 (BOM計算)</div>
+              <div className="flex items-center gap-1.5"><span className="w-4 h-4 bg-red-50 border border-red-200 rounded-sm inline-block"></span>在庫がマイナス (欠品)</div>
+              <div className="flex items-center gap-1.5"><span className="w-4 h-4 bg-amber-50/80 border border-amber-200 rounded-sm inline-block"></span>安全在庫割れ</div>
+              <div className="flex items-center gap-1.5"><span className="text-blue-600 font-bold">+数値</span>入荷予定</div><div className="flex items-center gap-1.5"><span className="text-red-500 font-bold">-数値</span>消費予定</div>
             </div>
           </div>
         </TabsContent>
 
-        {/* 5. 履歴タブ */}
         <TabsContent value="history" className="mt-0">
           <div className="bg-white border rounded-lg overflow-x-auto shadow-sm pb-10">
             <Table className="min-w-[600px] text-sm">
-              <TableHeader className="bg-slate-50"><TableRow>
-                <TableHead className="pl-4 w-32">日時</TableHead><TableHead>対象</TableHead><TableHead className="text-right">前</TableHead>
-                <TableHead></TableHead><TableHead className="text-right">後</TableHead><TableHead className="text-right">差異</TableHead><TableHead className="pr-4">理由</TableHead>
-              </TableRow></TableHeader>
+              <TableHeader className="bg-slate-50"><TableRow><TableHead className="pl-4 w-32">日時</TableHead><TableHead>対象</TableHead><TableHead className="text-right">前</TableHead><TableHead></TableHead><TableHead className="text-right">後</TableHead><TableHead className="text-right">差異</TableHead><TableHead className="pr-4">理由</TableHead></TableRow></TableHeader>
               <TableBody>
                 {histories.map((hist) => {
                   const targetName = hist.items?.name || (hist.products ? `${hist.products.name} (${hist.lot_code})` : '不明');
                   const diffColor = hist.diff > 0 ? 'text-green-600' : hist.diff < 0 ? 'text-red-600' : 'text-slate-400';
                   return (
                     <TableRow key={hist.id} className="hover:bg-slate-50">
-                      <TableCell className="text-slate-500 pl-4 text-xs">{new Date(hist.adjusted_at).toLocaleDateString()}<br />{new Date(hist.adjusted_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</TableCell>
+                      <TableCell className="text-slate-500 pl-4 text-xs">{new Date(hist.adjusted_at).toLocaleDateString()}<br/>{new Date(hist.adjusted_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</TableCell>
                       <TableCell className="font-bold text-slate-800 max-w-[150px] truncate" title={targetName}>{targetName}</TableCell>
                       <TableCell className="text-right text-slate-500">{hist.before_qty.toLocaleString()}</TableCell>
-                      <TableCell className="text-center text-slate-300"><ArrowRight className="w-3 h-3 mx-auto" /></TableCell>
+                      <TableCell className="text-center text-slate-300"><ArrowRight className="w-3 h-3 mx-auto"/></TableCell>
                       <TableCell className="text-right font-bold text-slate-800">{hist.after_qty.toLocaleString()}</TableCell>
                       <TableCell className={`text-right font-black ${diffColor}`}>{hist.diff > 0 ? '+' : ''}{hist.diff.toLocaleString()}</TableCell>
                       <TableCell className="text-slate-500 text-xs pr-4">{hist.reason}</TableCell>
@@ -502,10 +468,9 @@ export default function InventoryPage() {
         </TabsContent>
       </Tabs>
 
-      {/* --- 個別棚卸入力モーダル --- */}
-      <Dialog open={adjustmentModal.isOpen} onOpenChange={(open) => !open && setAdjustmentModal({ ...adjustmentModal, isOpen: false })}>
+      <Dialog open={adjustmentModal.isOpen} onOpenChange={(open) => !open && setAdjustmentModal({...adjustmentModal, isOpen: false})}>
         <DialogContent className="w-[95vw] max-w-md bg-white p-4 md:p-6 rounded-2xl">
-          <DialogHeader><DialogTitle className="flex items-center gap-2"><ClipboardEdit className="w-5 h-5 text-blue-600" /> 実地棚卸の入力</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><ClipboardEdit className="w-5 h-5 text-blue-600"/> 実地棚卸の入力</DialogTitle></DialogHeader>
           <div className="space-y-6 mt-2">
             <div className="bg-slate-50 p-3 md:p-4 rounded-lg border text-center"><div className="text-xs font-bold text-slate-500 mb-1">対象品目</div><div className="text-base md:text-lg font-bold text-blue-900 leading-tight">{adjustmentModal.targetName}</div></div>
             <div className="flex items-center justify-between px-2">
@@ -526,8 +491,8 @@ export default function InventoryPage() {
             </div>
           </div>
           <DialogFooter className="mt-4 md:mt-6 border-t pt-4">
-            <Button variant="outline" onClick={() => setAdjustmentModal({ ...adjustmentModal, isOpen: false })} className="w-full md:w-auto h-12 md:h-10 mb-2 md:mb-0 font-bold">キャンセル</Button>
-            <Button onClick={handleAdjustmentSubmit} disabled={isProcessing || actualQty === ""} className="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white font-bold h-12 md:h-10 text-lg md:text-base">{isProcessing ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <Save className="w-5 h-5 mr-2" />} 確定する</Button>
+            <Button variant="outline" onClick={() => setAdjustmentModal({...adjustmentModal, isOpen: false})} className="w-full md:w-auto h-12 md:h-10 mb-2 md:mb-0 font-bold">キャンセル</Button>
+            <Button onClick={handleAdjustmentSubmit} disabled={isProcessing || actualQty === ""} className="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white font-bold h-12 md:h-10 text-lg md:text-base">{isProcessing ? <Loader2 className="w-5 h-5 mr-2 animate-spin"/> : <Save className="w-5 h-5 mr-2"/>} 確定する</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

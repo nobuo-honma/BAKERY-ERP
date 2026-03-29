@@ -4,30 +4,28 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { AlertCircle, Package, Truck, Calendar, Loader2 } from "lucide-react";
+import { AlertCircle, Package, Truck, Calendar, Lock, Loader2 } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
 
 // --- 型定義 ---
-type DashboardSummary = {
-  inventoryAlerts: { count: number; items: string[] };
-  todayProduction: { cs: number; products: string[] };
-  todayShipment: { cs: number; customers: string[] };
-};
-
-type OngoingOrder = {
+type Order = {
   id: string;
-  customer_name: string;
   desired_ship_date: string;
   status: string;
+  quantity: number;
+  customers?: { name: string };
+  products?: { name: string; variant_name: string };
 };
 
 export default function Dashboard() {
+  const { canEdit } = useAuth();
   const [loading, setLoading] = useState(true);
-  const [summary, setSummary] = useState<DashboardSummary>({
-    inventoryAlerts: { count: 0, items: [] },
-    todayProduction: { cs: 0, products: [] },
-    todayShipment: { cs: 0, customers: [] },
-  });
-  const [ongoingOrders, setOngoingOrders] = useState<OngoingOrder[]>([]);
+
+  // 表示用データState
+  const [alerts, setAlerts] = useState<{ shortages: string[]; warnings: string[]; total: number }>({ shortages: [], warnings: [], total: 0 });
+  const [todayProd, setTodayProd] = useState<{ totalCs: number; detail: string }>({ totalCs: 0, detail: "予定なし" });
+  const [todayShip, setTodayShip] = useState<{ totalCs: number; detail: string }>({ totalCs: 0, detail: "予定なし" });
+  const [ongoingOrders, setOngoingOrders] = useState<Order[]>([]);
 
   useEffect(() => {
     fetchDashboardData();
@@ -35,182 +33,163 @@ export default function Dashboard() {
 
   const fetchDashboardData = async () => {
     setLoading(true);
-    const today = new Date().toISOString().split("T")[0];
+
+    // 本日の日付文字列を生成 (YYYY-MM-DD)
+    const d = new Date();
+    const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
     try {
-      // 1. 在庫アラート (安全在庫を下回っているアイテム)
-      const { data: itemsData } = await supabase
-        .from("items")
-        .select("name, safety_stock, item_stocks(quantity)");
+      // 1. 在庫アラートの計算
+      const { data: itemsData } = await supabase.from("items").select("name, safety_stock, item_stocks(quantity)");
+      const shortages: string[] = [];
+      const warnings: string[] = [];
 
-      const alerts = itemsData?.filter(item => {
-        const qty = item.item_stocks?.[0]?.quantity || 0;
-        return qty < item.safety_stock;
-      }) || [];
+      if (itemsData) {
+        itemsData.forEach((item: any) => {
+          const qty = item.item_stocks && item.item_stocks.length > 0 ? item.item_stocks[0].quantity : 0;
+          if (item.safety_stock > 0) {
+            if (qty < item.safety_stock) shortages.push(item.name);
+            else if (qty < item.safety_stock * 1.5) warnings.push(item.name);
+          }
+        });
+      }
+      setAlerts({ shortages, warnings, total: shortages.length + warnings.length });
 
       // 2. 本日の製造予定
-      const { data: prodData } = await supabase
-        .from("production_plans")
-        .select("planned_cs, products(name)")
-        .eq("production_date", today);
+      const { data: prodData } = await supabase.from("production_plans").select("planned_cs, products(name)").eq("production_date", todayStr);
+      if (prodData && prodData.length > 0) {
+        const totalCs = prodData.reduce((sum: number, p: any) => sum + p.planned_cs, 0);
+        // 重複を除いた製品名リストを作成
+        const names = Array.from(new Set(prodData.map((p: any) => p.products?.name)));
+        const detail = names.slice(0, 2).join(", ") + (names.length > 2 ? " 他" : "");
+        setTodayProd({ totalCs, detail });
+      }
 
-      const totalProdCs = prodData?.reduce((acc, curr) => acc + (curr.planned_cs || 0), 0) || 0;
-      const prodNames = Array.from(new Set(prodData?.map(p => (p.products as any)?.name).filter(Boolean))) as string[];
+      // 3. 本日の出荷予定 (希望納期が本日で、まだ出荷されていない受注)
+      const { data: shipData } = await supabase.from("orders").select("quantity, customers(name)").eq("desired_ship_date", todayStr).neq("status", "shipped");
+      if (shipData && shipData.length > 0) {
+        const totalCs = shipData.reduce((sum: number, o: any) => sum + o.quantity, 0);
+        const names = Array.from(new Set(shipData.map((o: any) => o.customers?.name)));
+        const detail = names.slice(0, 2).join("様, ") + "様" + (names.length > 2 ? " 他" : " 宛");
+        setTodayShip({ totalCs, detail });
+      }
 
-      // 3. 本日の出荷予定 (受注の希望納期が今日)
-      const { data: shipData } = await supabase
-        .from("orders")
-        .select("quantity, customers(name)")
-        .eq("desired_ship_date", today);
-
-      const totalShipCs = shipData?.reduce((acc, curr) => acc + (curr.quantity || 0), 0) || 0;
-      const shipCustNames = Array.from(new Set(shipData?.map(s => (s.customers as any)?.name).filter(Boolean))) as string[];
-
-      // 4. 進行中の受注 (出荷完了以外、直近5件)
-      const { data: orderData } = await supabase
-        .from("orders")
-        .select("id, status, desired_ship_date, customers(name)")
-        .neq("status", "shipped")
+      // 4. 進行中の受注 (近い納期順に最大5件)
+      const { data: ordersData } = await supabase.from("orders")
+        .select("id, desired_ship_date, status, quantity, customers(name), products(name, variant_name)")
+        .in("status", ["received", "in_production"])
         .order("desired_ship_date", { ascending: true })
         .limit(5);
 
-      setSummary({
-        inventoryAlerts: {
-          count: alerts.length,
-          items: alerts.slice(0, 3).map(a => a.name)
-        },
-        todayProduction: {
-          cs: totalProdCs,
-          products: prodNames
-        },
-        todayShipment: {
-          cs: totalShipCs,
-          customers: shipCustNames
-        },
-      });
-
-      setOngoingOrders(orderData?.map(o => ({
-        id: o.id,
-        customer_name: (o.customers as any)?.name || "不明",
-        desired_ship_date: o.desired_ship_date,
-        status: o.status
-      })) || []);
+      if (ordersData) {
+        const processed = (ordersData as any[]).map(o => ({
+          ...o,
+          customers: o.customers && o.customers.length > 0 ? o.customers[0] : undefined,
+          products: o.products && o.products.length > 0 ? o.products[0] : undefined
+        }));
+        setOngoingOrders(processed as Order[]);
+      }
 
     } catch (error) {
       console.error("Dashboard fetch error:", error);
-    } finally {
-      setLoading(false);
     }
-  };
 
-  const getStatusLabel = (status: string) => {
-    switch (status) {
-      case "received": return { text: "未計画", color: "bg-slate-100 text-slate-800" };
-      case "planned": return { text: "計画済", color: "bg-blue-50 text-blue-700 border-blue-100" };
-      case "in_production": return { text: "製造中", color: "bg-amber-100 text-amber-800" };
-      default: return { text: status, color: "bg-slate-50 text-slate-600" };
-    }
+    setLoading(false);
   };
 
   if (loading) {
-    return (
-      <div className="flex flex-col justify-center items-center h-[60vh] gap-4">
-        <Loader2 className="animate-spin h-10 w-10 text-blue-500" />
-        <p className="text-slate-500 font-bold">データを読み込み中...</p>
-      </div>
-    );
+    return <div className="flex justify-center items-center h-[80vh]"><Loader2 className="animate-spin h-10 w-10 text-slate-400" /></div>;
   }
+
+  // アラートテキストの生成
+  const shortageText = alerts.shortages.length > 0 ? `不足: ${alerts.shortages.slice(0, 2).join(", ")}${alerts.shortages.length > 2 ? ' 他' : ''}` : "";
+  const warningText = alerts.warnings.length > 0 ? `注意: ${alerts.warnings.slice(0, 2).join(", ")}${alerts.warnings.length > 2 ? ' 他' : ''}` : "";
 
   return (
     <>
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex items-center gap-4 mb-6">
         <h1 className="text-2xl md:text-3xl font-bold">ダッシュボード</h1>
-        <Badge variant="outline" className="bg-white text-slate-500 border-slate-200">
-          更新日: {new Date().toLocaleDateString('ja-JP')}
-        </Badge>
+        {!canEdit && <Badge variant="outline" className="bg-slate-100 text-slate-500 border-slate-300 px-3 py-1 shadow-sm"><Lock className="w-3 h-3 mr-1" /> 閲覧モード</Badge>}
       </div>
 
-      {/* サマリーカードのグリッド配置 */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-
-        {/* 在庫アラート */}
-        <Card className={`shadow-sm ${summary.inventoryAlerts.count > 0 ? "border-red-200 bg-red-50" : "border-slate-200"}`}>
+        {/* --- 在庫アラート --- */}
+        <Card className={`${alerts.total > 0 ? 'border-red-200 bg-red-50' : 'border-slate-200 bg-slate-50'} shadow-sm`}>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className={`text-sm font-bold ${summary.inventoryAlerts.count > 0 ? "text-red-800" : "text-slate-600"}`}>在庫アラート</CardTitle>
-            <AlertCircle className={`h-5 w-5 ${summary.inventoryAlerts.count > 0 ? "text-red-600" : "text-slate-400"}`} />
+            <CardTitle className={`text-sm font-bold ${alerts.total > 0 ? 'text-red-800' : 'text-slate-600'}`}>在庫アラート</CardTitle>
+            <AlertCircle className={`h-5 w-5 ${alerts.total > 0 ? 'text-red-600' : 'text-slate-400'}`} />
           </CardHeader>
           <CardContent>
-            <div className={`text-3xl font-black ${summary.inventoryAlerts.count > 0 ? "text-red-700" : "text-slate-800"}`}>
-              {summary.inventoryAlerts.count} <span className="text-lg font-normal">件</span>
+            <div className={`text-3xl font-black ${alerts.total > 0 ? 'text-red-700' : 'text-slate-700'}`}>{alerts.total} <span className="text-lg font-normal">件</span></div>
+            <div className={`text-sm mt-2 font-bold ${alerts.total > 0 ? 'text-red-600' : 'text-slate-400'}`}>
+              {alerts.total > 0 ? (
+                <>
+                  {shortageText && <div>{shortageText}</div>}
+                  {warningText && <div>{warningText}</div>}
+                </>
+              ) : (
+                "すべて安全在庫を満たしています"
+              )}
             </div>
-            <p className={`text-sm mt-2 font-medium truncate ${summary.inventoryAlerts.count > 0 ? "text-red-600" : "text-slate-500"}`}>
-              {summary.inventoryAlerts.count > 0 ? `不足: ${summary.inventoryAlerts.items.join(", ")}` : "全品目 充足"}
-            </p>
           </CardContent>
         </Card>
 
-        {/* 本日の製造予定 */}
-        <Card className="shadow-sm border-slate-200">
+        {/* --- 本日の製造予定 --- */}
+        <Card className="shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-bold text-slate-600">本日の製造予定</CardTitle>
-            <Package className="h-5 w-5 text-slate-400" />
+            <Package className="h-5 w-5 text-blue-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-black text-slate-800">
-              {summary.todayProduction.cs} <span className="text-lg font-normal text-slate-600">c/s</span>
-            </div>
-            <p className="text-sm text-slate-500 mt-2 truncate">
-              {summary.todayProduction.products.length > 0 ? summary.todayProduction.products.join(", ") : "予定なし"}
-            </p>
+            <div className="text-3xl font-black text-blue-900">{todayProd.totalCs} <span className="text-lg font-normal text-slate-600">c/s</span></div>
+            <p className="text-sm text-slate-500 mt-2 font-bold truncate" title={todayProd.detail}>{todayProd.detail}</p>
           </CardContent>
         </Card>
 
-        {/* 本日の出荷予定 */}
-        <Card className="shadow-sm border-slate-200">
+        {/* --- 本日の出荷予定 --- */}
+        <Card className="shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-bold text-slate-600">本日の出荷予定</CardTitle>
-            <Truck className="h-5 w-5 text-slate-400" />
+            <Truck className="h-5 w-5 text-purple-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-black text-slate-800">
-              {summary.todayShipment.cs} <span className="text-lg font-normal text-slate-600">c/s</span>
-            </div>
-            <p className="text-sm text-slate-500 mt-2 truncate">
-              {summary.todayShipment.customers.length > 0 ? `${summary.todayShipment.customers.join(", ")} 他` : "予定なし"}
-            </p>
+            <div className="text-3xl font-black text-purple-900">{todayShip.totalCs} <span className="text-lg font-normal text-slate-600">c/s</span></div>
+            <p className="text-sm text-slate-500 mt-2 font-bold truncate" title={todayShip.detail}>{todayShip.detail}</p>
           </CardContent>
         </Card>
       </div>
 
-      {/* 進行中の受注エリア */}
+      {/* --- 進行中の受注リスト --- */}
       <h2 className="text-xl font-bold mb-4 flex items-center gap-2 text-slate-800">
-        <Calendar className="h-5 w-5 text-blue-600" />
-        進行中の受注状況
+        <Calendar className="h-5 w-5 text-blue-600" /> 進行中・未処理の受注
       </h2>
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         {ongoingOrders.length > 0 ? (
           <div className="divide-y divide-slate-100">
-            {ongoingOrders.map((order) => {
-              const status = getStatusLabel(order.status);
+            {ongoingOrders.map(order => {
+              const isLate = new Date(order.desired_ship_date) < new Date(new Date().setHours(0, 0, 0, 0));
               return (
-                <div key={order.id} className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-50 transition-colors">
+                <div key={order.id} className="p-4 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-50 transition-colors">
                   <div>
-                    <div className="font-bold text-lg text-slate-800">{order.customer_name}</div>
-                    <div className="text-sm text-slate-500 mt-1 flex items-center gap-2">
-                      <span className="bg-slate-100 px-1.5 py-0.5 rounded text-[10px] uppercase font-bold text-slate-500">{order.id.slice(0, 8)}</span>
-                      納品希望: {new Date(order.desired_ship_date).toLocaleDateString()}
+                    <div className="font-bold text-lg text-slate-800">
+                      {order.customers?.name} <span className="text-sm font-normal text-slate-500 ml-2">({order.products?.name} {order.quantity}c/s)</span>
+                    </div>
+                    <div className={`text-sm mt-1 font-bold ${isLate ? 'text-red-600' : 'text-slate-500'}`}>
+                      納期: {new Date(order.desired_ship_date).toLocaleDateString()} {isLate && "(期限超過!)"}
                     </div>
                   </div>
-                  <Badge className={`${status.color} border-none px-3 py-1 text-sm font-bold w-fit shadow-sm`}>
-                    {status.text}
-                  </Badge>
+                  {order.status === 'in_production' ? (
+                    <Badge className="bg-blue-100 text-blue-800 border-none px-3 py-1 text-sm w-fit shadow-sm">製造中あり</Badge>
+                  ) : (
+                    <Badge className="bg-amber-100 text-amber-800 border-none px-3 py-1 text-sm w-fit shadow-sm">未処理 (計画・引当待)</Badge>
+                  )}
                 </div>
               );
             })}
           </div>
         ) : (
-          <div className="p-10 text-center text-slate-400">
-            進行中の受注はありません。
+          <div className="p-8 text-center text-slate-500 font-bold">
+            現在進行中の受注はありません。
           </div>
         )}
       </div>
