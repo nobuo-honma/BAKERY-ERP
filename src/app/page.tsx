@@ -42,7 +42,7 @@ export default function Dashboard() {
       const { data: itemsData } = await supabase
         .from("items")
         .select("name, safety_stock, item_stocks(quantity)");
-      
+
       const alerts = itemsData?.filter(item => {
         const qty = item.item_stocks?.[0]?.quantity || 0;
         return qty < item.safety_stock;
@@ -53,7 +53,7 @@ export default function Dashboard() {
         .from("production_plans")
         .select("planned_cs, products(name)")
         .eq("production_date", today);
-      
+
       const totalProdCs = prodData?.reduce((acc, curr) => acc + (curr.planned_cs || 0), 0) || 0;
       const prodNames = Array.from(new Set(prodData?.map(p => (p.products as any)?.name).filter(Boolean))) as string[];
 
@@ -62,7 +62,7 @@ export default function Dashboard() {
         .from("orders")
         .select("quantity, customers(name)")
         .eq("desired_ship_date", today);
-      
+
       const totalShipCs = shipData?.reduce((acc, curr) => acc + (curr.quantity || 0), 0) || 0;
       const shipCustNames = Array.from(new Set(shipData?.map(s => (s.customers as any)?.name).filter(Boolean))) as string[];
 
@@ -75,17 +75,17 @@ export default function Dashboard() {
         .limit(5);
 
       setSummary({
-        inventoryAlerts: { 
-          count: alerts.length, 
-          items: alerts.slice(0, 3).map(a => a.name) 
+        inventoryAlerts: {
+          count: alerts.length,
+          items: alerts.slice(0, 3).map(a => a.name)
         },
-        todayProduction: { 
-          cs: totalProdCs, 
-          products: prodNames 
+        todayProduction: {
+          cs: totalProdCs,
+          products: prodNames
         },
-        todayShipment: { 
-          cs: totalShipCs, 
-          customers: shipCustNames 
+        todayShipment: {
+          cs: totalShipCs,
+          customers: shipCustNames
         },
       });
 
@@ -132,7 +132,7 @@ export default function Dashboard() {
 
       {/* サマリーカードのグリッド配置 */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        
+
         {/* 在庫アラート */}
         <Card className={`shadow-sm ${summary.inventoryAlerts.count > 0 ? "border-red-200 bg-red-50" : "border-slate-200"}`}>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
