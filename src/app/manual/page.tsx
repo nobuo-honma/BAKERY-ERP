@@ -242,8 +242,8 @@ export default function ManualPage() {
                             onClick={() => setTab(t.key)}
                             className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-bold transition-colors"
                             style={tab === t.key
-                                ? { background: "#1d4ed8", color: "#fff" }
-                                : { background: "#f1f5f9", color: "#475569" }}
+                                ? { backgroundColor: "#1d4ed8", color: "#fff" }
+                                : { backgroundColor: "#f1f5f9", color: "#475569" }}
                         >
                             {t.icon}{t.label}
                         </button>
@@ -929,7 +929,7 @@ export default function ManualPage() {
                                             ["haccp_documents", "HACCP / 機械マニュアル等", "id, title, category, file_url, version", true, "#d1fae5"],
                                         ].map(([name, role, cols, highlight, bg], i) => (
                                             <tr key={name as string}
-                                                style={highlight ? { background: (bg as string) ?? "#eff6ff" } : undefined}
+                                                style={highlight ? { backgroundColor: typeof bg === 'string' ? bg : "#eff6ff" } : undefined}
                                                 className={i % 2 === 0 && !highlight ? "bg-slate-50" : "bg-white"}>
                                                 <td className="px-3 py-2 border border-slate-200 font-bold font-mono text-xs text-slate-800">{name as string}</td>
                                                 <td className="px-3 py-2 border border-slate-200">{role as string}</td>
