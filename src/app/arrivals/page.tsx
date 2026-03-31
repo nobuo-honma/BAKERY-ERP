@@ -7,14 +7,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { ArrowDownToLine, CalendarDays, Loader2, Plus, Printer, ArrowLeft, ChevronLeft, ChevronRight, Edit, Trash2, CheckCircle2, PackageCheck, Lock, FileText } from "lucide-react";
+// ★追加: ExternalLink アイコンを読み込み
+import { ArrowDownToLine, CalendarDays, Loader2, Plus, Printer, ArrowLeft, ChevronLeft, ChevronRight, Edit, Trash2, CheckCircle2, PackageCheck, Lock, FileText, ExternalLink } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useAuth } from "@/contexts/AuthContext";
 
 type Item = { id: string; name: string; item_type: string; unit: string; };
 type Arrival = { id: string; item_id: string; order_date: string; expected_date: string; quantity: number; unit: string; status: string; notes?: string; items?: { name: string; item_type: string } };
 
-// --- 発注書（PDF）用の商品リスト定数 ---
 const hashiyaItems = [
     { code: "", maker: "横山製粉", name: "あすなろミックス", spec: "20kg", unit: "1袋" },
     { code: "", maker: "日本製粉", name: "P15菓子パンミックス", spec: "20kg", unit: "1袋" },
@@ -28,8 +28,7 @@ const hashiyaItems = [
     { code: "", maker: "", name: "アップルチップ", spec: "2kg×6ｐ", unit: "1ケース" },
     { code: "", maker: "", name: "ホワイトチョコチップ", spec: "5kg×2p", unit: "1ケース" },
     { code: "", maker: "ニッテン", name: "FRイースト", spec: "500g×25", unit: "1ケース" },
-    { code: "", maker: "月島食品", name: "ラクトザック", spec: "10kg", unit: "1缶" },
-    { code: "", maker: "", name: "ミルシア", spec: "5kg", unit: "1ケース" },
+    { code: "", maker: "月島食品", name: "ミルシア", spec: "5kg", unit: "1ケース" },
     { code: "", maker: "", name: "ルミナスグランデ", spec: "10kg", unit: "1ケース" },
     { code: "", maker: "", name: "ショコラクリュ ホワイト", spec: "5kg", unit: "1ケース" },
     { code: "", maker: "", name: "ドライストロベリーダイス", spec: "2.5kg×2", unit: "1ケース" },
@@ -46,7 +45,6 @@ const nexusItems = [
 
 export default function ArrivalsPage() {
     const { canEdit } = useAuth();
-    // ★変更: viewMode に 'order_sheet' (発注書プレビュー) を追加
     const [viewMode, setViewMode] = useState<'list' | 'calendar' | 'order_sheet'>('list');
     const [loading, setLoading] = useState(true);
     const [items, setItems] = useState<Item[]>([]);
@@ -65,7 +63,6 @@ export default function ArrivalsPage() {
     const [editNotes, setEditNotes] = useState("");
     const [isProcessing, setIsProcessing] = useState(false);
 
-    // ★追加: 発注書（PDF）作成用のState
     const [orderSheetOpen, setOrderSheetOpen] = useState(false);
     const [orderSupplier, setOrderSupplier] = useState<'hashiya' | 'nexus'>('hashiya');
     const [orderDate, setOrderDate] = useState("");
@@ -139,9 +136,6 @@ export default function ArrivalsPage() {
         return [...blanks, ...days, ...trailingBlanks];
     };
 
-    // =======================================================================
-    // ★追加: 発注書 (PDF) プレビュー＆印刷画面
-    // =======================================================================
     if (viewMode === 'order_sheet') {
         const currentItems = orderSupplier === 'hashiya' ? hashiyaItems : nexusItems;
         const d = new Date(orderDate);
@@ -150,89 +144,31 @@ export default function ArrivalsPage() {
 
         return (
             <div className="bg-slate-200 min-h-screen py-8 print:p-0 print:bg-white flex flex-col items-center">
-                {/* A4印刷用のCSS強制適用 */}
-                <style dangerouslySetInnerHTML={{
-                    __html: `
-          @media print {
-            header, nav { display: none !important; }
-            main { padding: 0 !important; margin: 0 !important; max-width: 100% !important; background: white !important; }
-            @page { size: A4 portrait; margin: 15mm; }
-            body { background-color: white !important; color: black !important; }
-            .print-hide { display: none !important; }
-          }
-        `}} />
-
+                <style dangerouslySetInnerHTML={{ __html: `@media print { header, nav { display: none !important; } main { padding: 0 !important; margin: 0 !important; max-width: 100% !important; background: white !important; } @page { size: A4 portrait; margin: 15mm; } body { background-color: white !important; color: black !important; } .print-hide { display: none !important; } }` }} />
                 <div className="w-[210mm] print:w-full flex justify-between mb-4 print-hide">
-                    <Button variant="outline" onClick={() => setViewMode('list')} className="bg-white text-slate-700 font-bold border-slate-300">
-                        <ArrowLeft className="h-4 w-4 mr-2" /> 戻る
-                    </Button>
-                    <Button onClick={() => window.print()} className="bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-lg">
-                        <Printer className="h-5 w-5 mr-2" /> 印刷する (PDFに保存)
-                    </Button>
+                    <Button variant="outline" onClick={() => setViewMode('list')} className="bg-white text-slate-700 font-bold border-slate-300"><ArrowLeft className="h-4 w-4 mr-2" /> 戻る</Button>
+                    <Button onClick={() => window.print()} className="bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-lg"><Printer className="h-5 w-5 mr-2" /> 印刷する (PDFに保存)</Button>
                 </div>
-
-                {/* 印刷エリア (A4サイズ枠) */}
                 <div className="w-[210mm] min-h-[297mm] bg-white p-12 print:p-0 shadow-xl print:shadow-none text-black font-sans box-border">
                     <h1 className="text-3xl font-bold tracking-[1.5em] text-center mb-16 ml-[1.5em]">発注書</h1>
-
                     <div className="flex justify-between items-start mb-12">
-                        <div className="text-xl font-bold">
-                            {orderSupplier === 'hashiya' ? "橋谷㈱" : "㈱ネクス"}　御中
-                        </div>
-                        <div className="text-sm text-right leading-relaxed font-medium">
-                            社会福祉法人　小樽高島福祉会<br />
-                            ワークセンター・やまびこ<br /><br />
-                            TEL　0134-21-0011<br />
-                            FAX　0134-21-0022<br /><br />
-                            担当者　本間
-                        </div>
+                        <div className="text-xl font-bold">{orderSupplier === 'hashiya' ? "橋谷㈱" : "㈱ネクス"}　御中</div>
+                        <div className="text-sm text-right leading-relaxed font-medium">社会福祉法人　小樽高島福祉会<br />ワークセンター・やまびこ<br /><br />TEL　0134-21-0011<br />FAX　0134-21-0022<br /><br />担当者　本間</div>
                     </div>
-
                     <div className="mb-6 space-y-3 text-sm font-medium">
-                        <div className="flex">
-                            <div className="w-28">発注日</div>
-                            <div>{dateStr}</div>
-                        </div>
-                        {orderSupplier === 'hashiya' && (
-                            <div className="flex">
-                                <div className="w-28">納期希望日</div>
-                                <div>{deliveryInfo}</div>
-                            </div>
-                        )}
+                        <div className="flex"><div className="w-28">発注日</div><div>{dateStr}</div></div>
+                        {orderSupplier === 'hashiya' && <div className="flex"><div className="w-28">納期希望日</div><div>{deliveryInfo}</div></div>}
                     </div>
-
                     <table className="w-full border-collapse border-2 border-black text-sm">
                         <thead>
-                            <tr className="bg-white">
-                                <th className="border border-black py-2 px-1 w-[12%] font-medium">コード</th>
-                                <th className="border border-black py-2 px-1 w-[18%] font-medium">メーカー</th>
-                                <th className="border border-black py-2 px-1 w-[35%] font-medium">商品名</th>
-                                <th className="border border-black py-2 px-1 w-[15%] font-medium">規格</th>
-                                <th className="border border-black py-2 px-1 w-[8%] font-medium">単位</th>
-                                <th className="border border-black py-2 px-1 w-[12%] font-medium">発注数量</th>
-                            </tr>
+                            <tr className="bg-white"><th className="border border-black py-2 px-1 w-[12%] font-medium">コード</th><th className="border border-black py-2 px-1 w-[18%] font-medium">メーカー</th><th className="border border-black py-2 px-1 w-[35%] font-medium">商品名</th><th className="border border-black py-2 px-1 w-[15%] font-medium">規格</th><th className="border border-black py-2 px-1 w-[8%] font-medium">単位</th><th className="border border-black py-2 px-1 w-[12%] font-medium">発注数量</th></tr>
                         </thead>
                         <tbody>
                             {currentItems.map((item, idx) => {
-                                const key = `${item.name}-${item.spec}`;
-                                const qty = orderQuantities[key] || "";
-                                return (
-                                    <tr key={idx} className="h-9">
-                                        <td className="border border-black px-2 text-center">{item.code}</td>
-                                        <td className="border border-black px-2">{item.maker}</td>
-                                        <td className="border border-black px-2">{item.name}</td>
-                                        <td className="border border-black px-2 text-right">{item.spec}</td>
-                                        <td className="border border-black px-2 text-center">{item.unit}</td>
-                                        <td className="border border-black px-2 text-center font-bold text-lg">{qty}</td>
-                                    </tr>
-                                );
+                                const key = `${item.name}-${item.spec}`; const qty = orderQuantities[key] || "";
+                                return (<tr key={idx} className="h-9"><td className="border border-black px-2 text-center">{item.code}</td><td className="border border-black px-2">{item.maker}</td><td className="border border-black px-2">{item.name}</td><td className="border border-black px-2 text-right">{item.spec}</td><td className="border border-black px-2 text-center">{item.unit}</td><td className="border border-black px-2 text-center font-bold text-lg">{qty}</td></tr>);
                             })}
-                            {/* 空行を追加して表の長さを整える (全体で22行程度にする) */}
-                            {Array.from({ length: Math.max(0, 22 - currentItems.length) }).map((_, idx) => (
-                                <tr key={`empty-${idx}`} className="h-9">
-                                    <td className="border border-black"></td><td className="border border-black"></td><td className="border border-black"></td><td className="border border-black"></td><td className="border border-black"></td><td className="border border-black"></td>
-                                </tr>
-                            ))}
+                            {Array.from({ length: Math.max(0, 22 - currentItems.length) }).map((_, idx) => (<tr key={`empty-${idx}`} className="h-9"><td className="border border-black"></td><td className="border border-black"></td><td className="border border-black"></td><td className="border border-black"></td><td className="border border-black"></td><td className="border border-black"></td></tr>))}
                         </tbody>
                     </table>
                 </div>
@@ -240,9 +176,6 @@ export default function ArrivalsPage() {
         );
     }
 
-    // =======================================================================
-    // カレンダー画面の描画
-    // =======================================================================
     if (viewMode === 'calendar') {
         const daysArray = getCalendarDays(); const currentYear = calendarMonth.getFullYear(); const currentMonthStr = String(calendarMonth.getMonth() + 1).padStart(2, '0');
         const startDate = `${currentYear}-${currentMonthStr}-01`; const endDate = new Date(currentYear, calendarMonth.getMonth() + 1, 0).toISOString().split('T')[0];
@@ -314,8 +247,13 @@ export default function ArrivalsPage() {
                                     <div className="flex-1 space-y-2.5 py-1 min-h-[3rem]">
                                         {dayArrivals.map(arr => (
                                             <div key={arr.id} onClick={() => canEdit && openEditDialog(arr)} className={`${arr.status === 'arrived' ? "bg-green-50 border-green-300" : "bg-blue-50 border-blue-200"} border rounded p-2.5 text-xs shadow-sm relative group ${canEdit ? 'cursor-pointer hover:bg-slate-50' : ''}`}>
+                                                <div className="flex justify-between items-start mb-1.5 border-b border-white/40 pb-1.5">
+                                                    <div className="text-[10px] text-slate-500 font-bold">{arr.items?.item_type === 'raw_material' ? '原料' : '資材'}</div>
+                                                    {arr.status === 'arrived' ? <span className="text-[10px] bg-green-600 text-white px-1.5 rounded font-bold flex items-center gap-0.5"><CheckCircle2 className="h-2.5 w-2.5" /> 入荷済</span> : <span className="text-[10px] bg-blue-500 text-white px-1.5 rounded font-bold flex items-center gap-0.5"><PackageCheck className="h-2.5 w-2.5" /> 発注済</span>}
+                                                </div>
                                                 <div className="font-bold text-slate-800 text-sm mb-1.5">{arr.items?.name}</div>
                                                 <div className="flex justify-between items-end">
+                                                    <div className="text-[10px] text-slate-500 italic max-w-[60%] truncate bg-white/50 p-1 rounded">{arr.notes || "-"}</div>
                                                     <div className="font-black text-blue-700 text-lg">{arr.quantity.toLocaleString()} <span className="font-normal text-xs text-slate-500">{arr.unit}</span></div>
                                                 </div>
                                             </div>
@@ -336,17 +274,21 @@ export default function ArrivalsPage() {
     // =======================================================================
     return (
         <div className="bg-transparent">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+            <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 mb-6">
                 <div className="flex items-center gap-4">
                     <h1 className="text-2xl font-bold flex items-center gap-2 text-slate-800"><ArrowDownToLine className="h-6 w-6 text-blue-600" /> 入荷管理</h1>
                     {!canEdit && <Badge variant="outline" className="bg-slate-100 text-slate-500 border-slate-300 px-3 py-1 shadow-sm hidden md:flex"><Lock className="w-3 h-3 mr-1" /> 閲覧モード</Badge>}
                 </div>
-                <div className="flex gap-2 w-full md:w-auto">
-                    {/* ★追加: 発注書(PDF)作成ボタン */}
-                    <Button onClick={() => { setOrderQuantities({}); setOrderSheetOpen(true); }} className="w-full md:w-auto bg-slate-800 hover:bg-slate-900 text-white font-bold shadow-sm h-12 md:h-10">
+                <div className="flex flex-wrap gap-2 w-full xl:w-auto">
+                    {/* ★追加: ネット注文サイトを開くボタン */}
+                    <Button onClick={() => window.open("https://tano.mu/item?page=1", "_blank")} className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-sm h-12 md:h-10">
+                        <ExternalLink className="h-4 w-4 mr-2" /> 大槻食材へ
+                    </Button>
+
+                    <Button onClick={() => { setOrderQuantities({}); setOrderSheetOpen(true); }} className="w-full sm:w-auto bg-slate-800 hover:bg-slate-900 text-white font-bold shadow-sm h-12 md:h-10">
                         <FileText className="h-4 w-4 mr-2" /> 発注書(PDF)作成
                     </Button>
-                    <Button onClick={() => setViewMode('calendar')} variant="outline" className="w-full md:w-auto border-blue-300 text-blue-700 hover:bg-blue-50 gap-2 font-bold shadow-sm h-12 md:h-10">
+                    <Button onClick={() => setViewMode('calendar')} variant="outline" className="w-full sm:w-auto border-blue-300 text-blue-700 hover:bg-blue-50 gap-2 font-bold shadow-sm h-12 md:h-10">
                         <CalendarDays className="h-5 w-5" /> カレンダー表示
                     </Button>
                 </div>
@@ -395,54 +337,6 @@ export default function ArrivalsPage() {
                 </div>
             </div>
 
-            {/* --- 発注書（PDF）作成用 モーダル --- */}
-            <Dialog open={orderSheetOpen} onOpenChange={setOrderSheetOpen}>
-                <DialogContent className="w-[95vw] max-w-2xl bg-white max-h-[90vh] overflow-y-auto">
-                    <DialogHeader><DialogTitle className="flex items-center gap-2"><FileText className="w-5 h-5 text-blue-600" /> 発注書 (PDF) の作成</DialogTitle></DialogHeader>
-                    <div className="space-y-4 mt-2">
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 mb-1">発注先</label>
-                                <select value={orderSupplier} onChange={e => { setOrderSupplier(e.target.value as any); setOrderQuantities({}); }} className="w-full border border-blue-200 p-2 rounded-md font-bold">
-                                    <option value="hashiya">橋谷㈱</option><option value="nexus">㈱ネクス</option>
-                                </select>
-                            </div>
-                            <div><label className="block text-xs font-bold text-slate-500 mb-1">発注日</label><Input type="date" value={orderDate} onChange={e => setOrderDate(e.target.value)} /></div>
-                        </div>
-                        {orderSupplier === 'hashiya' && (
-                            <div><label className="block text-xs font-bold text-slate-500 mb-1">納期希望日</label><Input value={deliveryInfo} onChange={e => setDeliveryInfo(e.target.value)} /></div>
-                        )}
-
-                        <div className="border rounded-md overflow-hidden shadow-sm">
-                            <Table className="text-sm">
-                                <TableHeader className="bg-slate-50">
-                                    <TableRow><TableHead>商品名</TableHead><TableHead>規格 / 単位</TableHead><TableHead className="w-24 text-center">発注数量</TableHead></TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {(orderSupplier === 'hashiya' ? hashiyaItems : nexusItems).map(item => {
-                                        const key = `${item.name}-${item.spec}`;
-                                        return (
-                                            <TableRow key={key} className="hover:bg-slate-50">
-                                                <TableCell className="font-bold text-slate-800 py-2">{item.name}</TableCell>
-                                                <TableCell className="py-2 text-slate-500 text-xs">{item.spec} <br /> {item.unit}</TableCell>
-                                                <TableCell className="py-1">
-                                                    <Input type="number" min="0" value={orderQuantities[key] || ""} onChange={e => setOrderQuantities({ ...orderQuantities, [key]: e.target.value })} className="h-8 text-right font-bold text-blue-700 focus-visible:ring-blue-500" />
-                                                </TableCell>
-                                            </TableRow>
-                                        );
-                                    })}
-                                </TableBody>
-                            </Table>
-                        </div>
-                    </div>
-                    <DialogFooter className="mt-4 pt-4 border-t">
-                        <Button variant="outline" onClick={() => setOrderSheetOpen(false)}>キャンセル</Button>
-                        <Button onClick={() => { setOrderSheetOpen(false); setViewMode('order_sheet'); }} className="bg-blue-600 hover:bg-blue-700 text-white font-bold"><Printer className="w-4 h-4 mr-2" /> プレビュー＆印刷へ</Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
-
-            {/* --- 既存の入荷詳細モーダル --- */}
             <Dialog open={!!editingArrival} onOpenChange={(open) => !open && setEditingArrival(null)}>
                 <DialogContent className="max-w-md bg-white">
                     <DialogHeader><DialogTitle className="flex justify-between items-center"><span>入荷予定の詳細 / 処理</span></DialogTitle></DialogHeader>
@@ -453,7 +347,7 @@ export default function ArrivalsPage() {
                                 <div><label className="block text-xs font-bold text-slate-500 mb-1">入荷予定日</label><Input type="date" value={editExpectedDate} onChange={e => setEditExpectedDate(e.target.value)} disabled={editingArrival.status === 'arrived' || !canEdit} className="h-10 md:h-9" /></div>
                                 <div><label className="block text-xs font-bold text-slate-500 mb-1">数量 ({editingArrival.unit})</label><Input type="number" value={editQuantity} onChange={e => setEditQuantity(e.target.value === "" ? "" : Number(e.target.value))} disabled={editingArrival.status === 'arrived' || !canEdit} className="h-10 md:h-9 text-right font-bold text-lg text-blue-700" /></div>
                             </div>
-                            <div><label className="block text-xs font-bold text-slate-500 mb-1">備考</label><Input value={editNotes} onChange={e => setEditNotes(e.target.value)} disabled={editingArrival.status === 'arrived' || !canEdit} className="h-10 md:h-9" /></div>
+                            <div><label className="block text-xs font-bold text-slate-500 mb-1">備考</label><Input value={editNotes} onChange={e => setEditNotes(e.target.value)} disabled={editingArrival.status === 'arrived' || !canEdit} className="h-10 md:h-9" placeholder="備考を入力..." /></div>
 
                             {canEdit && (
                                 <div className="pt-4 border-t flex flex-col gap-3">
@@ -461,6 +355,8 @@ export default function ArrivalsPage() {
                                     {editingArrival.status === 'pending' && <Button onClick={handleCompleteArrival} disabled={isProcessing} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold h-12 shadow-sm text-base"><ArrowDownToLine className="h-5 w-5 mr-2" /> 入荷済にする (在庫加算)</Button>}
                                 </div>
                             )}
+                            {editingArrival.status === 'arrived' && <div className="text-center text-sm font-bold text-green-700 bg-green-50 py-3 rounded-md border border-green-200">このデータは入荷済のため、在庫へ加算されています。</div>}
+                            {!canEdit && editingArrival.status !== 'arrived' && <div className="text-center text-sm font-bold text-slate-500 bg-slate-50 py-3 rounded-md"><Lock className="w-4 h-4 inline mr-1" />閲覧モードのため処理はできません</div>}
                         </div>
                     )}
                 </DialogContent>
