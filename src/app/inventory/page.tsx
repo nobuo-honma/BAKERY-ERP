@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import { Package, Wheat, Box, Boxes, ClipboardEdit, ArrowRight, Save, Loader2, AlertCircle, CheckCircle2, ListChecks, TrendingUp, Filter, Lock } from "lucide-react";
+import { Package, Wheat, Box, Boxes, ClipboardEdit, ArrowRight, Save, Loader2, AlertCircle, CheckCircle2, ListChecks, TrendingUp, Filter, Lock, Printer, ArrowLeft } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 
 type ItemStock = { id: string; name: string; item_type: string; unit: string; safety_stock: number; current_qty: number; };
@@ -18,7 +18,10 @@ type AdjustmentHistory = { id: string; adjusted_at: string; items?: { name: stri
 
 export default function InventoryPage() {
   const { canEdit } = useAuth();
+  // ★追加: 印刷モード用のState
+  const [viewMode, setViewMode] = useState<'list' | 'print'>('list');
   const [loading, setLoading] = useState(true);
+
   const [rawMaterials, setRawMaterials] = useState<ItemStock[]>([]);
   const [materials, setMaterials] = useState<ItemStock[]>([]);
   const [productStocks, setProductStocks] = useState<ProductStock[]>([]);
@@ -50,15 +53,8 @@ export default function InventoryPage() {
 
     if (itemsData) {
       const formattedItems = itemsData.map((item: any) => {
-        // ★修正: 配列で返ってきた場合と、オブジェクトで返ってきた場合の両方に対応
-        const qty = Array.isArray(item.item_stocks)
-          ? (item.item_stocks[0]?.quantity || 0)
-          : (item.item_stocks?.quantity || 0);
-
-        return {
-          id: item.id, name: item.name, item_type: item.item_type, unit: item.unit, safety_stock: item.safety_stock,
-          current_qty: qty
-        };
+        const qty = Array.isArray(item.item_stocks) ? (item.item_stocks[0]?.quantity || 0) : (item.item_stocks?.quantity || 0);
+        return { id: item.id, name: item.name, item_type: item.item_type, unit: item.unit, safety_stock: item.safety_stock, current_qty: qty };
       });
       setRawMaterials(formattedItems.filter(i => i.item_type === 'raw_material'));
       setMaterials(formattedItems.filter(i => i.item_type === 'material'));
@@ -264,15 +260,131 @@ export default function InventoryPage() {
     </>
   );
 
+  // =======================================================================
+  // ★追加: 在庫一覧（棚卸表）のPDFプレビュー・印刷画面
+  // =======================================================================
+  if (viewMode === 'print') {
+    const todayStr = new Date().toLocaleDateString('ja-JP');
+
+    // 原材料・資材・製品をすべて一つのリストにまとめる
+    const printItems = [
+      ...rawMaterials.map(i => ({ id: i.id, category: '原材料', name: i.name, qty: `${i.current_qty.toLocaleString(undefined, { maximumFractionDigits: 1 })} ${i.unit}`, rawQty: i.current_qty, expiry: undefined as string | undefined })),
+      ...materials.map(i => ({ id: i.id, category: '資材', name: i.name, qty: `${i.current_qty.toLocaleString()} ${i.unit}`, rawQty: i.current_qty, expiry: undefined as string | undefined })),
+      ...productStocks.map(p => {
+        const u = p.products.unit_per_cs || 24;
+        const cs = Math.floor(p.total_pieces / u);
+        const pc = p.total_pieces % u;
+        return {
+          id: p.lot_code, category: '製品 (Lot別)',
+          name: `${p.products.name} (${p.products.variant_name})`,
+          qty: `${cs} c/s${pc > 0 ? ` ${pc} p` : ''}`,
+          rawQty: p.total_pieces,
+          expiry: new Date(p.expiry_date).toLocaleDateString()
+        };
+      })
+    ];
+
+    // 1ページあたり約35行で分割
+    const chunkedItems = [];
+    for (let i = 0; i < printItems.length; i += 35) {
+      chunkedItems.push(printItems.slice(i, i + 35));
+    }
+
+    return (
+      <div className="bg-slate-200 min-h-screen py-8 print:p-0 print:bg-white flex flex-col items-center">
+        <style dangerouslySetInnerHTML={{
+          __html: `
+          @media print {
+            header, nav { display: none !important; }
+            main { padding: 0 !important; margin: 0 !important; max-width: 100% !important; background: white !important; }
+            @page { size: A4 portrait; margin: 10mm; }
+            body { background-color: white !important; color: black !important; }
+            .print-hide { display: none !important; }
+            .page-break { page-break-after: always; }
+          }
+        `}} />
+
+        <div className="w-[210mm] print:w-full flex justify-between mb-4 print-hide">
+          <Button variant="outline" onClick={() => setViewMode('list')} className="bg-white text-slate-700 font-bold border-slate-300">
+            <ArrowLeft className="h-4 w-4 mr-2" /> 戻る
+          </Button>
+          <Button onClick={() => window.print()} className="bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-lg">
+            <Printer className="h-5 w-5 mr-2" /> 印刷する (PDFに保存)
+          </Button>
+        </div>
+
+        {chunkedItems.length === 0 ? (
+          <div className="w-[210mm] bg-white p-8 text-center text-slate-500 font-bold shadow-xl">データがありません</div>
+        ) : (
+          chunkedItems.map((chunk, pageIdx) => (
+            <div key={pageIdx} className={`w-[210mm] min-h-[297mm] bg-white p-10 print:p-0 shadow-xl print:shadow-none text-black font-sans box-border flex flex-col ${pageIdx < chunkedItems.length - 1 ? 'page-break mb-8 print:mb-0' : ''}`}>
+
+              <div className="flex justify-between items-end mb-4 border-b-2 border-black pb-2">
+                <h1 className="text-2xl font-bold tracking-widest">在庫一覧 兼 実地棚卸表</h1>
+                <div className="text-sm font-medium">作成日: {todayStr}　({pageIdx + 1} / {chunkedItems.length} ページ)</div>
+              </div>
+
+              <table className="w-full border-collapse border-[2px] border-black text-sm flex-1">
+                <thead>
+                  <tr className="bg-gray-100">
+                    <th className="border border-black py-1.5 w-[15%] font-medium">ID / Lot</th>
+                    <th className="border border-black py-1.5 w-[12%] font-medium">区分</th>
+                    <th className="border border-black py-1.5 w-[33%] font-medium">品目名 / 製品名</th>
+                    <th className="border border-black py-1.5 w-[20%] font-medium">システム在庫</th>
+                    <th className="border border-black py-1.5 w-[20%] font-medium">実数記入欄</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {chunk.map((item, idx) => (
+                    <tr key={idx} className="h-7 text-[13px]">
+                      <td className="border border-black px-2 text-center font-mono">{item.id}</td>
+                      <td className="border border-black px-2 text-center text-xs">{item.category}</td>
+                      <td className="border border-black px-2 font-bold">
+                        {item.name}
+                        {item.expiry && <span className="text-[10px] font-normal ml-2 text-gray-500">(期限: {item.expiry})</span>}
+                      </td>
+                      <td className="border border-black px-2 text-right font-medium">{item.qty}</td>
+                      <td className="border border-black px-2 bg-gray-50/50"></td>
+                    </tr>
+                  ))}
+                  {/* 空行を追加して表の下端を揃える */}
+                  {Array.from({ length: Math.max(0, 35 - chunk.length) }).map((_, idx) => (
+                    <tr key={`empty-${idx}`} className="h-7">
+                      <td className="border border-black"></td><td className="border border-black"></td><td className="border border-black"></td><td className="border border-black"></td><td className="border border-black"></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              <div className="mt-4 flex justify-end gap-4 text-sm font-medium">
+                <div className="border border-black w-48 h-20 flex flex-col">
+                  <div className="border-b border-black text-center py-0.5 bg-gray-100">棚卸 担当者</div>
+                </div>
+                <div className="border border-black w-48 h-20 flex flex-col">
+                  <div className="border-b border-black text-center py-0.5 bg-gray-100">システム入力 担当者</div>
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    );
+  }
+
+
   if (loading) return <div className="flex justify-center items-center h-64"><Loader2 className="animate-spin h-8 w-8 text-slate-500" /></div>;
 
   return (
     <div className="bg-slate-50 min-h-screen md:bg-transparent -mx-4 px-4 md:mx-0 md:px-0">
-      <div className="flex justify-between items-center mb-4 md:mb-6 pt-4 md:pt-0">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4 md:mb-6 pt-4 md:pt-0">
         <div className="flex items-center gap-4">
           <h1 className="text-xl md:text-2xl font-black flex items-center gap-2 text-slate-800"><Package className="h-6 w-6 text-blue-600" /> 在庫管理・棚卸</h1>
           {!canEdit && <Badge variant="outline" className="bg-slate-100 text-slate-500 border-slate-300 px-3 py-1 shadow-sm hidden md:flex"><Lock className="w-3 h-3 mr-1" /> 閲覧モード</Badge>}
         </div>
+        {/* ★追加: 在庫表の印刷ボタン */}
+        <Button onClick={() => setViewMode('print')} className="w-full md:w-auto bg-slate-800 hover:bg-slate-900 text-white font-bold shadow-sm h-12 md:h-10">
+          <Printer className="h-4 w-4 mr-2" /> 在庫表(PDF)を印刷
+        </Button>
       </div>
 
       <Tabs defaultValue="raw" className="w-full">
@@ -408,7 +520,7 @@ export default function InventoryPage() {
                     <TableRow key={f.item.id} className="hover:bg-slate-50"><TableCell className="sticky left-0 bg-white font-bold text-slate-800 border-r z-10 shadow-[2px_0_5px_rgba(0,0,0,0.05)] truncate max-w-[200px]" title={f.item.name}>{f.item.name} <span className="text-[10px] font-normal text-slate-500 block">({f.item.unit})</span></TableCell><TableCell className="text-right font-black text-slate-700 border-r bg-slate-50">{f.item.current_qty.toLocaleString(undefined, { maximumFractionDigits: 1 })}</TableCell>
                       {forecastResult.dates.map(date => {
                         const day = f.days[date]; const isShort = day.endQty < 0; const isWarning = !isShort && f.item.safety_stock > 0 && day.endQty < f.item.safety_stock;
-                        return (<TableCell key={date} className={`border-r p-1 align-top ${isShort ? 'bg-red-50 border-red-200' : isWarning ? 'bg-amber-50/50' : ''}`}><div className="flex flex-col justify-between h-full min-h-12"><div className="flex justify-between w-full text-[10px] px-1 font-bold"><span className="text-blue-600">{day.inQty > 0 ? `+${day.inQty.toLocaleString(undefined, { maximumFractionDigits: 1 })}` : ''}</span><span className="text-red-500">{day.outQty > 0 ? `-${day.outQty.toLocaleString(undefined, { maximumFractionDigits: 1 })}` : ''}</span></div><div className={`text-right font-black text-sm px-1 mt-1 ${isShort ? 'text-red-700' : 'text-slate-800'}`}>{day.endQty.toLocaleString(undefined, { maximumFractionDigits: 1 })}</div></div></TableCell>);
+                        return (<TableCell key={date} className={`border-r p-1 align-top ${isShort ? 'bg-red-50 border-red-200' : isWarning ? 'bg-amber-50/50' : ''}`}><div className="flex flex-col justify-between h-full min-h-[3rem]"><div className="flex justify-between w-full text-[10px] px-1 font-bold"><span className="text-blue-600">{day.inQty > 0 ? `+${day.inQty.toLocaleString(undefined, { maximumFractionDigits: 1 })}` : ''}</span><span className="text-red-500">{day.outQty > 0 ? `-${day.outQty.toLocaleString(undefined, { maximumFractionDigits: 1 })}` : ''}</span></div><div className={`text-right font-black text-sm px-1 mt-1 ${isShort ? 'text-red-700' : 'text-slate-800'}`}>{day.endQty.toLocaleString(undefined, { maximumFractionDigits: 1 })}</div></div></TableCell>);
                       })}
                     </TableRow>
                   ))}
