@@ -2,7 +2,7 @@
 
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetTrigger } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
-import { Menu, Home, ShoppingCart, Factory, Package, ArrowDownToLine, Truck, Database, BookOpen, ShieldAlert, FileText } from "lucide-react";
+import { Menu, Home, ShoppingCart, Factory, Package, ArrowDownToLine, Truck, Database, BookOpen, ShieldAlert, FileText, Sun, Moon, Beaker } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -16,6 +16,8 @@ export default function Header() {
     { title: "受注管理", href: "/orders", icon: ShoppingCart },
     { title: "製造管理", href: "/production", icon: Factory },
     { title: "在庫管理", href: "/inventory", icon: Package },
+    // ▼ 修正2: ここにキープサンプルを追加！
+    { title: "キープサンプル", href: "/keep-samples", icon: Beaker },
     { title: "入荷管理", href: "/arrivals", icon: ArrowDownToLine },
     { title: "出荷管理", href: "/shipments", icon: Truck },
     { title: "マスタ管理", href: "/master", icon: Database },
