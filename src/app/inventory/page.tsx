@@ -18,7 +18,6 @@ type AdjustmentHistory = { id: string; adjusted_at: string; items?: { name: stri
 
 export default function InventoryPage() {
   const { canEdit } = useAuth();
-  // ★追加: 印刷モード用のState
   const [viewMode, setViewMode] = useState<'list' | 'print'>('list');
   const [loading, setLoading] = useState(true);
 
@@ -77,6 +76,7 @@ export default function InventoryPage() {
     return { label: "充足", color: "bg-green-100 text-green-800 border-none", icon: <CheckCircle2 className="w-3 h-3 mr-1" /> };
   };
 
+  // --- ★変更: 個別棚卸で在庫が0になったら削除 ---
   const handleAdjustmentSubmit = async () => {
     if (actualQty === "" || Number(actualQty) < 0) return;
     setIsProcessing(true);
@@ -87,7 +87,12 @@ export default function InventoryPage() {
         await supabase.from("item_stocks").upsert({ item_id: targetId, quantity: Number(actualQty) }, { onConflict: 'item_id' });
         await supabase.from("inventory_adjustments").insert({ item_id: targetId, before_qty: currentQty, after_qty: Number(actualQty), reason: adjReason });
       } else {
-        await supabase.from("product_stocks").update({ total_pieces: Number(actualQty) }).eq("id", targetId);
+        // ★追加: 製品在庫が0になった場合は削除
+        if (Number(actualQty) <= 0) {
+          await supabase.from("product_stocks").delete().eq("id", targetId);
+        } else {
+          await supabase.from("product_stocks").update({ total_pieces: Number(actualQty) }).eq("id", targetId);
+        }
         await supabase.from("inventory_adjustments").insert({ product_id: productId, lot_code: lotCode, before_qty: currentQty, after_qty: Number(actualQty), reason: adjReason });
       }
       setAdjustmentModal({ ...adjustmentModal, isOpen: false }); setActualQty(""); setAdjReason("定例棚卸"); fetchInventory();
@@ -107,10 +112,11 @@ export default function InventoryPage() {
     }
   };
 
+  // --- ★変更: 一括棚卸で在庫が0になったら削除 ---
   const handleBatchSubmit = async () => {
     setIsProcessing(true);
     try {
-      const itemUpdates = []; const productUpdates = []; const historyInserts = [];
+      const itemUpdates = []; const productUpdates = []; const productDeletes = []; const historyInserts = [];
 
       for (const item of [...rawMaterials, ...materials]) {
         const newVal = batchInputs[item.id];
@@ -123,24 +129,30 @@ export default function InventoryPage() {
       for (const stock of productStocks) {
         const newVal = batchInputs[stock.id];
         if (newVal !== undefined && newVal !== "" && Number(newVal) !== stock.total_pieces) {
-          productUpdates.push({ id: stock.id, total_pieces: Number(newVal) });
+          // ★追加: 0以下の場合は削除配列へ
+          if (Number(newVal) <= 0) {
+            productDeletes.push(stock.id);
+          } else {
+            productUpdates.push({ id: stock.id, total_pieces: Number(newVal) });
+          }
           historyInserts.push({ product_id: stock.product_id, lot_code: stock.lot_code, before_qty: stock.total_pieces, after_qty: Number(newVal), reason: batchReason });
         }
       }
 
-      if (itemUpdates.length === 0 && productUpdates.length === 0) {
+      if (itemUpdates.length === 0 && productUpdates.length === 0 && productDeletes.length === 0) {
         alert("変更された在庫はありません。"); setIsProcessing(false); return;
       }
 
-      if (!confirm(`合計 ${itemUpdates.length + productUpdates.length} 件の在庫を一括で上書き更新しますか？\n(理由は「${batchReason}」として記録されます)`)) {
+      if (!confirm(`合計 ${itemUpdates.length + productUpdates.length + productDeletes.length} 件の在庫を一括で上書き更新しますか？\n(理由は「${batchReason}」として記録されます)`)) {
         setIsProcessing(false); return;
       }
 
       if (itemUpdates.length > 0) await supabase.from('item_stocks').upsert(itemUpdates, { onConflict: 'item_id' });
       if (productUpdates.length > 0) await supabase.from('product_stocks').upsert(productUpdates, { onConflict: 'id' });
+      if (productDeletes.length > 0) await supabase.from('product_stocks').delete().in('id', productDeletes); // ★追加: 一括削除
       if (historyInserts.length > 0) await supabase.from('inventory_adjustments').insert(historyInserts);
 
-      alert(`一括棚卸を完了しました！\n（${itemUpdates.length + productUpdates.length} 件の在庫を更新しました）`);
+      alert(`一括棚卸を完了しました！\n（${itemUpdates.length + productUpdates.length + productDeletes.length} 件の在庫を更新しました）`);
       setIsBatchMode(false); setBatchInputs({}); fetchInventory();
     } catch (err: any) { alert("エラー: " + err.message); }
     setIsProcessing(false);
@@ -214,7 +226,7 @@ export default function InventoryPage() {
                   <TableCell className="text-right font-black text-xl text-slate-700">
                     {isBatchMode ? (
                       <div className="flex justify-end items-center gap-2">
-                        <Input type="number" inputMode="decimal" min="0" step="0.1" value={batchInputs[item.id] !== undefined ? batchInputs[item.id] : ""} onChange={e => setBatchInputs({ ...batchInputs, [item.id]: e.target.value === "" ? "" : Number(e.target.value) })} className={`w-28 text-right font-bold h-10 ${isChanged ? 'border-amber-400 bg-white ring-2 ring-amber-200' : 'border-blue-300 shadow-sm'}`} />
+                        <Input type="number" inputMode="decimal" min="0" step="0.1" value={batchInputs[item.id] !== undefined ? batchInputs[item.id] : ""} onChange={e => setBatchInputs({ ...batchInputs, [item.id]: e.target.value === "" ? "" : Number(e.target.value) })} className={`w-28 text-right font-bold h-9 ${isChanged ? 'border-amber-400 bg-white ring-2 ring-amber-200' : 'border-blue-300 shadow-sm'}`} />
                         {isChanged && <span className="text-xs text-amber-600 font-bold ml-1 w-6 block bg-amber-100 rounded px-1">変更</span>}
                       </div>
                     ) : item.current_qty.toLocaleString(undefined, { maximumFractionDigits: 1 })}
@@ -260,16 +272,12 @@ export default function InventoryPage() {
     </>
   );
 
-  // =======================================================================
-  // ★追加: 在庫一覧（棚卸表）のPDFプレビュー・印刷画面
-  // =======================================================================
   if (viewMode === 'print') {
     const todayStr = new Date().toLocaleDateString('ja-JP');
 
-    // 原材料・資材・製品をすべて一つのリストにまとめる
-    const printItems = [
-      ...rawMaterials.map(i => ({ id: i.id, category: '原材料', name: i.name, qty: `${i.current_qty.toLocaleString(undefined, { maximumFractionDigits: 1 })} ${i.unit}`, rawQty: i.current_qty, expiry: undefined as string | undefined })),
-      ...materials.map(i => ({ id: i.id, category: '資材', name: i.name, qty: `${i.current_qty.toLocaleString()} ${i.unit}`, rawQty: i.current_qty, expiry: undefined as string | undefined })),
+    const printItems: { id: string; category: string; name: string; qty: string; rawQty: number; expiry?: string }[] = [
+      ...rawMaterials.map(i => ({ id: i.id, category: '原材料', name: i.name, qty: `${i.current_qty.toLocaleString(undefined, { maximumFractionDigits: 1 })} ${i.unit}`, rawQty: i.current_qty })),
+      ...materials.map(i => ({ id: i.id, category: '資材', name: i.name, qty: `${i.current_qty.toLocaleString()} ${i.unit}`, rawQty: i.current_qty })),
       ...productStocks.map(p => {
         const u = p.products.unit_per_cs || 24;
         const cs = Math.floor(p.total_pieces / u);
@@ -284,7 +292,6 @@ export default function InventoryPage() {
       })
     ];
 
-    // 1ページあたり約35行で分割
     const chunkedItems = [];
     for (let i = 0; i < printItems.length; i += 35) {
       chunkedItems.push(printItems.slice(i, i + 35));
@@ -347,7 +354,6 @@ export default function InventoryPage() {
                       <td className="border border-black px-2 bg-gray-50/50"></td>
                     </tr>
                   ))}
-                  {/* 空行を追加して表の下端を揃える */}
                   {Array.from({ length: Math.max(0, 35 - chunk.length) }).map((_, idx) => (
                     <tr key={`empty-${idx}`} className="h-7">
                       <td className="border border-black"></td><td className="border border-black"></td><td className="border border-black"></td><td className="border border-black"></td><td className="border border-black"></td>
@@ -371,7 +377,6 @@ export default function InventoryPage() {
     );
   }
 
-
   if (loading) return <div className="flex justify-center items-center h-64"><Loader2 className="animate-spin h-8 w-8 text-slate-500" /></div>;
 
   return (
@@ -381,7 +386,6 @@ export default function InventoryPage() {
           <h1 className="text-xl md:text-2xl font-black flex items-center gap-2 text-slate-800"><Package className="h-6 w-6 text-blue-600" /> 在庫管理・棚卸</h1>
           {!canEdit && <Badge variant="outline" className="bg-slate-100 text-slate-500 border-slate-300 px-3 py-1 shadow-sm hidden md:flex"><Lock className="w-3 h-3 mr-1" /> 閲覧モード</Badge>}
         </div>
-        {/* ★追加: 在庫表の印刷ボタン */}
         <Button onClick={() => setViewMode('print')} className="w-full md:w-auto bg-slate-800 hover:bg-slate-900 text-white font-bold shadow-sm h-12 md:h-10">
           <Printer className="h-4 w-4 mr-2" /> 在庫表(PDF)を印刷
         </Button>
