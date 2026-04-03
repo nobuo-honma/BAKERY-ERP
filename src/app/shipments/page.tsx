@@ -13,8 +13,8 @@ import { useAuth } from "@/contexts/AuthContext";
 type Order = { id: string; order_date: string; planned_ship_date: string; desired_ship_date: string; quantity: number; status: string; product_id: string; customer_order_no?: string; customers?: { name: string }; products?: { name: string; variant_name: string; unit_per_cs: number }; };
 type ProductStock = { id: string; lot_code: string; product_id: string; total_pieces: number; expiry_date: string; };
 
-// ★変更: 出荷実績の型に variant_name を追加
-type Shipment = { id: string; order_id: string; ship_date: string; lot_code: string; qty_cs: number; qty_piece: number; status: string; orders?: { desired_ship_date: string; planned_ship_date: string; customer_order_no?: string; customers?: { name: string }; products?: { name: string; variant_name: string } } };
+// ★変更: 出荷実績の型に product_id を追加
+type Shipment = { id: string; order_id: string; ship_date: string; lot_code: string; qty_cs: number; qty_piece: number; status: string; orders?: { product_id: string; desired_ship_date: string; planned_ship_date: string; customer_order_no?: string; customers?: { name: string }; products?: { name: string; variant_name: string } } };
 
 type OrderGroup = { groupId: string; customerOrderNo: string; plannedShipDate: string; desiredShipDate: string; customerName: string; items: Order[]; isLate: boolean; };
 
@@ -57,8 +57,8 @@ export default function ShipmentsPage() {
       setOrderGroups(Object.values(groups));
     }
 
-    // ★変更: products(name, variant_name) で味の種類も取得する
-    const { data: sData } = await supabase.from("shipments").select("*, orders(desired_ship_date, planned_ship_date, customer_order_no, customers(name), products(name, variant_name))").order("ship_date", { ascending: false }).limit(30);
+    // ★変更: product_id を追加で取得する
+    const { data: sData } = await supabase.from("shipments").select("*, orders(product_id, desired_ship_date, planned_ship_date, customer_order_no, customers(name), products(name, variant_name))").order("ship_date", { ascending: false }).limit(30);
     if (sData) setShipments(sData as any[]);
     setLoading(false);
   }, []);
@@ -144,7 +144,7 @@ export default function ShipmentsPage() {
   };
 
   // =======================================================================
-  // 出荷管理票 (PDFプレビュー)
+  // ★変更: 出荷管理票 (PDFプレビュー) のレイアウト調整
   // =======================================================================
   if (viewMode === 'print') {
     const groupedShipments: Record<string, Shipment[]> = {};
@@ -152,23 +152,18 @@ export default function ShipmentsPage() {
       if (!groupedShipments[s.order_id]) groupedShipments[s.order_id] = [];
       groupedShipments[s.order_id].push(s);
     });
-    const orderChunks = Object.values(groupedShipments);
+
+    // ★追加: 1つの受注に紐づく複数のLotを、Lot番号順（古い順）に並べ替える
+    const orderChunks = Object.values(groupedShipments).map(group => {
+      return group.sort((a, b) => a.lot_code.localeCompare(b.lot_code));
+    });
+
     const chunkedOrders = [];
     for (let i = 0; i < orderChunks.length; i += 3) chunkedOrders.push(orderChunks.slice(i, i + 3));
 
     return (
       <div className="bg-slate-200 min-h-screen py-8 print:p-0 print:bg-white flex flex-col items-center">
-        <style dangerouslySetInnerHTML={{
-          __html: `
-          @media print {
-            header, nav { display: none !important; }
-            main { padding: 0 !important; margin: 0 !important; max-width: 100% !important; background: white !important; }
-            @page { size: A4 portrait; margin: 10mm; }
-            body { background-color: white !important; color: black !important; }
-            .print-hide { display: none !important; }
-            .page-break { page-break-after: always; }
-          }
-        `}} />
+        <style dangerouslySetInnerHTML={{ __html: `@media print { header, nav { display: none !important; } main { padding: 0 !important; margin: 0 !important; max-width: 100% !important; background: white !important; } @page { size: A4 portrait; margin: 10mm; } body { background-color: white !important; color: black !important; } .print-hide { display: none !important; } .page-break { page-break-after: always; } }` }} />
         <div className="w-[210mm] print:w-full flex justify-between mb-4 print-hide">
           <Button variant="outline" onClick={() => setViewMode('list')} className="bg-white text-slate-700 font-bold border-slate-300"><ArrowLeft className="h-4 w-4 mr-2" /> 戻る</Button>
           <div className="flex gap-2">
@@ -198,20 +193,32 @@ export default function ShipmentsPage() {
                     <table className="w-full border-collapse border-[2px] border-black text-sm mb-2 mt-2">
                       <thead><tr><th className="border border-black py-1 w-[12%] font-medium">出荷日</th><th className="border border-black py-1 w-[12%] font-medium">着予定日</th><th className="border border-black py-1 w-[52%] font-medium">出荷先</th><th className="border border-black py-1 w-[12%] font-medium">施設長</th><th className="border border-black py-1 w-[12%] font-medium">担当</th></tr></thead>
                       <tbody><tr>
-                        <td className="border border-black text-center font-bold text-xs tracking-wider">{new Date(first.ship_date).toLocaleDateString('ja-JP')}</td>
+                        {/* ★変更: 高さを h-16 (印鑑が押せるサイズ) に固定 */}
+                        <td className="border border-black h-16 text-center font-bold text-xs tracking-wider">{new Date(first.ship_date).toLocaleDateString('ja-JP')}</td>
                         <td className="border border-black text-center font-bold text-xs tracking-wider">{new Date(first.orders?.desired_ship_date || "").toLocaleDateString('ja-JP')}</td>
                         <td className="border border-black px-2 font-bold text-base tracking-wide">{first.orders?.customers?.name}</td>
-                        <td className="border border-black h-8"></td><td className="border border-black"></td>
+                        <td className="border border-black"></td><td className="border border-black"></td>
                       </tr></tbody>
                     </table>
                     <table className="w-full border-collapse border-[2px] border-black text-[13px] flex-1">
-                      <thead><tr><th className="border border-black py-1 w-[8%] font-medium">注番</th><th className="border border-black py-1 w-[20%] font-medium">出荷種類</th><th className="border border-black py-1 w-[8%] font-medium">出荷数</th><th className="border border-black py-1 w-[18%] font-medium">LotNo.</th><th className="border border-black py-1 w-[9%] font-medium">数量</th><th className="border border-black py-1 w-[18%] font-medium">LotNo.</th><th className="border border-black py-1 w-[9%] font-medium">数量</th><th className="border border-black py-1 w-[10%] font-medium text-[11px] leading-tight">数量確認欄</th></tr></thead>
+                      <thead><tr>
+                        {/* ★変更: 注番の幅を広く、出荷種類の幅を少し狭く調整 */}
+                        <th className="border border-black py-1 w-[14%] font-medium">注番</th>
+                        <th className="border border-black py-1 w-[13%] font-medium">出荷種類</th>
+                        <th className="border border-black py-1 w-[8%] font-medium">出荷数</th>
+                        <th className="border border-black py-1 w-[18%] font-medium">LotNo.</th>
+                        <th className="border border-black py-1 w-[9%] font-medium">数量</th>
+                        <th className="border border-black py-1 w-[18%] font-medium">LotNo.</th>
+                        <th className="border border-black py-1 w-[9%] font-medium">数量</th>
+                        <th className="border border-black py-1 w-[11%] font-medium text-[11px] leading-tight">数量確認欄</th>
+                      </tr></thead>
                       <tbody>
                         <tr className="h-6">
-                          <td className="border border-black text-center text-[10px] font-bold truncate max-w-[40px] px-0.5">{first.orders?.customer_order_no ? first.orders.customer_order_no : first.order_id.slice(-4)}</td>
+                          {/* ★変更: 発注番号が長くても入るように break-all を指定し、フォントサイズを微調整 */}
+                          <td className="border border-black text-center text-[11px] font-bold px-1 break-all">{first.orders?.customer_order_no ? first.orders.customer_order_no : first.order_id.slice(-4)}</td>
 
-                          {/* ★変更: 出荷種類に「味」を表示 */}
-                          <td className="border border-black px-1 font-bold truncate max-w-[120px]">{first.orders?.products?.variant_name}</td>
+                          {/* ★変更: 出荷種類に product_id (例: C3, MA-C3) を印字 */}
+                          <td className="border border-black text-center font-bold text-xs">{first.orders?.product_id}</td>
 
                           <td className="border border-black text-right pr-1 font-bold text-base">{totalCs}<span className="text-[9px] ml-0.5 font-normal">c/s</span></td>
 
@@ -221,7 +228,6 @@ export default function ShipmentsPage() {
                           <td className="border border-black text-center font-bold text-xs tracking-wider">{group.length > 1 ? group[1].lot_code : ""}</td>
                           <td className="border border-black text-right pr-1 font-bold leading-none">{group.length > 1 ? <>{group[1].qty_cs}<span className="text-[9px] font-normal ml-0.5">c/s</span>{group[1].qty_piece > 0 && <span className="text-[9px] font-normal ml-0.5">{group[1].qty_piece}p</span>}</> : <><span className="text-[9px] text-slate-300">c/s</span></>}</td>
 
-                          {/* ★変更: 数量確認欄に総出荷数を表示 */}
                           <td className="border border-black text-right pr-1 font-bold text-base leading-none pt-1.5">{totalCs}<span className="text-[9px] font-normal ml-0.5">c/s</span>{totalP > 0 && <span className="text-[9px] font-normal ml-0.5">{totalP}p</span>}</td>
                         </tr>
                         {Array.from({ length: 9 }).map((_, i) => {
@@ -252,7 +258,7 @@ export default function ShipmentsPage() {
   }
 
   // =======================================================================
-  // 通常リスト画面
+  // 通常のリスト入力画面
   // =======================================================================
   return (
     <div className="bg-transparent">
