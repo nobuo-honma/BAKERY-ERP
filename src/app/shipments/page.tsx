@@ -12,7 +12,9 @@ import { useAuth } from "@/contexts/AuthContext";
 
 type Order = { id: string; order_date: string; planned_ship_date: string; desired_ship_date: string; quantity: number; status: string; product_id: string; customer_order_no?: string; customers?: { name: string }; products?: { name: string; variant_name: string; unit_per_cs: number }; };
 type ProductStock = { id: string; lot_code: string; product_id: string; total_pieces: number; expiry_date: string; };
-type Shipment = { id: string; order_id: string; ship_date: string; lot_code: string; qty_cs: number; qty_piece: number; status: string; orders?: { desired_ship_date: string; planned_ship_date: string; customer_order_no?: string; customers?: { name: string }; products?: { name: string } } };
+
+// ★変更: 出荷実績の型に variant_name を追加
+type Shipment = { id: string; order_id: string; ship_date: string; lot_code: string; qty_cs: number; qty_piece: number; status: string; orders?: { desired_ship_date: string; planned_ship_date: string; customer_order_no?: string; customers?: { name: string }; products?: { name: string; variant_name: string } } };
 
 type OrderGroup = { groupId: string; customerOrderNo: string; plannedShipDate: string; desiredShipDate: string; customerName: string; items: Order[]; isLate: boolean; };
 
@@ -45,7 +47,7 @@ export default function ShipmentsPage() {
         if (!groups[groupKey]) {
           groups[groupKey] = {
             groupId: groupKey, customerOrderNo: o.customer_order_no || "",
-            plannedShipDate: o.planned_ship_date || o.desired_ship_date, // ★出荷予定日ベース
+            plannedShipDate: o.planned_ship_date || o.desired_ship_date,
             desiredShipDate: o.desired_ship_date, customerName: o.customers?.name || "",
             items: [], isLate: new Date(o.planned_ship_date || o.desired_ship_date) < today
           };
@@ -55,7 +57,8 @@ export default function ShipmentsPage() {
       setOrderGroups(Object.values(groups));
     }
 
-    const { data: sData } = await supabase.from("shipments").select("*, orders(desired_ship_date, planned_ship_date, customer_order_no, customers(name), products(name))").order("ship_date", { ascending: false }).limit(30);
+    // ★変更: products(name, variant_name) で味の種類も取得する
+    const { data: sData } = await supabase.from("shipments").select("*, orders(desired_ship_date, planned_ship_date, customer_order_no, customers(name), products(name, variant_name))").order("ship_date", { ascending: false }).limit(30);
     if (sData) setShipments(sData as any[]);
     setLoading(false);
   }, []);
@@ -65,12 +68,13 @@ export default function ShipmentsPage() {
   const handleSelectGroup = async (group: OrderGroup) => {
     setSelectedGroup(group); setShipInputs({}); setIsOrderCompleted(true);
     const productIds = group.items.map(i => i.product_id);
-
-    // ★デフォルトの「実際の出荷日」を、この注文の「出荷予定日」にする親切設計
     setShipDate(group.plannedShipDate || new Date().toISOString().split('T')[0]);
 
-    const { data } = await supabase.from("product_stocks").select("*").in("product_id", productIds).gt("total_pieces", 0).order("expiry_date", { ascending: true });
-    if (data) {
+    const { data, error } = await supabase.from("product_stocks").select("*").in("product_id", productIds).gt("total_pieces", 0).order("expiry_date", { ascending: true });
+    if (error) {
+      console.error("在庫取得エラー:", error);
+      alert("在庫の取得に失敗しました。");
+    } else if (data) {
       const gStocks: Record<string, ProductStock[]> = {};
       (data as ProductStock[]).forEach(s => {
         if (!gStocks[s.product_id]) gStocks[s.product_id] = [];
@@ -114,6 +118,7 @@ export default function ShipmentsPage() {
             const random4 = Math.floor(Math.random() * 10000).toString().padStart(4, "0");
             shipmentInserts.push({ id: `SHP-${shipDate.replace(/-/g, "")}-${random4}`, order_id: order.id, ship_date: shipDate, lot_code: stock.lot_code, qty_cs: inputCs, qty_piece: inputP, status: "shipped" });
             historyInserts.push({ product_id: stock.product_id, lot_code: stock.lot_code, before_qty: stock.total_pieces, after_qty: newTotalPieces, reason: `出荷 (${selectedGroup.customerName}様宛)` });
+
             totalShippedForThisOrder += shipPieces;
           }
         }
@@ -128,15 +133,18 @@ export default function ShipmentsPage() {
       if (isOrderCompleted && completedOrderIds.length > 0) {
         await supabase.from("orders").update({ status: "shipped" }).in("id", completedOrderIds);
         setSelectedGroup(null);
-      } else handleSelectGroup(selectedGroup);
+      } else {
+        handleSelectGroup(selectedGroup);
+      }
 
-      alert("出荷処理が完了し、在庫から正確に減算されました！"); fetchOrders();
+      alert("出荷処理が完了し、在庫から正確に減算されました！");
+      fetchOrders();
     } catch (err: any) { alert("エラー: " + err.message); }
     setIsProcessing(false);
   };
 
   // =======================================================================
-  // ★変更: 出荷管理票 (PDFプレビュー)
+  // 出荷管理票 (PDFプレビュー)
   // =======================================================================
   if (viewMode === 'print') {
     const groupedShipments: Record<string, Shipment[]> = {};
@@ -150,7 +158,17 @@ export default function ShipmentsPage() {
 
     return (
       <div className="bg-slate-200 min-h-screen py-8 print:p-0 print:bg-white flex flex-col items-center">
-        <style dangerouslySetInnerHTML={{ __html: `@media print { header, nav { display: none !important; } main { padding: 0 !important; margin: 0 !important; max-width: 100% !important; background: white !important; } @page { size: A4 portrait; margin: 10mm; } body { background-color: white !important; color: black !important; } .print-hide { display: none !important; } .page-break { page-break-after: always; } }` }} />
+        <style dangerouslySetInnerHTML={{
+          __html: `
+          @media print {
+            header, nav { display: none !important; }
+            main { padding: 0 !important; margin: 0 !important; max-width: 100% !important; background: white !important; }
+            @page { size: A4 portrait; margin: 10mm; }
+            body { background-color: white !important; color: black !important; }
+            .print-hide { display: none !important; }
+            .page-break { page-break-after: always; }
+          }
+        `}} />
         <div className="w-[210mm] print:w-full flex justify-between mb-4 print-hide">
           <Button variant="outline" onClick={() => setViewMode('list')} className="bg-white text-slate-700 font-bold border-slate-300"><ArrowLeft className="h-4 w-4 mr-2" /> 戻る</Button>
           <div className="flex gap-2">
@@ -167,6 +185,7 @@ export default function ShipmentsPage() {
               {chunk.map((group, gIdx) => {
                 const first = group[0];
                 const totalCs = group.reduce((sum, s) => sum + s.qty_cs, 0);
+                const totalP = group.reduce((sum, s) => sum + s.qty_piece, 0);
 
                 return (
                   <div key={gIdx} className="flex-1 flex flex-col border-b-2 border-dashed border-slate-400 pb-6 print:pb-4 last:border-b-0 last:pb-0">
@@ -176,7 +195,6 @@ export default function ShipmentsPage() {
                         <tbody><tr><th className="border border-black px-2 py-0.5 font-medium">ワークセンターやまびこ</th><th className="border border-black px-2 py-0.5 font-medium">制定日</th><td className="border border-black px-3 py-0.5">2021/4/1</td></tr><tr><th className="border border-black px-2 py-0.5 font-medium">文章No.　　YO-29</th><th className="border border-black px-2 py-0.5 font-medium">改定日</th><td className="border border-black px-3 py-0.5">-</td></tr></tbody>
                       </table>
                     </div>
-                    {/* ★変更: 出荷日(実績)と着予定日の印字を正確に */}
                     <table className="w-full border-collapse border-[2px] border-black text-sm mb-2 mt-2">
                       <thead><tr><th className="border border-black py-1 w-[12%] font-medium">出荷日</th><th className="border border-black py-1 w-[12%] font-medium">着予定日</th><th className="border border-black py-1 w-[52%] font-medium">出荷先</th><th className="border border-black py-1 w-[12%] font-medium">施設長</th><th className="border border-black py-1 w-[12%] font-medium">担当</th></tr></thead>
                       <tbody><tr>
@@ -190,15 +208,21 @@ export default function ShipmentsPage() {
                       <thead><tr><th className="border border-black py-1 w-[8%] font-medium">注番</th><th className="border border-black py-1 w-[20%] font-medium">出荷種類</th><th className="border border-black py-1 w-[8%] font-medium">出荷数</th><th className="border border-black py-1 w-[18%] font-medium">LotNo.</th><th className="border border-black py-1 w-[9%] font-medium">数量</th><th className="border border-black py-1 w-[18%] font-medium">LotNo.</th><th className="border border-black py-1 w-[9%] font-medium">数量</th><th className="border border-black py-1 w-[10%] font-medium text-[11px] leading-tight">数量確認欄</th></tr></thead>
                       <tbody>
                         <tr className="h-6">
-                          {/* ★変更: 発注番号がある場合は発注番号、なければID下4桁 */}
                           <td className="border border-black text-center text-[10px] font-bold truncate max-w-[40px] px-0.5">{first.orders?.customer_order_no ? first.orders.customer_order_no : first.order_id.slice(-4)}</td>
-                          <td className="border border-black px-1 font-bold truncate max-w-[120px]">{first.orders?.products?.name}</td>
+
+                          {/* ★変更: 出荷種類に「味」を表示 */}
+                          <td className="border border-black px-1 font-bold truncate max-w-[120px]">{first.orders?.products?.variant_name}</td>
+
                           <td className="border border-black text-right pr-1 font-bold text-base">{totalCs}<span className="text-[9px] ml-0.5 font-normal">c/s</span></td>
+
                           <td className="border border-black text-center font-bold text-xs tracking-wider">{first.lot_code}</td>
                           <td className="border border-black text-right pr-1 font-bold leading-none">{first.qty_cs}<span className="text-[9px] font-normal ml-0.5">c/s</span>{first.qty_piece > 0 && <span className="text-[9px] font-normal ml-0.5">{first.qty_piece}p</span>}</td>
+
                           <td className="border border-black text-center font-bold text-xs tracking-wider">{group.length > 1 ? group[1].lot_code : ""}</td>
                           <td className="border border-black text-right pr-1 font-bold leading-none">{group.length > 1 ? <>{group[1].qty_cs}<span className="text-[9px] font-normal ml-0.5">c/s</span>{group[1].qty_piece > 0 && <span className="text-[9px] font-normal ml-0.5">{group[1].qty_piece}p</span>}</> : <><span className="text-[9px] text-slate-300">c/s</span></>}</td>
-                          <td className="border border-black text-right pr-1 pt-2 leading-none"><span className="text-[9px] text-slate-400">c/s</span></td>
+
+                          {/* ★変更: 数量確認欄に総出荷数を表示 */}
+                          <td className="border border-black text-right pr-1 font-bold text-base leading-none pt-1.5">{totalCs}<span className="text-[9px] font-normal ml-0.5">c/s</span>{totalP > 0 && <span className="text-[9px] font-normal ml-0.5">{totalP}p</span>}</td>
                         </tr>
                         {Array.from({ length: 9 }).map((_, i) => {
                           const lotLeft = group[i * 2 + 2]; const lotRight = group[i * 2 + 3];
@@ -209,7 +233,7 @@ export default function ShipmentsPage() {
                               <td className="border border-black text-right pr-1 font-bold leading-none">{lotLeft ? <>{lotLeft.qty_cs}<span className="text-[9px] font-normal ml-0.5">c/s</span>{lotLeft.qty_piece > 0 && <span className="text-[9px] font-normal ml-0.5">{lotLeft.qty_piece}p</span>}</> : <><span className="text-[9px] text-slate-300">c/s</span></>}</td>
                               <td className="border border-black text-center font-bold text-xs tracking-wider">{lotRight ? lotRight.lot_code : ""}</td>
                               <td className="border border-black text-right pr-1 font-bold leading-none">{lotRight ? <>{lotRight.qty_cs}<span className="text-[9px] font-normal ml-0.5">c/s</span>{lotRight.qty_piece > 0 && <span className="text-[9px] font-normal ml-0.5">{lotRight.qty_piece}p</span>}</> : <><span className="text-[9px] text-slate-300">c/s</span></>}</td>
-                              <td className="border border-black text-right pr-1 pt-2 leading-none text-slate-400 text-[9px]">c/s</td>
+                              <td className="border border-black"></td>
                             </tr>
                           )
                         })}
@@ -227,12 +251,8 @@ export default function ShipmentsPage() {
     );
   }
 
-  const totalShipPieces = Object.values(shipInputs).reduce((sum, input) => {
-    return sum + (Number(input?.cs) || 0) + (Number(input?.p) || 0);
-  }, 0);
-
   // =======================================================================
-  // 通常のリスト入力画面
+  // 通常リスト画面
   // =======================================================================
   return (
     <div className="bg-transparent">
@@ -256,7 +276,6 @@ export default function ShipmentsPage() {
                       {group.customerOrderNo && <Badge variant="outline" className="w-fit text-[10px] bg-white text-blue-700 font-bold border-blue-200 py-0 mb-1"><FileText className="w-3 h-3 mr-1" />発注: {group.customerOrderNo}</Badge>}
                       <CardTitle className="text-lg text-slate-800 leading-tight">{group.customerName}</CardTitle>
                     </div>
-                    {/* ★変更: ステータスを出荷予定に。赤の警告は「出荷予定日」で判断 */}
                     <Badge className={`${group.isLate ? 'bg-red-500 text-white' : 'bg-blue-100 text-blue-800'} border-none shadow-sm text-xs`}>
                       出荷予定: {new Date(group.plannedShipDate).toLocaleDateString()}
                     </Badge>
@@ -325,7 +344,7 @@ export default function ShipmentsPage() {
                               const inputCs = Number(shipInputs[stock.id]?.cs) || 0; const inputP = Number(shipInputs[stock.id]?.p) || 0;
                               const isOver = ((inputCs * unitPerCs) + inputP) > stock.total_pieces; const isSelected = ((inputCs * unitPerCs) + inputP) > 0;
                               return (
-                                <TableRow key={stock.id} className={`${isSelected ? "bg-blue-50/30" : ""}`}>
+                                <TableRow key={stock.id} className={`${isSelected ? "bg-blue-50/30" : ""} transition-colors`}>
                                   <TableCell className="font-black text-slate-700 pl-4 tracking-wider">{stock.lot_code}</TableCell>
                                   <TableCell className="text-slate-500 text-xs">{new Date(stock.expiry_date).toLocaleDateString()}</TableCell>
                                   <TableCell className="text-right bg-slate-50/50"><span className="font-bold text-slate-700">{stockCs} <span className="text-[10px] font-normal">c/s</span></span><span className="ml-1 font-bold text-slate-500">{stockPiece} <span className="text-[9px] font-normal">p</span></span></TableCell>
@@ -354,8 +373,8 @@ export default function ShipmentsPage() {
                         <input type="checkbox" checked={isOrderCompleted} onChange={e => setIsOrderCompleted(e.target.checked)} className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500" />
                         この注文書全体の出荷を完了(リストから消去)にする
                       </label>
-                      <Button onClick={handleSaveShipment} disabled={isProcessing || totalShipPieces === 0} className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white font-bold h-12 px-8 shadow-sm">
-                        {isProcessing ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <ArrowRight className="w-5 h-5 mr-2" />}一括で出荷を確定・在庫減算
+                      <Button onClick={handleSaveShipment} disabled={isProcessing || Object.values(shipInputs).every(i => !i.cs && !i.p)} className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white font-bold h-12 px-8 shadow-sm">
+                        {isProcessing ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <ArrowRight className="w-5 h-5 mr-2" />}一括で出荷を確定
                       </Button>
                     </div>
                   ) : (<div className="text-slate-500 font-bold text-center"><Lock className="w-4 h-4 inline mr-1" /> 閲覧モードのため出荷処理はできません</div>)}
