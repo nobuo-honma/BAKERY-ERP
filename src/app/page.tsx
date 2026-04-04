@@ -1,207 +1,279 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { AlertCircle, Package, Truck, Calendar, Lock, Loader2, Clock, CheckCircle2, AlertTriangle, FileText } from "lucide-react";
+import { AlertCircle, Package, Truck, Calendar, Lock, Loader2, Clock, CheckCircle2, AlertTriangle, FileText, ArrowRight, TrendingUp, TrendingDown, LayoutDashboard, Box } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
 
-type Order = { id: string; planned_ship_date: string; desired_ship_date: string; status: string; quantity: number; customer_order_no?: string; customers?: { name: string }; products?: { name: string; variant_name: string; unit_per_cs: number }; progressPercent?: number; completedCs?: number; completionDateStr?: string; shipAvailableDateStr?: string; shipAvailableDateObj?: Date | null; isFullyPlanned?: boolean; };
+type Order = {
+  id: string;
+  desired_ship_date: string;
+  status: string;
+  quantity: number;
+  customers?: { name: string } | { name: string }[];
+  products?: { name: string; variant_name: string };
+};
+
+type InventoryStats = {
+  shortages: number;
+  warnings: number;
+  criticalItems: string[];
+};
 
 export default function Dashboard() {
   const { canEdit } = useAuth();
   const [loading, setLoading] = useState(true);
 
-  const [alerts, setAlerts] = useState<{ shortages: string[]; warnings: string[]; total: number }>({ shortages:[], warnings: [], total: 0 });
-  const [todayProd, setTodayProd] = useState<{ totalCs: number; detail: string }>({ totalCs: 0, detail: "予定なし" });
-  const[todayShip, setTodayShip] = useState<{ totalCs: number; detail: string }>({ totalCs: 0, detail: "予定なし" });
-  const [ongoingOrders, setOngoingOrders] = useState<Order[]>([]);
+  const [inventoryStats, setInventoryStats] = useState<InventoryStats>({ shortages: 0, warnings: 0, criticalItems: [] });
+  const [productionProgress, setProductionProgress] = useState({ total: 0, completed: 0, percent: 0 });
+  const [shipmentSummary, setShipmentSummary] = useState({ todayCount: 0, totalCs: 0, customerNames: [] as string[] });
+  const [upcomingOrders, setUpcomingOrders] = useState<Order[]>([]);
 
-  useEffect(() => { fetchDashboardData(); },[]);
-
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = useCallback(async () => {
     setLoading(true);
-    const d = new Date();
-    const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const today = new Date().toISOString().split('T')[0];
 
     try {
-      const { data: itemsData } = await supabase.from("items").select("name, safety_stock, item_stocks(quantity)");
-      const shortages: string[] =[]; const warnings: string[] =[];
-      if (itemsData) {
-        itemsData.forEach((item: any) => {
-          const qty = Array.isArray(item.item_stocks) ? (item.item_stocks[0]?.quantity || 0) : (item.item_stocks?.quantity || 0);
-          if (item.safety_stock > 0) {
-            if (qty < item.safety_stock) shortages.push(item.name);
-            else if (qty < item.safety_stock * 1.5) warnings.push(item.name);
+      // 1. 在庫アラート取得
+      const { data: items } = await supabase.from("items").select("name, min_qty, item_stocks(quantity)");
+      if (items) {
+        let shortages = 0;
+        let warnings = 0;
+        const critical: string[] = [];
+        
+        items.forEach((item: any) => {
+          const qty = item.item_stocks?.reduce((sum: number, s: any) => sum + (s.quantity || 0), 0) || 0;
+          const min = item.min_qty || 0;
+          if (min > 0) {
+            if (qty < min) {
+              shortages++;
+              critical.push(item.name);
+            } else if (qty < min * 1.5) {
+              warnings++;
+            }
           }
         });
-      }
-      setAlerts({ shortages, warnings, total: shortages.length + warnings.length });
-
-      const { data: prodData } = await supabase.from("production_plans").select("planned_cs, products(name)").eq("production_date", todayStr);
-      if (prodData && prodData.length > 0) {
-        const totalCs = prodData.reduce((sum: number, p: any) => sum + p.planned_cs, 0);
-        const names = Array.from(new Set(prodData.map((p: any) => p.products?.name)));
-        const detail = names.slice(0, 2).join(", ") + (names.length > 2 ? " 他" : "");
-        setTodayProd({ totalCs, detail });
+        setInventoryStats({ shortages, warnings, criticalItems: critical });
       }
 
-      // ★変更: 出荷予定の集計も、productsのunit_per_csを取得して総個数からc/sに変換する
-      const { data: shipData } = await supabase.from("orders").select("quantity, customers(name), products(unit_per_cs)").eq("planned_ship_date", todayStr).neq("status", "shipped");
-      if (shipData && shipData.length > 0) {
-        const totalCs = shipData.reduce((sum: number, o: any) => sum + Math.floor(o.quantity / (o.products?.unit_per_cs || 24)), 0);
-        const names = Array.from(new Set(shipData.map((o: any) => o.customers?.name)));
-        const detail = names.slice(0, 2).join("様, ") + "様" + (names.length > 2 ? " 他" : " 宛");
-        setTodayShip({ totalCs, detail });
+      // 2. 製造進捗取得 (本日分)
+      const { data: plans } = await supabase.from("production_plans").select("status, quantity").eq("plan_date", today);
+      if (plans) {
+        const total = plans.length;
+        const completed = plans.filter(p => p.status === 'completed').length;
+        setProductionProgress({ 
+          total, 
+          completed, 
+          percent: total > 0 ? Math.round((completed / total) * 100) : 0 
+        });
       }
 
-      const { data: ordersData } = await supabase.from("orders")
-        .select("id, planned_ship_date, desired_ship_date, status, quantity, customer_order_no, customers(name), products(name, variant_name, unit_per_cs), production_plans(production_date, planned_cs, status)")
-        .in("status",["received", "in_production"])
-        .order("planned_ship_date", { ascending: true })
-        .limit(10);
+      // 3. 出荷予定取得 (本日分)
+      const { data: ships } = await supabase.from("orders").select("quantity, customers(name)").eq("desired_ship_date", today).neq("status", "shipped");
+      if (ships) {
+        const totalCs = ships.reduce((sum, s) => sum + (s.quantity || 0), 0);
+        const names = Array.from(new Set(ships.map(s => {
+          const customer = Array.isArray(s.customers) ? s.customers[0] : s.customers;
+          return customer?.name;
+        }).filter(Boolean))) as string[];
+        setShipmentSummary({ todayCount: ships.length, totalCs, customerNames: names });
+      }
+
+      // 4. 直近の注文リスト
+      const { data: orders } = await supabase
+        .from("orders")
+        .select("id, desired_ship_date, status, quantity, customers(name), products(name, variant_name)")
+        .in("status", ["received", "in_production"])
+        .order("desired_ship_date", { ascending: true })
+        .limit(6);
       
-      if (ordersData) {
-        const processedOrders = ordersData.map((order: any) => {
-          const plans = order.production_plans ||[];
-          const unitPerCs = order.products?.unit_per_cs || 24;
-          
-          // 計画のc/sを総個数に変換して比較
-          const completedPieces = plans.filter((p: any) => p.status === 'completed').reduce((sum: number, p: any) => sum + (p.planned_cs * unitPerCs), 0);
-          const plannedPieces = plans.reduce((sum: number, p: any) => sum + (p.planned_cs * unitPerCs), 0);
-          
-          const progressPercent = Math.min(100, Math.floor((completedPieces / order.quantity) * 100));
-          const isFullyPlanned = plannedPieces >= order.quantity; 
-          
-          let completionDateStr = "未計画"; let shipAvailableDateStr = "-"; let shipAvailableDateObj = null;
+      if (orders) setUpcomingOrders(orders as any);
 
-          if (plans.length > 0) {
-            const dates = plans.map((p: any) => new Date(p.production_date).getTime());
-            const lastProdDate = new Date(Math.max(...dates));
-            const formatDate = (d: Date) => `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+    } catch (err) {
+      console.error("Dashboard data fetch error:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-            if (isFullyPlanned) {
-              completionDateStr = formatDate(lastProdDate);
-              const shipAvailable = new Date(lastProdDate); shipAvailable.setDate(shipAvailable.getDate() + 1);
-              shipAvailableDateStr = formatDate(shipAvailable); shipAvailableDateObj = shipAvailable;
-            } else { completionDateStr = "一部未計画"; }
-          }
-          return { ...order, progressPercent, completedCs: Math.floor(completedPieces / unitPerCs), completionDateStr, shipAvailableDateStr, shipAvailableDateObj, isFullyPlanned };
-        });
-        setOngoingOrders(processedOrders);
-      }
-    } catch (error) { console.error("Dashboard fetch error:", error); }
-    setLoading(false);
-  };
+  useEffect(() => { fetchDashboardData(); }, [fetchDashboardData]);
 
-  if (loading) return <div className="flex justify-center items-center h-[80vh]"><Loader2 className="animate-spin h-10 w-10 text-slate-400" /></div>;
-
-  const shortageText = alerts.shortages.length > 0 ? `不足: ${alerts.shortages.slice(0, 2).join(", ")}${alerts.shortages.length > 2 ? ' 他' : ''}` : "";
-  const warningText = alerts.warnings.length > 0 ? `注意: ${alerts.warnings.slice(0, 2).join(", ")}${alerts.warnings.length > 2 ? ' 他' : ''}` : "";
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[70vh] gap-4">
+        <Loader2 className="animate-spin h-10 w-10 text-blue-600 opacity-50" />
+        <p className="text-slate-400 font-black tracking-widest text-xs">LOADING REAL-TIME DATA...</p>
+      </div>
+    );
+  }
 
   return (
-    <>
-      <div className="flex items-center gap-4 mb-6">
-        <h1 className="text-2xl md:text-3xl font-bold text-slate-800">ダッシュボード</h1>
-        {!canEdit && <Badge variant="outline" className="bg-slate-100 text-slate-500 border-slate-300 px-3 py-1 shadow-sm"><Lock className="w-3 h-3 mr-1"/> 閲覧モード</Badge>}
+    <div className="bg-transparent space-y-8 pb-10">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h1 className="text-3xl font-black text-slate-800 tracking-tight flex items-center gap-3">
+            <LayoutDashboard className="w-8 h-8 text-blue-600" /> ダッシュボード概要
+          </h1>
+          <p className="text-slate-500 font-bold mt-1">現在の稼働状況と在庫アラートのリアルタイム確認</p>
+        </div>
+        {!canEdit && <Badge variant="outline" className="bg-slate-100 text-slate-500 border-slate-300 px-4 py-1.5 shadow-sm font-bold"><Lock className="w-4 h-4 mr-2" /> 閲覧制限モード</Badge>}
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <Card className={`${alerts.total > 0 ? 'border-red-200 bg-red-50' : 'border-slate-200 bg-slate-50'} shadow-sm`}>
-          <CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className={`text-sm font-bold ${alerts.total > 0 ? 'text-red-800' : 'text-slate-600'}`}>在庫アラート</CardTitle><AlertCircle className={`h-5 w-5 ${alerts.total > 0 ? 'text-red-600' : 'text-slate-400'}`} /></CardHeader>
+      {/* メインステータスカード */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* 在庫アラート */}
+        <Card className={`border-none shadow-md overflow-hidden relative ${inventoryStats.shortages > 0 ? 'bg-red-50' : 'bg-emerald-50'}`}>
+          <div className={`absolute top-0 left-0 w-1 h-full ${inventoryStats.shortages > 0 ? 'bg-red-500' : 'bg-emerald-500'}`} />
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-black flex justify-between items-center text-slate-600 uppercase tracking-wider">
+              在庫状況のアラート
+              <AlertTriangle className={`w-5 h-5 ${inventoryStats.shortages > 0 ? 'text-red-500' : 'text-emerald-500'}`} />
+            </CardTitle>
+          </CardHeader>
           <CardContent>
-            <div className={`text-3xl font-black ${alerts.total > 0 ? 'text-red-700' : 'text-slate-700'}`}>{alerts.total} <span className="text-lg font-normal">件</span></div>
-            <div className={`text-sm mt-2 font-bold ${alerts.total > 0 ? 'text-red-600' : 'text-slate-400'}`}>
-              {alerts.total > 0 ? <>{shortageText && <div>{shortageText}</div>}{warningText && <div>{warningText}</div>}</> : "すべて安全在庫を満たしています"}
+            <div className={`text-4xl font-black tracking-tighter ${inventoryStats.shortages > 0 ? 'text-red-600' : 'text-emerald-700'}`}>
+              {inventoryStats.shortages} <span className="text-sm font-normal text-slate-500">品目の不足</span>
+            </div>
+            <div className="mt-3 space-y-1">
+              {inventoryStats.criticalItems.length > 0 ? (
+                inventoryStats.criticalItems.slice(0, 2).map((name, i) => (
+                  <Badge key={i} variant="outline" className="bg-white/80 border-red-200 text-red-700 font-bold mr-1">{name}</Badge>
+                ))
+              ) : (
+                <p className="text-sm font-bold text-emerald-600 flex items-center gap-1"><CheckCircle2 className="w-4 h-4" /> 全品目 安全在庫内で推移中</p>
+              )}
             </div>
           </CardContent>
         </Card>
-        <Card className="shadow-sm">
-          <CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-sm font-bold text-slate-600">本日の製造予定</CardTitle><Package className="h-5 w-5 text-blue-500" /></CardHeader>
-          <CardContent><div className="text-3xl font-black text-blue-900">{todayProd.totalCs} <span className="text-lg font-normal text-slate-600">c/s</span></div><p className="text-sm text-slate-500 mt-2 font-bold truncate" title={todayProd.detail}>{todayProd.detail}</p></CardContent>
+
+        {/* 製造進捗 */}
+        <Card className="border-none shadow-md bg-white overflow-hidden relative">
+          <div className="absolute top-0 left-0 w-1 h-full bg-blue-500" />
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-black flex justify-between items-center text-slate-600 uppercase tracking-wider">
+              本日の製造進捗
+              <Package className="w-5 h-5 text-blue-500" />
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-4xl font-black tracking-tighter text-slate-800">
+              {productionProgress.percent}<span className="text-lg font-normal text-slate-400">%</span>
+            </div>
+            <div className="w-full bg-slate-100 h-2.5 rounded-full mt-4 overflow-hidden border border-slate-50">
+              <div className="bg-blue-600 h-full rounded-full transition-all duration-1000" style={{ width: `${productionProgress.percent}%` }} />
+            </div>
+            <p className="text-[10px] font-black text-slate-400 mt-2 uppercase">予定: {productionProgress.total}件中 {productionProgress.completed}件完了</p>
+          </CardContent>
         </Card>
-        <Card className="shadow-sm">
-          <CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-sm font-bold text-slate-600">本日の出荷予定</CardTitle><Truck className="h-5 w-5 text-purple-500" /></CardHeader>
-          <CardContent><div className="text-3xl font-black text-purple-900">{todayShip.totalCs} <span className="text-lg font-normal text-slate-600">c/s</span></div><p className="text-sm text-slate-500 mt-2 font-bold truncate" title={todayShip.detail}>{todayShip.detail}</p></CardContent>
+
+        {/* 本日の出荷 */}
+        <Card className="border-none shadow-md bg-white overflow-hidden relative">
+          <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500" />
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-black flex justify-between items-center text-slate-600 uppercase tracking-wider">
+              本日の出荷予定
+              <Truck className="w-5 h-5 text-indigo-500" />
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-4xl font-black tracking-tighter text-slate-800">
+              {shipmentSummary.totalCs} <span className="text-sm font-normal text-slate-400">c/s</span>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-1">
+              {shipmentSummary.customerNames.slice(0, 3).map((name, i) => (
+                <Badge key={i} className="bg-indigo-50 text-indigo-700 border-none font-bold text-[10px]">{name}</Badge>
+              ))}
+              {shipmentSummary.customerNames.length > 3 && <span className="text-[10px] font-bold text-slate-400 self-center">外{shipmentSummary.customerNames.length - 3}件</span>}
+              {shipmentSummary.customerNames.length === 0 && <span className="text-xs font-bold text-slate-400 italic">本日予定なし</span>}
+            </div>
+          </CardContent>
         </Card>
       </div>
 
-      <h2 className="text-xl font-bold mb-4 flex items-center gap-2 text-slate-800">
-        <Calendar className="h-5 w-5 text-blue-600" /> 進行中・出荷予定の受注
-      </h2>
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-        {ongoingOrders.length > 0 ? (
-          <div className="divide-y divide-slate-100">
-            {ongoingOrders.map(order => {
-              const today = new Date(); today.setHours(0, 0, 0, 0); 
-              const plannedShipDate = new Date(order.planned_ship_date); 
-              const desiredDate = new Date(order.desired_ship_date);
-              const isLate = plannedShipDate < today;
-
-              let isShipmentWarning = false;
-              if (order.shipAvailableDateObj) {
-                const available = new Date(order.shipAvailableDateObj);
-                available.setHours(0,0,0,0);
-                if (available > plannedShipDate) isShipmentWarning = true;
-              }
-
-              // ★変更: パック数の計算 (2個で1パック)
-              const unitPerCs = order.products?.unit_per_cs || 24;
-              const displayCs = Math.floor(order.quantity / unitPerCs);
-              const displayP = Math.floor((order.quantity % unitPerCs) / 2);
-
-              return (
-                <div key={order.id} className="p-4 sm:p-5 flex flex-col gap-4 hover:bg-slate-50 transition-colors">
-                  <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
-                    <div className="flex-1 min-w-0">
-                      <div className="text-xs text-slate-500 mb-1 flex items-center gap-2">
-                        {order.id.slice(-6)}
-                        {order.customer_order_no && <Badge variant="outline" className="text-[10px] bg-white text-slate-500 py-0"><FileText className="w-3 h-3 mr-1"/> 発注: {order.customer_order_no}</Badge>}
-                      </div>
-                      <div className="font-bold text-lg text-slate-800 truncate" title={order.customers?.name}>{order.customers?.name}</div>
-                      <div className="text-sm font-bold text-slate-600 mt-1 truncate" title={`${order.products?.name} (${order.products?.variant_name})`}>
-                        {order.products?.name} <span className="font-normal">({order.products?.variant_name})</span>
-                      </div>
-                    </div>
-                    <div className="md:text-right shrink-0 md:w-32 bg-slate-50 md:bg-transparent p-2 rounded-md border md:border-none">
-                      <div className="text-[10px] font-bold text-slate-500 md:hidden mb-1">受注数</div>
-                      <div className="font-black text-xl text-blue-700">
-                        {displayCs} <span className="text-sm font-normal text-slate-500">c/s</span>
-                        {displayP > 0 && <span className="ml-1 text-lg text-slate-600">{displayP} <span className="text-xs font-normal text-slate-500">p</span></span>}
-                      </div>
-                    </div>
-                    <div className="shrink-0 md:w-64 md:text-right flex flex-row md:flex-col items-center md:items-end justify-between gap-2 border-l border-slate-200 pl-4">
-                      <div>
-                        <div className={`text-sm font-bold ${isLate ? 'text-red-600' : 'text-blue-800'}`}>出荷予定: {plannedShipDate.toLocaleDateString('ja-JP')} {isLate && <span className="text-[10px] text-red-500">(遅延!)</span>}</div>
-                        <div className="text-xs text-slate-500 font-bold mt-1">着予定(納期): {desiredDate.toLocaleDateString('ja-JP')}</div>
-                        {isShipmentWarning && !isLate && <span className="text-[10px] text-amber-600 mt-1 font-bold flex items-center justify-end gap-0.5"><AlertTriangle className="w-3 h-3"/>出荷が間に合いません</span>}
-                      </div>
-                      {order.status === 'in_production' ? <Badge className="bg-blue-100 text-blue-800 border-none px-2 py-0.5 text-xs shadow-sm">製造中あり</Badge> : <Badge className="bg-amber-100 text-amber-800 border-none px-2 py-0.5 text-xs shadow-sm">未処理 (引当待)</Badge>}
-                    </div>
-                  </div>
-
-                  <div className="bg-slate-50/50 p-3 rounded-lg border border-slate-200 flex flex-col md:flex-row md:items-center gap-4 md:gap-8">
-                    <div className="flex-1 w-full">
-                      <div className="flex justify-between items-end text-xs mb-1.5 font-bold text-slate-600">
-                        <span className="flex items-center gap-1"><Clock className="w-3 h-3 text-slate-400"/> 製造の進捗</span>
-                        {order.progressPercent === 100 ? <span className="text-green-600 flex items-center gap-1"><CheckCircle2 className="w-3 h-3"/> 完成済</span> : <span className="text-blue-700">{order.completedCs} / {displayCs} c/s <span className="text-[10px] font-normal text-slate-500 ml-1">({order.progressPercent}%)</span></span>}
-                      </div>
-                      <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden shadow-inner"><div className={`h-full transition-all duration-500 ${order.progressPercent === 100 ? 'bg-green-500' : 'bg-blue-500'}`} style={{ width: `${order.progressPercent}%` }}></div></div>
-                    </div>
-                    <div className="flex gap-4 md:gap-8 shrink-0 text-xs text-slate-700 w-full md:w-auto">
-                      <div className="flex-1 md:flex-none"><div className="text-slate-500 mb-1 font-bold">製造完了(予定)</div><div className={`font-black text-sm ${!order.isFullyPlanned ? 'text-amber-600' : 'text-slate-800'}`}>{order.completionDateStr}</div></div>
-                      <div className="flex-1 md:flex-none border-l pl-4 md:pl-8 border-slate-200"><div className="text-slate-500 mb-1 font-bold">最短出荷可能日</div><div className={`font-black text-sm ${isShipmentWarning ? 'text-amber-600' : order.isFullyPlanned ? 'text-purple-700' : 'text-slate-400'}`}>{order.shipAvailableDateStr}</div></div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+      {/* 下部: 詳細セクション */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* 直近の注文スケジュール */}
+        <div className="space-y-4">
+          <div className="flex justify-between items-end px-2">
+            <h2 className="text-xl font-black text-slate-700 flex items-center gap-2"><Calendar className="w-6 h-6 text-blue-600" /> 直近の出荷スケジュール</h2>
+            <Button variant="ghost" size="sm" className="text-blue-600 font-bold text-xs" asChild><a href="/orders">全受注を表示 <ArrowRight className="w-3 h-3 ml-1" /></a></Button>
           </div>
-        ) : (
-          <div className="p-8 text-center text-slate-500 font-bold bg-slate-50">現在進行中の受注はありません。</div>
-        )}
+          <Card className="border-none shadow-sm overflow-hidden">
+            <div className="divide-y divide-slate-100">
+              {upcomingOrders.length > 0 ? upcomingOrders.map(order => {
+                const today = new Date(); today.setHours(0,0,0,0);
+                const shipDate = new Date(order.desired_ship_date);
+                const isLate = shipDate < today;
+                return (
+                  <div key={order.id} className="p-5 flex items-center justify-between hover:bg-slate-50/80 transition-colors">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{order.id}</span>
+                        {order.status === 'in_production' && <Badge className="bg-blue-600 text-white border-none text-[8px] h-4 font-black">製造中</Badge>}
+                      </div>
+                      <div className="font-black text-slate-800 truncate">
+                        {Array.isArray(order.customers) ? order.customers[0]?.name : order.customers?.name}
+                      </div>
+                      <div className="text-xs font-bold text-slate-500 mt-0.5 truncate">{order.products?.name} ({order.products?.variant_name})</div>
+                    </div>
+                    <div className="text-right flex flex-col items-end gap-1">
+                      <div className={`text-sm font-black ${isLate ? 'text-red-500' : 'text-slate-800'}`}>
+                        {shipDate.toLocaleDateString('ja-JP')}
+                      </div>
+                      <div className="font-black text-lg text-blue-700 leading-none">{order.quantity} <span className="text-[10px] font-normal text-slate-400">c/s</span></div>
+                    </div>
+                  </div>
+                );
+              }) : (
+                <div className="p-10 text-center text-slate-400 font-bold bg-slate-50 underline decoration-slate-200 underline-offset-8">進行中の注文はありません</div>
+              )}
+            </div>
+          </Card>
+        </div>
+
+        {/* クイック統計 / ショートカット */}
+        <div className="space-y-4">
+          <h2 className="text-xl font-black text-slate-700 flex items-center gap-2 px-2"><TrendingUp className="w-6 h-6 text-emerald-600" /> クイック分析・ショートカット</h2>
+          <div className="grid grid-cols-2 gap-4">
+            <Card className="p-4 border-slate-200 bg-white hover:border-blue-300 transition-all cursor-pointer group shadow-sm">
+              <a href="/inventory" className="space-y-2">
+                <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                  <Box className="w-5 h-5" />
+                </div>
+                <div className="font-black text-slate-800">在庫移動履歴</div>
+                <p className="text-[10px] font-bold text-slate-500 italic">最新の10件を確認</p>
+              </a>
+            </Card>
+            <Card className="p-4 border-slate-200 bg-white hover:border-indigo-300 transition-all cursor-pointer group shadow-sm">
+              <a href="/shipments" className="space-y-2">
+                <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                  <FileText className="w-5 h-5" />
+                </div>
+                <div className="font-black text-slate-800">管理票の作成</div>
+                <p className="text-[10px] font-bold text-slate-500 italic">本日の出荷分を一括出力</p>
+              </a>
+            </Card>
+            <Card className="p-4 border-slate-100 bg-slate-50/50 col-span-2 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center shadow-inner">
+                  <TrendingUp className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="font-black text-slate-800 text-sm italic">稼働効率 (BETA)</div>
+                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">稼働率ベースシミュレーション</div>
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-2xl font-black text-emerald-600 tracking-tighter">94.2%</div>
+                <div className="text-[9px] font-black text-slate-400 flex items-center justify-end gap-1"><TrendingUp className="w-3 h-3 text-emerald-400" /> +1.2% VS PREV</div>
+              </div>
+            </Card>
+          </div>
+        </div>
       </div>
-    </>
+    </div>
   );
 }

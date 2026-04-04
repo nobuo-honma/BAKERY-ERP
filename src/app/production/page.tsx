@@ -6,828 +6,340 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Factory, Calendar as CalendarIcon, PackageCheck, Loader2, ListPlus, CheckCircle2, CalendarDays, Printer, ArrowLeft, ChevronLeft, ChevronRight, Edit, Trash2, Play, CheckCircle, Truck, Flag, Lock, Plus } from "lucide-react";
-import { calculateExpiryDate, generateLotNumber } from "@/lib/lot-generator";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Calendar, ClipboardList, Loader2, Save, Play, CheckCircle2, FlaskConical, AlertCircle, Trash2, Edit, Lock, ArrowRight, PackageOpen, LayoutDashboard } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 
-type Order = { id: string; order_date: string; desired_ship_date: string; planned_ship_date: string; quantity: number; status: string; product_id: string; customer_order_no?: string; customers?: { name: string }; products?: { name: string; variant_name: string; unit_per_kg: number; unit_per_cs: number }; plannedPieces: number; remainPieces: number; };
-type Plan = { id: string; order_id: string; product_id: string; production_date: string; production_kg: number; planned_cs: number; lot_code: string; expiry_date: string; status: string; notes?: string; products?: { name: string; variant_name: string; unit_per_cs?: number; unit_per_kg?: number }; actual_cs?: number; actual_piece?: number; };
-type Event = { id: string; event_date: string; title: string; notes?: string; };
-type Product = { id: string; name: string; variant_name: string; unit_per_kg: number; unit_per_cs: number; };
+type Plan = {
+  id: string;
+  plan_date: string;
+  order_id: string | null;
+  product_id: string;
+  quantity: number;
+  actual_cs: number | null;
+  actual_piece: number | null;
+  status: string;
+  lot_code: string | null;
+  orders?: { 
+    id: string;
+    customers?: { name: string };
+    customer_order_no?: string;
+  };
+  products?: { 
+    name: string; 
+    variant_name: string;
+    unit_per_cs: number;
+    expiry_days: number;
+  };
+};
+
+type Product = { 
+  id: string; 
+  name: string; 
+  variant_name: string; 
+  unit_per_cs: number; 
+  expiry_days: number;
+};
 
 export default function ProductionPage() {
   const { canEdit } = useAuth();
-  const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
-  const [orders, setOrders] = useState<Order[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
+  const [viewMode, setViewMode] = useState<'calendar' | 'list'>('calendar');
 
-  const [calendarMonth, setCalendarMonth] = useState(new Date());
-  const [calendarPlans, setCalendarPlans] = useState<Plan[]>([]);
-  const [calendarOrders, setCalendarOrders] = useState<Order[]>([]);
-  const [calendarEvents, setCalendarEvents] = useState<Event[]>([]);
-  const [loadingCalendar, setLoadingCalendar] = useState(false);
-
-  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
-  const [isStockProduction, setIsStockProduction] = useState(false);
-  const [stockProductId, setStockProductId] = useState("");
-
-  const [planDate, setPlanDate] = useState("");
-  const [planKg, setPlanKg] = useState<number | "">("");
-  const [planNotes, setPlanNotes] = useState("");
-  const [calculatedLot, setCalculatedLot] = useState("");
-  const [calculatedExpiry, setCalculatedExpiry] = useState("");
-  const [calculatedCs, setCalculatedCs] = useState(0);
-
-  const [editingPlan, setEditingPlan] = useState<Plan | null>(null);
-  const [editDate, setEditDate] = useState("");
-  const [editKg, setEditKg] = useState<number | "">("");
-  const [editNotes, setEditNotes] = useState("");
+  const [isOpen, setIsOpen] = useState(false);
+  const [newPlan, setNewPlan] = useState({ date: "", productId: "", cs: 0, type: "order" as "order" | "stock" });
+  const [selectedProductName, setSelectedProductName] = useState("");
+  
   const [isProcessing, setIsProcessing] = useState(false);
+  const [completeDialogOpen, setCompleteDialogOpen] = useState(false);
+  const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
+  const [actualResults, setActualResults] = useState({ cs: 0, p: 0, lotCode: "" });
 
-  const [completionModalOpen, setCompletionModalOpen] = useState(false);
-  const [actualCs, setActualCs] = useState<number | "">("");
-  const [actualPiece, setActualPiece] = useState<number | "">("");
-
-  const [eventModalOpen, setEventModalOpen] = useState(false);
-  const [editingEvent, setEditingEvent] = useState<Event | null>(null);
-  const [eventDate, setEventDate] = useState("");
-  const [eventTitle, setEventTitle] = useState("");
-  const [eventNotes, setEventNotes] = useState("");
-
-  const [ordersModalOpen, setOrdersModalOpen] = useState(false);
-  const [ordersModalDate, setOrdersModalDate] = useState("");
-
-  const fetchData = useCallback(async (preserveSelectedId?: string) => {
+  const fetchPlans = useCallback(async () => {
     setLoading(true);
-    const { data: oData } = await supabase.from("orders").select("*, customers(name), products(name, variant_name, unit_per_kg, unit_per_cs), production_plans(planned_cs)").in("status", ["received", "in_production"]).order("planned_ship_date", { ascending: true });
-    const { data: pData } = await supabase.from("production_plans").select("*, products(name, variant_name, unit_per_kg, unit_per_cs)").order("production_date", { ascending: false }).limit(30);
-    const { data: prData } = await supabase.from("products").select("*");
+    const { data: pData } = await supabase
+      .from("production_plans")
+      .select("*, orders(id, customers(name), customer_order_no), products(name, variant_name, unit_per_cs, expiry_days)")
+      .order("plan_date", { ascending: true });
+    
+    const { data: prodData } = await supabase.from("products").select("*");
 
-    const processedOrders = (oData as any[])?.map(o => {
-      const unitPerCs = o.products?.unit_per_cs || 24;
-      const plannedPieces = o.production_plans ? o.production_plans.reduce((sum: number, p: any) => sum + (p.planned_cs * unitPerCs), 0) : 0;
-      const remainPieces = o.quantity - plannedPieces;
-
-      return { ...o, plannedPieces, remainPieces };
-    }).filter(o => o.remainPieces > 0) || [];
-
-    setOrders(processedOrders);
-    if (pData) setPlans(pData as Plan[]);
-    if (prData) setProducts(prData as Product[]);
-
-    if (preserveSelectedId) {
-      const stillRemainingOrder = processedOrders.find(o => o.id === preserveSelectedId);
-      if (stillRemainingOrder) {
-        setSelectedOrder(stillRemainingOrder); resetInputForNextDay(stillRemainingOrder, planDate);
-      } else {
-        setSelectedOrder(null); setIsStockProduction(false);
-      }
-    } else if (!selectedOrder && !isStockProduction) {
-      setPlanDate(new Date().toISOString().split('T')[0]);
-    }
+    if (pData) setPlans(pData as any);
+    if (prodData) setProducts(prodData);
     setLoading(false);
-  }, [planDate, selectedOrder, isStockProduction]);
+  }, []);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
-
-  const fetchCalendarPlans = useCallback(async () => {
-    setLoadingCalendar(true);
-    const y = calendarMonth.getFullYear(); const m = calendarMonth.getMonth() + 1;
-    const startDate = `${y}-${String(m).padStart(2, '0')}-01`;
-    const endDate = new Date(y, m, 0).toISOString().split('T')[0];
-
-    const { data: pData } = await supabase.from("production_plans").select("*, products(name, variant_name, unit_per_kg, unit_per_cs)").gte("production_date", startDate).lte("production_date", endDate).order("production_date", { ascending: true });
-    if (pData) setCalendarPlans(pData as Plan[]);
-
-    // ★修正: 出荷予定を取得する際、productsから unit_per_cs も忘れずに取得する！
-    const { data: oData } = await supabase.from("orders").select("*, customers(name), products(name, variant_name, unit_per_cs)").gte("planned_ship_date", startDate).lte("planned_ship_date", endDate).order("planned_ship_date", { ascending: true });
-    if (oData) setCalendarOrders(oData as Order[]);
-
-    const { data: eData } = await supabase.from("events").select("*").gte("event_date", startDate).lte("event_date", endDate).order("event_date", { ascending: true });
-    if (eData) setCalendarEvents(eData as Event[]);
-
-    setLoadingCalendar(false);
-  }, [calendarMonth]);
-
-  useEffect(() => { if (viewMode === 'calendar') fetchCalendarPlans(); }, [fetchCalendarPlans, viewMode]);
-
-  useEffect(() => {
-    const pId = isStockProduction ? stockProductId : selectedOrder?.product_id;
-    const targetProduct = isStockProduction ? products.find(p => p.id === stockProductId) : selectedOrder?.products;
-
-    if (pId && targetProduct && planDate && planKg) {
-      setCalculatedExpiry(calculateExpiryDate(planDate));
-      setCalculatedLot(generateLotNumber(planDate, pId, 1));
-      const pcs = (planKg as number) * targetProduct.unit_per_kg;
-      setCalculatedCs(Math.floor(pcs / targetProduct.unit_per_cs));
-    } else {
-      setCalculatedLot(""); setCalculatedExpiry(""); setCalculatedCs(0);
-    }
-  }, [selectedOrder, planDate, planKg, isStockProduction, stockProductId, products]);
-
-  const handleSelectOrder = (order: Order) => {
-    setIsStockProduction(false); setStockProductId("");
-    setSelectedOrder(order); setPlanDate(new Date().toISOString().split('T')[0]);
-    const requiredKg = Math.ceil((order.remainPieces * order.products!.unit_per_cs) / order.products!.unit_per_kg);
-    setPlanKg(requiredKg); setPlanNotes("");
-  };
-
-  const handleSelectStockProduction = () => {
-    setSelectedOrder(null); setIsStockProduction(true);
-    setPlanDate(new Date().toISOString().split('T')[0]);
-    setPlanKg(""); setPlanNotes(""); setStockProductId("");
-  };
-
-  const resetInputForNextDay = (order: Order, currentDateStr: string) => {
-    const nextDate = new Date(currentDateStr); nextDate.setDate(nextDate.getDate() + 1);
-    setPlanDate(nextDate.toISOString().split('T')[0]);
-    const requiredKg = Math.ceil((order.remainPieces * order.products!.unit_per_cs) / order.products!.unit_per_kg);
-    setPlanKg(requiredKg); setPlanNotes("");
-  };
+  useEffect(() => { fetchPlans(); }, [fetchPlans]);
 
   const handleSavePlan = async () => {
-    const pId = isStockProduction ? stockProductId : selectedOrder?.product_id;
-    const targetProduct = isStockProduction ? products.find(p => p.id === stockProductId) : selectedOrder?.products;
-
-    if (!pId || !targetProduct || !planDate || !planKg || !calculatedLot) return;
+    if (!newPlan.date || !newPlan.productId || newPlan.cs <= 0) { alert("必須項目を入力してください。"); return; }
     setIsProcessing(true);
-
-    const dateStr = planDate.replace(/-/g, "");
-    const random3 = Math.floor(Math.random() * 1000).toString().padStart(3, "0");
-    const newPlan = {
-      id: `PLN-${dateStr}-${random3}`, order_id: isStockProduction ? null : selectedOrder?.id, product_id: pId,
-      production_date: planDate, production_kg: planKg, planned_units: (planKg as number) * targetProduct.unit_per_kg,
-      planned_cs: calculatedCs, lot_code: calculatedLot, expiry_date: calculatedExpiry, status: "planned", notes: planNotes
-    };
-
-    const { error } = await supabase.from("production_plans").insert(newPlan);
-    if (!error) {
-      if (!isStockProduction && selectedOrder?.status === 'received') {
-        await supabase.from("orders").update({ status: "in_production" }).eq("id", selectedOrder.id);
-        fetchData(selectedOrder.id);
-      } else {
-        alert(isStockProduction ? "在庫品としての製造計画を登録しました！" : "計画を登録しました！");
-        fetchData();
-        if (isStockProduction) { setPlanKg(""); setPlanNotes(""); }
-      }
-    } else alert("エラー: " + error.message);
+    const { error } = await supabase.from("production_plans").insert({
+      plan_date: newPlan.date,
+      product_id: newPlan.productId,
+      quantity: newPlan.cs,
+      status: "planned"
+    });
+    if (!error) { setIsOpen(false); fetchPlans(); } else alert("エラー: " + error.message);
     setIsProcessing(false);
   };
 
-  const openEditDialog = (plan: Plan) => { setEditingPlan(plan); setEditDate(plan.production_date); setEditKg(plan.production_kg); setEditNotes(plan.notes || ""); };
-  const openOrdersModal = (dateStr: string) => { setOrdersModalDate(dateStr); setOrdersModalOpen(true); };
-
-  const handleUpdatePlan = async () => {
-    if (!editingPlan || !editDate || !editKg) return;
-    setIsProcessing(true);
-    const unit_per_kg = editingPlan.products?.unit_per_kg || 10; const unit_per_cs = editingPlan.products?.unit_per_cs || 24;
-    const newCs = Math.floor(((editKg as number) * unit_per_kg) / unit_per_cs);
-    const newExpiry = calculateExpiryDate(editDate); const newLot = generateLotNumber(editDate, editingPlan.product_id, 1);
-    const updates = { production_date: editDate, production_kg: editKg, planned_cs: newCs, planned_units: (editKg as number) * unit_per_kg, lot_code: newLot, expiry_date: newExpiry, notes: editNotes };
-    const { error } = await supabase.from("production_plans").update(updates).eq("id", editingPlan.id);
-    if (!error) { setEditingPlan(null); if (viewMode === 'calendar') fetchCalendarPlans(); fetchData(); alert("計画を更新しました。"); } else alert("更新失敗: " + error.message);
-    setIsProcessing(false);
+  const handleOpenComplete = (plan: Plan) => {
+    setSelectedPlan(plan);
+    const today = new Date().toISOString().split('T')[0].replace(/-/g, "").slice(2);
+    setActualResults({ 
+      cs: plan.quantity, 
+      p: 0, 
+      lotCode: `${today}-01` // デフォルトロット
+    });
+    setCompleteDialogOpen(true);
   };
 
-  const handleDeletePlan = async () => {
-    if (!editingPlan) return;
-    let confirmMsg = "この製造計画を削除（キャンセル）しますか？";
-    if (editingPlan.status === 'in_progress') confirmMsg = "【重要】この計画は「製造中」です。\nキャンセルすると、引き落とされた「原料・資材の在庫」が自動的に元に戻されます。\n本当に削除してよろしいですか？";
-    else if (editingPlan.status === 'completed') confirmMsg = "【超重要】この計画は「完了」しています。\nキャンセルすると、完成した「製品在庫」が自動的に取り消し(マイナス)されますがよろしいですか？\n（※すでに出荷済みの場合は削除しないでください）";
-
-    if (!confirm(confirmMsg)) return;
-    setIsProcessing(true);
-
-    try {
-      if (editingPlan.status === 'in_progress') {
-        const { data: boms } = await supabase.from('bom').select('*').eq('product_id', editingPlan.product_id);
-        if (boms && boms.length > 0) {
-          for (const bom of boms) {
-            const usedQty = bom.basis_type === 'production_qty' ? editingPlan.production_kg * bom.usage_rate : editingPlan.planned_cs * bom.usage_rate;
-            const { data: stock } = await supabase.from('item_stocks').select('quantity').eq('item_id', bom.item_id).single();
-            const currentQty = stock?.quantity || 0;
-            await supabase.from('item_stocks').upsert({ item_id: bom.item_id, quantity: currentQty + usedQty });
-            await supabase.from('inventory_adjustments').insert({ item_id: bom.item_id, before_qty: currentQty, after_qty: currentQty + usedQty, reason: `製造キャンセルによる原料戻し (Lot: ${editingPlan.lot_code})` });
-          }
-        }
-      }
-
-      if (editingPlan.status === 'completed') {
-        const unit_per_cs = editingPlan.products?.unit_per_cs || 24;
-        const actualCsVal = editingPlan.actual_cs || editingPlan.planned_cs;
-        const actualPieceVal = editingPlan.actual_piece || 0;
-        const cancelPieces = (actualCsVal * unit_per_cs) + actualPieceVal;
-
-        const { data: existingStock } = await supabase.from('product_stocks').select('id, total_pieces').eq('lot_code', editingPlan.lot_code).single();
-        if (existingStock) {
-          const newPieces = existingStock.total_pieces - cancelPieces;
-          if (newPieces <= 0) await supabase.from('product_stocks').delete().eq('id', existingStock.id);
-          else await supabase.from('product_stocks').update({ total_pieces: newPieces }).eq('id', existingStock.id);
-          await supabase.from('inventory_adjustments').insert({ product_id: editingPlan.product_id, lot_code: editingPlan.lot_code, before_qty: existingStock.total_pieces, after_qty: newPieces, reason: `製造完了取り消しによる製品減算` });
-        }
-      }
-
-      const { error } = await supabase.from("production_plans").delete().eq("id", editingPlan.id);
-      if (error) throw error;
-
-      setEditingPlan(null); if (viewMode === 'calendar') fetchCalendarPlans(); fetchData();
-      alert("計画をキャンセル（削除）し、必要な在庫のロールバックを完了しました。");
-    } catch (err: any) { alert("削除処理中にエラーが発生しました: " + err.message); }
-    setIsProcessing(false);
-  };
-
-  const handleStartProduction = async () => {
-    if (!editingPlan) return;
-    if (editingPlan.status !== 'planned') { alert("この計画はすでに製造開始されています！"); return; }
-    if (!confirm("製造を開始しますか？\n（BOMに基づいて原材料・資材の在庫が引き落とされます）")) return;
+  const handleCompleteProduction = async () => {
+    if (!selectedPlan || !canEdit || !actualResults.lotCode) return;
     setIsProcessing(true);
     try {
-      const { data: boms } = await supabase.from('bom').select('*').eq('product_id', editingPlan.product_id);
-      if (boms && boms.length > 0) {
-        for (const bom of boms) {
-          const requiredQty = bom.basis_type === 'production_qty' ? editingPlan.production_kg * bom.usage_rate : editingPlan.planned_cs * bom.usage_rate;
-          const { data: stock } = await supabase.from('item_stocks').select('quantity').eq('item_id', bom.item_id).single();
-          const currentQty = stock?.quantity || 0;
-          await supabase.from('item_stocks').upsert({ item_id: bom.item_id, quantity: currentQty - requiredQty });
-          await supabase.from('inventory_adjustments').insert({ item_id: bom.item_id, before_qty: currentQty, after_qty: currentQty - requiredQty, reason: `製造消費 (Lot: ${editingPlan.lot_code})` });
-        }
-      }
-      await supabase.from("production_plans").update({ status: "in_progress" }).eq("id", editingPlan.id);
-      setEditingPlan(null); if (viewMode === 'calendar') fetchCalendarPlans(); fetchData(); alert("製造を開始し、資材の在庫を減算しました。");
-    } catch (err) { alert("エラーが発生しました。"); }
-    setIsProcessing(false);
-  };
+      const unitPerCs = selectedPlan.products?.unit_per_cs || 1;
+      const totalPieces = (actualResults.cs * unitPerCs) + actualResults.p;
+      const expiryDays = selectedPlan.products?.expiry_days || 180;
+      const expiryDate = new Date();
+      expiryDate.setDate(expiryDate.getDate() + expiryDays);
 
-  const openCompletionModal = () => {
-    if (!editingPlan) return;
-    if (editingPlan.status === 'completed') { alert("すでに完了処理されています。"); return; }
-    setActualCs(editingPlan.planned_cs); setActualPiece(0); setCompletionModalOpen(true);
-  };
+      // 1. 製造ステータスの更新
+      await supabase.from("production_plans").update({
+        status: "completed",
+        lot_code: actualResults.lotCode,
+        actual_cs: actualResults.cs,
+        actual_piece: actualResults.p
+      }).eq("id", selectedPlan.id);
 
-  const handleCompleteProductionWithActuals = async () => {
-    if (!editingPlan || actualCs === "") { alert("実績ケース数を入力してください。"); return; }
-    if (editingPlan.status === 'completed') { alert("この計画はすでに完了済みです。"); return; }
-    const aCs = Number(actualCs) || 0; const aP = Number(actualPiece) || 0;
-    if (aCs === 0 && aP === 0) { alert("実績数が0になっています。"); return; }
-
-    setIsProcessing(true);
-    try {
-      const unit_per_cs = editingPlan.products?.unit_per_cs || 24;
-      const totalActualPieces = (aCs * unit_per_cs) + (aP * 2);
-
-      const productIdStr = editingPlan.product_id || "";
-      const keepQuantity = (productIdStr.startsWith('MA') || productIdStr.startsWith('FD')) ? 5 : 10;
-      const addPiecesToStock = totalActualPieces - keepQuantity;
-
-      if (addPiecesToStock < 0) {
-        alert(`エラー: 実績数(${totalActualPieces}個)が、キープサンプル必要数(${keepQuantity}個)を下回っています。`);
-        setIsProcessing(false); return;
-      }
-
-      const { data: existingStock } = await supabase.from('product_stocks').select('id, total_pieces').eq('lot_code', editingPlan.lot_code).single();
+      // 2. 製品在庫の追加 (upsert または insert)
+      // 同じロット番号があれば合算、なければ新規
+      const { data: existingStock } = await supabase.from("product_stocks").select("*").eq("lot_code", actualResults.lotCode).eq("product_id", selectedPlan.product_id).single();
+      
       if (existingStock) {
-        await supabase.from('product_stocks').update({ total_pieces: existingStock.total_pieces + addPiecesToStock }).eq('id', existingStock.id);
-        await supabase.from('inventory_adjustments').insert({ product_id: editingPlan.product_id, lot_code: editingPlan.lot_code, before_qty: existingStock.total_pieces, after_qty: existingStock.total_pieces + addPiecesToStock, reason: `製造完成 (サンプル引当後)` });
+        await supabase.from("product_stocks").update({ total_pieces: existingStock.total_pieces + totalPieces }).eq("id", existingStock.id);
       } else {
-        await supabase.from('product_stocks').insert({ lot_code: editingPlan.lot_code, product_id: editingPlan.product_id, total_pieces: addPiecesToStock, expiry_date: editingPlan.expiry_date });
-        await supabase.from('inventory_adjustments').insert({ product_id: editingPlan.product_id, lot_code: editingPlan.lot_code, before_qty: 0, after_qty: addPiecesToStock, reason: `製造完成 (新規Lot / サンプル引当後)` });
+        await supabase.from("product_stocks").insert({
+          product_id: selectedPlan.product_id,
+          lot_code: actualResults.lotCode,
+          total_pieces: totalPieces,
+          expiry_date: expiryDate.toISOString().split('T')[0]
+        });
       }
 
-      const randomManageNo = `KS-${editingPlan.lot_code}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
-      await supabase.from("keep_samples").insert({
-        lot_code: editingPlan.lot_code, product_id: editingPlan.product_id, management_no: randomManageNo, saved_quantity: keepQuantity, production_date: editingPlan.production_date, expiry_date: editingPlan.expiry_date
+      // 3. 在庫変動履歴の記録
+      await supabase.from("inventory_adjustments").insert({
+        product_id: selectedPlan.product_id,
+        lot_code: actualResults.lotCode,
+        before_qty: existingStock ? existingStock.total_pieces : 0,
+        after_qty: (existingStock ? existingStock.total_pieces : 0) + totalPieces,
+        reason: "製品製造完了"
       });
 
-      try { await supabase.from("production_plans").update({ status: "completed", actual_cs: aCs, actual_piece: aP }).eq("id", editingPlan.id); }
-      catch (e) { await supabase.from("production_plans").update({ status: "completed" }).eq("id", editingPlan.id); }
+      // 4. 保存サンプルの自動登録 (1個)
+      await supabase.from("keep_samples").insert({
+        product_id: selectedPlan.product_id,
+        lot_code: actualResults.lotCode,
+        save_date: new Date().toISOString().split('T')[0],
+        expiry_date: expiryDate.toISOString().split('T')[0],
+        qty: 1,
+        status: "saved"
+      });
 
-      setCompletionModalOpen(false); setEditingPlan(null); if (viewMode === 'calendar') fetchCalendarPlans(); fetchData();
-      alert(`製造完了！\nキープサンプルを ${keepQuantity}個 自動登録し、\n残りの実績を製品在庫に追加しました。`);
-    } catch (err: any) { alert("エラーが発生しました: " + err.message); }
+      // 5. 受注ステータスの更新 (もし受注紐付けがあれば)
+      if (selectedPlan.order_id) {
+        await supabase.from("orders").update({ status: "in_production" }).eq("id", selectedPlan.order_id);
+      }
+
+      setCompleteDialogOpen(false);
+      fetchPlans();
+      alert("製造実績を登録し、在庫（＋保存サンプル）に反映しました！");
+    } catch (err: any) {
+      alert("エラー: " + err.message);
+    }
     setIsProcessing(false);
   };
 
-  const openEventDialog = (ev?: Event, dateStr?: string) => {
-    if (ev) { setEditingEvent(ev); setEventDate(ev.event_date); setEventTitle(ev.title); setEventNotes(ev.notes || ""); }
-    else { setEditingEvent(null); setEventDate(dateStr || new Date().toISOString().split('T')[0]); setEventTitle(""); setEventNotes(""); }
-    setEventModalOpen(true);
-  };
-  const handleSaveEvent = async () => {
-    if (!eventDate || !eventTitle) { alert("日付とタイトルは必須です。"); return; }
-    setIsProcessing(true); const eventData = { event_date: eventDate, title: eventTitle, notes: eventNotes };
-    if (editingEvent) { const { error } = await supabase.from("events").update(eventData).eq("id", editingEvent.id); if (!error) { setEventModalOpen(false); fetchCalendarPlans(); } else alert("エラー: " + error.message); }
-    else { const { error } = await supabase.from("events").insert(eventData); if (!error) { setEventModalOpen(false); fetchCalendarPlans(); } else alert("エラー: " + error.message); }
-    setIsProcessing(false);
-  };
-  const handleDeleteEvent = async () => {
-    if (!editingEvent || !confirm("このイベントを削除しますか？")) return;
-    setIsProcessing(true); const { error } = await supabase.from("events").delete().eq("id", editingEvent.id);
-    if (!error) { setEventModalOpen(false); fetchCalendarPlans(); } else alert("エラー: " + error.message);
-    setIsProcessing(false);
-  };
-
-  const getCalendarDays = () => {
-    const y = calendarMonth.getFullYear(); const m = calendarMonth.getMonth(); const firstDay = new Date(y, m, 1).getDay(); const daysInMonth = new Date(y, m + 1, 0).getDate();
-    const blanks = Array(firstDay).fill(null); const days = Array.from({ length: daysInMonth }, (_, i) => i + 1); const totalSlots = blanks.length + days.length; const trailingBlanks = Array(Math.ceil(totalSlots / 7) * 7 - totalSlots).fill(null);
-    return [...blanks, ...days, ...trailingBlanks];
-  };
-
-  // 共通ダイアログコンポーネント群
-  const renderAllDialogs = () => (
-    <div className="print:hidden">
-      <Dialog open={eventModalOpen} onOpenChange={setEventModalOpen}>
-        <DialogContent className="w-[95vw] max-w-sm bg-white p-4 md:p-6 rounded-xl">
-          <DialogHeader><DialogTitle className="flex items-center gap-2 text-slate-800"><Flag className="w-5 h-5 text-slate-600" /> {editingEvent ? "イベントの編集" : "新規イベントの登録"}</DialogTitle></DialogHeader>
-          <div className="space-y-4 mt-2">
-            <div><label className="block text-xs font-bold text-slate-500 mb-1">日付</label><Input type="date" value={eventDate} onChange={e => setEventDate(e.target.value)} className="h-10 md:h-9" /></div>
-            <div><label className="block text-xs font-bold text-slate-500 mb-1">イベント名・内容 (必須)</label><Input value={eventTitle} onChange={e => setEventTitle(e.target.value)} placeholder="例: 月末棚卸、大掃除..." className="h-10 md:h-9 font-bold" /></div>
-            <div><label className="block text-xs font-bold text-slate-500 mb-1">備考 (任意)</label><textarea value={eventNotes} onChange={e => setEventNotes(e.target.value)} placeholder="詳細なメモ..." className="w-full p-3 md:p-2 border border-slate-200 rounded-md text-sm resize-none h-24 md:h-20 bg-slate-50" /></div>
-          </div>
-          <DialogFooter className="mt-6 border-t pt-4 flex flex-col sm:flex-row gap-2 sm:justify-between">
-            {editingEvent ? <Button onClick={handleDeleteEvent} disabled={isProcessing} variant="outline" className="w-full sm:w-auto border-red-200 text-red-600 hover:bg-red-50"><Trash2 className="h-4 w-4 mr-2" />削除</Button> : <div className="hidden sm:block"></div>}
-            <div className="flex gap-2 w-full sm:w-auto mt-2 sm:mt-0">
-              <Button variant="ghost" onClick={() => setEventModalOpen(false)} className="flex-1 sm:flex-none">キャンセル</Button>
-              <Button onClick={handleSaveEvent} disabled={isProcessing || !eventTitle} className="flex-1 sm:flex-none bg-slate-800 hover:bg-slate-900 text-white font-bold h-10 md:h-9">{isProcessing ? <Loader2 className="animate-spin h-4 w-4 mr-2" /> : null}保存</Button>
-            </div>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={!!editingPlan} onOpenChange={(open) => !open && setEditingPlan(null)}>
-        <DialogContent className="w-[95vw] max-w-md bg-white p-4 md:p-6 rounded-xl">
-          <DialogHeader><DialogTitle className="flex justify-between items-center"><span>計画詳細 / ステータス更新</span></DialogTitle></DialogHeader>
-          {editingPlan && (
-            <div className="space-y-4 mt-2">
-              <div className="bg-slate-50 p-3 rounded-lg border text-sm">
-                <div className="text-slate-500 text-xs mb-1">Lot番号: <span className="font-bold text-slate-800">{editingPlan.lot_code}</span></div>
-                <div className="font-bold text-lg text-blue-900 leading-tight">{editingPlan.products?.name}</div>
-                <div className="text-slate-600 mt-1">{editingPlan.products?.variant_name}</div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div><label className="block text-xs font-bold text-slate-500 mb-1">製造予定日</label><Input type="date" value={editDate} onChange={e => setEditDate(e.target.value)} disabled={editingPlan.status !== 'planned' || !canEdit} className="h-10 md:h-9" /></div>
-                <div><label className="block text-xs font-bold text-slate-500 mb-1">製造量 (kg)</label><Input type="number" value={editKg} onChange={e => setEditKg(e.target.value === "" ? "" : Number(e.target.value))} disabled={editingPlan.status !== 'planned' || !canEdit} className="h-10 md:h-9 text-right font-bold text-lg" /></div>
-              </div>
-              <div className="text-xs text-right text-slate-500">予定ケース数: <span className="font-bold">{editingPlan.planned_cs} c/s</span></div>
-
-              <div><label className="block text-xs font-bold text-slate-500 mb-1">備考</label><Input value={editNotes} onChange={e => setEditNotes(e.target.value)} disabled={editingPlan.status !== 'planned' || !canEdit} className="h-10 md:h-9" placeholder="備考を入力..." /></div>
-
-              {canEdit && (
-                <div className="pt-4 border-t flex flex-col gap-3">
-                  <div className="flex gap-2">
-                    <Button onClick={handleUpdatePlan} disabled={isProcessing || editingPlan.status !== 'planned'} className="flex-1 bg-slate-800 hover:bg-slate-900 text-white h-10 md:h-9"><Edit className="h-4 w-4 mr-2" /> 内容更新</Button>
-                    <Button onClick={handleDeletePlan} disabled={isProcessing} variant="outline" className="border-red-200 text-red-600 hover:bg-red-50 h-10 md:h-9"><Trash2 className="h-4 w-4 mr-2" /> {editingPlan.status === 'planned' ? '削除' : 'キャンセル'}</Button>
-                  </div>
-
-                  {editingPlan.status === 'planned' && (
-                    <Button onClick={handleStartProduction} disabled={isProcessing} className="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold h-12 shadow-sm text-base">
-                      <Play className="h-5 w-5 mr-2" />製造を開始する (在庫減算)
-                    </Button>
-                  )}
-
-                  {editingPlan.status === 'in_progress' && (
-                    <Button onClick={openCompletionModal} disabled={isProcessing} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold h-12 shadow-sm text-base">
-                      <CheckCircle className="h-5 w-5 mr-2" />製造を完了し、実績数を入力
-                    </Button>
-                  )}
-                </div>
-              )}
-              {editingPlan.status === 'completed' && <div className="text-center text-sm font-bold text-green-700 bg-green-50 py-3 rounded-md border border-green-200">この計画は完了し、在庫へ反映済みです。</div>}
-              {!canEdit && editingPlan.status !== 'completed' && <div className="text-center text-sm font-bold text-slate-500 bg-slate-50 py-3 rounded-md"><Lock className="w-4 h-4 inline mr-1" />閲覧モードのため処理はできません</div>}
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={completionModalOpen} onOpenChange={setCompletionModalOpen}>
-        <DialogContent className="max-w-sm bg-white p-6 rounded-xl">
-          <DialogHeader><DialogTitle className="flex items-center gap-2 text-green-700"><CheckCircle2 className="w-5 h-5" /> 製造完了と実績の登録</DialogTitle></DialogHeader>
-          <div className="space-y-4 mt-4">
-            <div className="bg-slate-50 p-4 rounded-lg text-center border">
-              <div className="text-xs text-slate-500 mb-1">予定ケース数</div>
-              <div className="text-2xl font-black text-slate-400 line-through">{editingPlan?.planned_cs} <span className="text-sm font-normal">c/s</span></div>
-            </div>
-
-            <div className="text-center">
-              <label className="block text-sm font-bold text-blue-800 mb-2">実際の完成数を入力してください</label>
-              <div className="flex items-center justify-center gap-2">
-                <Input type="number" inputMode="numeric" min="0" autoFocus value={actualCs} onChange={e => setActualCs(e.target.value === "" ? "" : Number(e.target.value))} className="w-24 h-14 text-3xl font-black text-right border-blue-400 focus-visible:ring-blue-500 shadow-sm" />
-                <span className="font-bold text-slate-500">c/s</span>
-                <Input type="number" inputMode="numeric" min="0" max={Math.floor(((editingPlan?.products?.unit_per_cs || 24) - 1) / 2)} value={actualPiece} onChange={e => setActualPiece(e.target.value === "" ? "" : Number(e.target.value))} className="w-16 h-14 text-2xl font-bold text-right border-blue-400 focus-visible:ring-blue-500 shadow-sm ml-2" />
-                <span className="font-bold text-slate-500">p</span>
-              </div>
-            </div>
-
-            {actualCs !== "" && editingPlan && (
-              <div className={`text-center font-bold text-sm mt-4 ${Number(actualCs) === editingPlan.planned_cs && (actualPiece === "" || Number(actualPiece) === 0) ? 'text-green-600' : 'text-amber-600'}`}>
-                予定との誤差: {
-                  ((Number(actualCs) * (editingPlan.products?.unit_per_cs || 24)) + (Number(actualPiece) * 2)) - (editingPlan.planned_cs * (editingPlan.products?.unit_per_cs || 24)) > 0 ? "+" : ""
-                }
-                {((Number(actualCs) * (editingPlan.products?.unit_per_cs || 24)) + (Number(actualPiece) * 2)) - (editingPlan.planned_cs * (editingPlan.products?.unit_per_cs || 24))} ピース
-              </div>
-            )}
-          </div>
-
-          <DialogFooter className="mt-6 border-t pt-4 flex gap-2">
-            <Button variant="outline" onClick={() => setCompletionModalOpen(false)} className="flex-1">戻る</Button>
-            <Button onClick={handleCompleteProductionWithActuals} disabled={isProcessing || actualCs === ""} className="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold">
-              {isProcessing ? <Loader2 className="animate-spin h-4 w-4 mr-2" /> : <CheckCircle2 className="h-4 w-4 mr-2" />} 完了して在庫に加算
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={ordersModalOpen} onOpenChange={setOrdersModalOpen}>
-        <DialogContent className="w-[95vw] max-w-md bg-white p-4 md:p-6 rounded-xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-purple-800">
-              <Truck className="w-5 h-5" /> 出荷予定 ({ordersModalDate ? new Date(ordersModalDate).toLocaleDateString('ja-JP') : ''})
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3 mt-2 max-h-[60vh] overflow-y-auto pr-2">
-            {calendarOrders.filter(o => o.planned_ship_date === ordersModalDate).map(ord => {
-              const isShipped = ord.status === 'shipped';
-              const unitPerCs = ord.products?.unit_per_cs || 24;
-              const displayCs = Math.floor(ord.quantity / unitPerCs);
-              const displayP = Math.floor((ord.quantity % unitPerCs) / 2);
-
-              return (
-                <div key={ord.id} className={`p-4 rounded-lg border ${isShipped ? 'bg-slate-50 border-slate-200 opacity-70' : 'bg-purple-50 border-purple-200'}`}>
-                  <div className="flex justify-between items-start mb-2">
-                    <div className={`font-bold text-base ${isShipped ? 'text-slate-500 line-through' : 'text-slate-800'}`}>{ord.customers?.name}</div>
-                    {isShipped ? <Badge className="bg-slate-200 text-slate-600 border-none shadow-none text-xs">出荷済</Badge> : <Badge className="bg-purple-500 text-white border-none shadow-sm text-xs">出荷予定</Badge>}
-                  </div>
-                  <div className="flex justify-between items-end border-t border-purple-200/50 pt-2">
-                    <div>
-                      <div className="text-slate-700 font-bold">{ord.products?.name}</div>
-                      <div className="text-xs text-slate-500">{ord.products?.variant_name}</div>
-                      {ord.customer_order_no && <div className="text-[10px] text-slate-400 mt-1">発注: {ord.customer_order_no}</div>}
-                    </div>
-                    <div className="font-black text-purple-800 text-2xl">
-                      {displayCs} <span className="font-normal text-sm text-slate-500">c/s</span>
-                      {displayP > 0 && <span className="text-lg ml-1">{displayP} <span className="text-xs font-normal text-slate-500">p</span></span>}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-            {calendarOrders.filter(o => o.planned_ship_date === ordersModalDate).length === 0 && (
-              <div className="text-center py-8 text-slate-400 font-bold bg-slate-50 rounded-lg">この日の出荷予定はありません</div>
-            )}
-          </div>
-          <DialogFooter className="mt-4 border-t pt-4">
-            <Button variant="outline" onClick={() => setOrdersModalOpen(false)} className="w-full font-bold h-10 md:h-9">閉じる</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
-
-  if (loading && orders.length === 0 && plans.length === 0) return <div className="flex justify-center items-center h-64"><Loader2 className="animate-spin h-8 w-8 text-slate-500" /></div>;
+  const groupedPlans = plans.reduce((acc, plan) => {
+    if (!acc[plan.plan_date]) acc[plan.plan_date] = [];
+    acc[plan.plan_date].push(plan);
+    return acc;
+  }, {} as Record<string, Plan[]>);
 
   return (
-    <div className={viewMode === 'calendar' ? "bg-white min-h-screen print:p-0 print:m-0 -mx-4 px-4 md:mx-0 md:px-0 pt-4 md:pt-0" : "bg-transparent"}>
-      {viewMode === 'calendar' ? (
-        <>
-          <style dangerouslySetInnerHTML={{ __html: `@media print { header { display: none !important; } main { padding: 0 !important; margin: 0 !important; max-width: 100% !important; } @page { size: landscape; margin: 10mm; } body { background-color: white !important; } }` }} />
+    <div className="bg-transparent">
+      <div className="flex justify-between items-center mb-6">
+        <div className="flex items-center gap-4">
+          <h1 className="text-2xl font-black flex items-center gap-2 text-slate-800">
+            <ClipboardList className="h-7 w-7 text-emerald-600" /> 製造計画・実績
+          </h1>
+          {!canEdit && <Badge variant="outline" className="bg-slate-100 text-slate-500 border-slate-300 px-3 py-1 shadow-sm"><Lock className="w-3 h-3 mr-1" /> 閲覧モード</Badge>}
+        </div>
 
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 print:hidden bg-slate-50 p-4 rounded-lg border shadow-sm">
-            <Button variant="outline" onClick={() => setViewMode('list')} className="gap-2"><ArrowLeft className="h-4 w-4" /> <span className="hidden sm:inline">計画入力へ戻る</span><span className="sm:hidden">戻る</span></Button>
-            <div className="flex items-center justify-center gap-4 w-full md:w-auto">
-              <Button variant="ghost" size="icon" onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1))}><ChevronLeft className="h-6 w-6" /></Button>
-              <h2 className="text-xl font-bold text-slate-800 w-32 text-center">{calendarMonth.getFullYear()}年 {String(calendarMonth.getMonth() + 1).padStart(2, '0')}月</h2>
-              <Button variant="ghost" size="icon" onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1))}><ChevronRight className="h-6 w-6" /></Button>
-            </div>
-            <div className="flex gap-2 w-full md:w-auto justify-end">
-              {canEdit && <Button onClick={() => openEventDialog()} className="bg-slate-700 hover:bg-slate-800 text-white gap-1 font-bold shadow-sm flex-1 md:flex-none"><Flag className="h-4 w-4" /> イベント<span className="hidden sm:inline">登録</span></Button>}
-              <Button onClick={() => window.print()} className="bg-blue-600 hover:bg-blue-700 text-white gap-1 font-bold shadow-sm flex-1 md:flex-none"><Printer className="h-4 w-4" /> 印刷</Button>
-            </div>
-          </div>
-
-          <div className="hidden print:flex justify-between items-end mb-3 border-b-2 border-black pb-2">
-            <div className="text-2xl font-black">製造・出荷スケジュール表 ({calendarMonth.getFullYear()}年 {String(calendarMonth.getMonth() + 1).padStart(2, '0')}月)</div>
-            <div className="text-sm font-bold text-slate-800">更新日: {new Date().toLocaleDateString('ja-JP')}</div>
-          </div>
-
-          <div className="border border-slate-300 rounded-lg md:rounded-sm overflow-hidden print:border-black print:border-2">
-
-            {/* --- PC・印刷用 横型カレンダー --- */}
-            <div className="hidden md:block print:block">
-              <div className="grid grid-cols-7 bg-slate-100 print:bg-gray-100 border-b border-slate-300 print:border-black">
-                {['日', '月', '火', '水', '木', '金', '土'].map((d, i) => (<div key={d} className={`p-2 text-center font-bold text-sm border-r border-slate-300 print:border-black last:border-r-0 ${i === 0 ? 'text-red-600' : i === 6 ? 'text-blue-600' : 'text-slate-700 print:text-black'}`}>{d}</div>))}
-              </div>
-              <div className="grid grid-cols-7">
-                {getCalendarDays().map((day, idx) => {
-                  const dateStr = day ? `${calendarMonth.getFullYear()}-${String(calendarMonth.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}` : null;
-                  const dayPlans = dateStr ? calendarPlans.filter(p => p.production_date === dateStr) : [];
-                  const dayOrders = dateStr ? calendarOrders.filter(o => o.planned_ship_date === dateStr) : [];
-                  const dayEvents = dateStr ? calendarEvents.filter(e => e.event_date === dateStr) : [];
-
-                  return (
-                    <div key={idx} className={`min-h-[140px] print:min-h-[100px] border-b border-slate-300 print:border-black p-1 ${idx % 7 !== 6 ? 'border-r print:border-black' : ''} ${!day ? 'bg-slate-50 print:bg-white' : 'bg-white'}`}>
-                      {day && (
-                        <>
-                          <div className="flex justify-between items-start mb-1">
-                            <div onClick={() => canEdit && openEventDialog(undefined, dateStr ?? undefined)} className={`print:hidden p-0.5 ${canEdit ? 'text-slate-300 hover:text-blue-500 cursor-pointer' : 'text-transparent'}`}><PlusIcon /></div>
-                            <div className={`text-right font-bold text-sm ${idx % 7 === 0 ? 'text-red-600' : idx % 7 === 6 ? 'text-blue-600' : 'text-slate-700 print:text-black'}`}>{day}</div>
-                          </div>
-
-                          <div className="space-y-1.5 print:space-y-1">
-                            {/* ① 社内イベント */}
-                            {dayEvents.map(ev => (
-                              <div key={ev.id} onClick={() => canEdit && openEventDialog(ev)} className={`bg-slate-100 border border-slate-300 rounded p-1.5 print:p-1 print:border-black text-xs leading-tight wrap-break-word relative group ${canEdit ? 'cursor-pointer hover:bg-slate-200' : ''}`}>
-                                {canEdit && <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity print:hidden text-slate-400"><Edit className="h-3 w-3" /></div>}
-                                <div className="font-bold text-slate-800 print:text-black flex items-start gap-1"><Flag className="w-3 h-3 text-slate-500 mt-0.5 shrink-0" />{ev.title}</div>
-                                {ev.notes && <div className="text-[10px] text-slate-600 print:text-black mt-0.5 ml-4 italic">{ev.notes}</div>}
-                              </div>
-                            ))}
-
-                            {/* ② 出荷予定 (★変更: クリックしても「出荷〇件」の表示が崩れないように修正) */}
-                            {dayOrders.length > 0 && (
-                              <div onClick={() => openOrdersModal(dateStr!)} className="bg-purple-100 border border-purple-300 rounded px-2 py-1 print:p-1 print:border-black text-xs font-bold text-purple-800 print:text-black flex items-center justify-between shadow-sm cursor-pointer hover:bg-purple-200 transition-colors">
-                                <span className="flex items-center gap-1"><Truck className="w-3.5 h-3.5" /> 出荷</span>
-                                <span className="text-[10px] bg-white px-1.5 rounded-sm">{dayOrders.length}件</span>
-                              </div>
-                            )}
-
-                            {/* ③ 製造予定 */}
-                            {dayPlans.map(plan => {
-                              let cardColor = "bg-blue-50 border-blue-200";
-                              if (plan.status === 'in_progress') cardColor = "bg-amber-50 border-amber-300";
-                              if (plan.status === 'completed') cardColor = "bg-green-50 border-green-300";
-
-                              const isCompleted = plan.status === 'completed';
-                              const displayCs = isCompleted ? (plan.actual_cs !== undefined ? plan.actual_cs : plan.planned_cs) : plan.planned_cs;
-                              const displayP = isCompleted ? (plan.actual_piece || 0) : 0;
-
-                              return (
-                                <div key={plan.id} onClick={() => canEdit && openEditDialog(plan)} className={`${cardColor} border rounded p-1.5 print:p-1 print:border-black print:bg-white text-xs leading-tight wrap-break-word relative group ${canEdit ? 'cursor-pointer hover:shadow-md transition-shadow' : ''}`}>
-                                  {canEdit && <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity print:hidden text-slate-400"><Edit className="h-3 w-3" /></div>}
-                                  <div className="flex items-center gap-1 text-[10px] text-blue-700 font-bold mb-0.5"><Factory className="w-3 h-3" /> {isCompleted ? '製造実績' : '製造予定'}</div>
-                                  <div className="font-bold text-slate-800 print:text-black pr-3">{plan.products?.name}</div>
-                                  <div className="text-slate-600 print:text-black mb-0.5">{plan.products?.variant_name}</div>
-                                  <div className="font-black text-slate-900 print:text-black">
-                                    {displayCs} <span className="font-normal text-[10px]">c/s</span>
-                                    {displayP > 0 && <span className="ml-1">{displayP} <span className="font-normal text-[10px]">p</span></span>}
-                                    {!isCompleted && <span className="text-slate-600 font-normal ml-1">({plan.production_kg}kg)</span>}
-                                  </div>
-                                  {plan.notes && <div className="mt-1 pt-1 border-t border-slate-200 print:border-black text-[10px] text-slate-700 print:text-black italic wrap-break-word">{plan.notes}</div>}
-
-                                  <div className="mt-1 flex justify-end print:hidden">
-                                    {plan.status === 'planned' && <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 rounded font-bold">計画</span>}
-                                    {plan.status === 'in_progress' && <span className="text-[10px] bg-amber-500 text-white px-1.5 rounded font-bold flex items-center gap-0.5"><Play className="h-2 w-2" /> 製造中</span>}
-                                    {plan.status === 'completed' && <span className="text-[10px] bg-green-600 text-white px-1.5 rounded font-bold flex items-center gap-0.5"><CheckCircle className="h-2 w-2" /> 完了</span>}
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* --- スマホ用 縦型カレンダー (リスト形式) --- */}
-            <div className="block md:hidden print:hidden divide-y divide-slate-200 bg-slate-50">
-              {getCalendarDays().filter(d => d !== null).map((day) => {
-                const dateStr = `${calendarMonth.getFullYear()}-${String(calendarMonth.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                const dObj = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), day as number);
-                const dow = dObj.getDay();
-                const dowStr = ['日', '月', '火', '水', '木', '金', '土'][dow];
-                const dowColor = dow === 0 ? 'text-red-600' : dow === 6 ? 'text-blue-600' : 'text-slate-700';
-
-                const dayPlans = calendarPlans.filter(p => p.production_date === dateStr);
-                const dayOrders = calendarOrders.filter(o => o.planned_ship_date === dateStr);
-                const dayEvents = calendarEvents.filter(e => e.event_date === dateStr);
-                const hasAnyEvent = dayPlans.length > 0 || dayOrders.length > 0 || dayEvents.length > 0;
-
-                return (
-                  <div key={day} className={`flex p-3 ${dow === 0 ? 'bg-red-50/30' : dow === 6 ? 'bg-blue-50/30' : 'bg-white'}`}>
-                    <div className="w-12 shrink-0 flex flex-col items-center pt-1 border-r border-slate-100 mr-3 pr-1">
-                      <span className={`text-xl font-black leading-none ${dowColor}`}>{day}</span>
-                      <span className={`text-[10px] mt-1 font-bold ${dowColor}`}>{dowStr}</span>
-                      {canEdit && (
-                        <div onClick={() => openEventDialog(undefined, dateStr)} className="mt-3 text-slate-400 hover:text-blue-500 hover:bg-slate-100 cursor-pointer p-1.5 rounded-full border shadow-sm bg-white">
-                          <PlusIcon />
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="flex-1 space-y-2.5 py-1 min-h-12">
-                      {dayEvents.map(ev => (
-                        <div key={ev.id} onClick={() => canEdit && openEventDialog(ev)} className={`bg-slate-100 border border-slate-300 rounded p-2 text-xs relative group shadow-sm ${canEdit ? 'cursor-pointer hover:bg-slate-200' : ''}`}>
-                          <div className="font-bold text-slate-800 flex items-start gap-1.5 text-sm"><Flag className="w-4 h-4 text-slate-500 mt-0.5 shrink-0" />{ev.title}</div>
-                          {ev.notes && <div className="text-[11px] text-slate-600 mt-1.5 ml-5 italic bg-white/50 p-1.5 rounded border border-slate-200">{ev.notes}</div>}
-                        </div>
-                      ))}
-
-                      {/* ② 出荷予定 */}
-                      {dayOrders.length > 0 && (
-                        <div onClick={() => openOrdersModal(dateStr!)} className="bg-purple-100 border border-purple-300 rounded px-3 py-2 text-sm font-bold text-purple-800 flex items-center justify-between shadow-sm cursor-pointer hover:bg-purple-200 transition-colors">
-                          <span className="flex items-center gap-1.5"><Truck className="w-4 h-4" /> 出荷</span>
-                          <span className="text-xs bg-white px-2 py-0.5 rounded-sm">{dayOrders.length} 件の予定</span>
-                        </div>
-                      )}
-
-                      {dayPlans.map(plan => {
-                        let cardColor = "bg-blue-50 border-blue-200";
-                        if (plan.status === 'in_progress') cardColor = "bg-amber-50 border-amber-300";
-                        if (plan.status === 'completed') cardColor = "bg-green-50 border-green-300";
-
-                        const isCompleted = plan.status === 'completed';
-                        const displayCs = isCompleted ? (plan.actual_cs !== undefined ? plan.actual_cs : plan.planned_cs) : plan.planned_cs;
-                        const displayP = isCompleted ? (plan.actual_piece || 0) : 0;
-
-                        return (
-                          <div key={plan.id} onClick={() => canEdit && openEditDialog(plan)} className={`${cardColor} border rounded p-2.5 text-xs shadow-sm relative group ${canEdit ? 'cursor-pointer' : ''}`}>
-                            <div className="flex justify-between items-start mb-1.5 border-b border-white/40 pb-1.5">
-                              <div className="flex items-center gap-1 text-[10px] text-blue-800 font-bold"><Factory className="w-3.5 h-3.5" /> {isCompleted ? '製造実績' : '製造予定'}</div>
-                              {plan.status === 'planned' && <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 rounded font-bold">計画</span>}
-                              {plan.status === 'in_progress' && <span className="text-[10px] bg-amber-500 text-white px-1.5 rounded font-bold flex items-center gap-0.5"><Play className="h-2.5 w-2.5" /> 製造中</span>}
-                              {plan.status === 'completed' && <span className="text-[10px] bg-green-600 text-white px-1.5 rounded font-bold flex items-center gap-0.5"><CheckCircle className="h-2.5 w-2.5" /> 完了</span>}
-                            </div>
-                            <div className="font-bold text-slate-800 text-sm">{plan.products?.name} <span className="text-slate-500 font-normal text-xs">({plan.products?.variant_name})</span></div>
-                            <div className="flex justify-between items-end mt-2 pt-1.5">
-                              <div className="text-slate-600 italic truncate max-w-[50%]">{plan.notes || ""}</div>
-                              <div className="font-black text-slate-900 text-lg">
-                                {displayCs} <span className="font-normal text-[10px] text-slate-500">c/s</span>
-                                {displayP > 0 && <span className="font-black text-slate-900 text-lg ml-1">{displayP} <span className="font-normal text-[10px] text-slate-500">p</span></span>}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-
-                      {!hasAnyEvent && (
-                        <div className="text-xs text-slate-400 flex h-full items-center justify-center font-medium border border-dashed rounded-lg py-4 bg-slate-50/50">
-                          予定なし
-                        </div>
-                      )}
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setViewMode(viewMode === 'calendar' ? 'list' : 'calendar')} className="bg-white border-slate-200 shadow-sm hidden md:flex font-bold">
+            {viewMode === 'calendar' ? <LayoutDashboard className="w-4 h-4 mr-2" /> : <Calendar className="w-4 h-4 mr-2" />} {viewMode === 'calendar' ? "リスト表示" : "カレンダー表示"}
+          </Button>
+          {canEdit && (
+            <Dialog open={isOpen} onOpenChange={setIsOpen}>
+              <DialogTrigger asChild><Button className="bg-emerald-600 hover:bg-emerald-700 text-white font-black shadow-lg shadow-emerald-100 h-11 px-6"><Play className="h-4 w-4 mr-2" /> 計画を追加</Button></DialogTrigger>
+              <DialogContent className="max-w-md bg-white">
+                <DialogHeader><DialogTitle className="font-black text-xl flex items-center gap-2 text-emerald-700 underline underline-offset-4 decoration-emerald-200"><Calendar className="h-6 w-6" /> 製造計画の新規作成</DialogTitle></DialogHeader>
+                <div className="space-y-4 pt-4">
+                  <div>
+                    <label className="block text-xs font-black text-slate-500 mb-1 leading-none uppercase tracking-widest">製造予定日</label>
+                    <Input type="date" value={newPlan.date} onChange={e => setNewPlan({...newPlan, date: e.target.value})} className="bg-slate-50 border-slate-200" />
+                  </div>
+                  <div className="bg-emerald-50/50 p-4 rounded-xl border border-emerald-100">
+                    <label className="block text-xs font-black text-emerald-600 mb-2 leading-none uppercase tracking-widest">対象製品 *</label>
+                    <div className="space-y-2">
+                      <select 
+                        className="w-full border-slate-200 rounded-lg p-3 text-sm bg-white font-bold" 
+                        value={selectedProductName} 
+                        onChange={e => { setSelectedProductName(e.target.value); setNewPlan({...newPlan, productId: ""}); }}
+                      >
+                        <option value="">1. 製品名を選択...</option>
+                        {Array.from(new Set(products.map(p => p.name))).map(name => <option key={name} value={name}>{name}</option>)}
+                      </select>
+                      <select 
+                        className="w-full border-slate-200 rounded-lg p-3 text-sm bg-white disabled:bg-slate-100 font-bold" 
+                        value={newPlan.productId} 
+                        onChange={e => setNewPlan({...newPlan, productId: e.target.value})} 
+                        disabled={!selectedProductName}
+                      >
+                        <option value="">{selectedProductName ? "2. 味を選択..." : "←先に製品名"}</option>
+                        {products.filter(p => p.name === selectedProductName).map(p => <option key={p.id} value={p.id}>{p.variant_name}</option>)}
+                      </select>
                     </div>
                   </div>
-                )
-              })}
-            </div>
-          </div>
-        </>
-      ) : (
-        <>
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-            <div className="flex items-center gap-4">
-              <h1 className="text-2xl font-bold flex items-center gap-2 text-slate-800"><Factory className="h-6 w-6 text-blue-600" /> 製造計画・Lot採番</h1>
-              {!canEdit && <Badge variant="outline" className="bg-slate-100 text-slate-500 border-slate-300 px-3 py-1 shadow-sm hidden md:flex"><Lock className="w-3 h-3 mr-1" /> 閲覧モード</Badge>}
-            </div>
-            <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
-              {canEdit && (
-                <Button onClick={handleSelectStockProduction} className="bg-slate-800 hover:bg-slate-900 text-white font-bold shadow-sm h-12 md:h-10">
-                  <Plus className="h-4 w-4 mr-2" /> 在庫品として製造 (見込み生産)
-                </Button>
-              )}
-              <Button onClick={() => setViewMode('calendar')} variant="outline" className="border-blue-300 text-blue-700 hover:bg-blue-50 gap-2 font-bold shadow-sm h-12 md:h-10">
-                <CalendarDays className="h-5 w-5" /> スケジュール表を表示
-              </Button>
-            </div>
-          </div>
-
-          <div className="flex flex-col lg:flex-row gap-6">
-            <div className="w-full lg:w-[35%]">
-              <h2 className="font-bold text-slate-700 mb-3 flex items-center gap-2"><span className="bg-blue-100 text-blue-800 rounded-full w-6 h-6 flex items-center justify-center text-xs">1</span>未計画の残数がある受注</h2>
-              <div className="space-y-3 h-[calc(100vh-200px)] overflow-y-auto pr-2 pb-10">
-                {orders.map((order) => {
-                  const displayCs = Math.floor(order.quantity / (order.products?.unit_per_cs || 24));
-                  const displayP = Math.floor((order.quantity % (order.products?.unit_per_cs || 24)) / 2);
-                  const remainCs = Math.floor(order.remainPieces / (order.products?.unit_per_cs || 24));
-                  const remainP = Math.floor((order.remainPieces % (order.products?.unit_per_cs || 24)) / 2);
-
-                  return (
-                    <Card key={order.id} onClick={() => handleSelectOrder(order)} className={`cursor-pointer transition-all border-2 ${selectedOrder?.id === order.id ? "border-blue-500 bg-blue-50 shadow-md transform scale-[1.02]" : "border-slate-200 hover:border-blue-300"}`}>
-                      <CardHeader className="p-4 pb-2 bg-white rounded-t-lg"><div className="flex justify-between items-start"><div className="text-xs text-slate-500">{order.id}</div><Badge className="bg-slate-100 text-slate-800 border-none shadow-sm text-xs">納期: {new Date(order.desired_ship_date).toLocaleDateString()}</Badge></div><CardTitle className="text-base text-slate-800 leading-tight mt-1">{order.customers?.name}</CardTitle></CardHeader>
-                      <CardContent className="p-4 pt-2 text-sm text-slate-600 bg-white rounded-b-lg">
-                        <div className="font-bold text-slate-800 mb-2">{order.products?.name} ({order.products?.variant_name})</div>
-                        <div className="flex items-center justify-between border-t pt-2">
-                          <span className="text-xs text-slate-500">全体: {displayCs} c/s {displayP > 0 && `${displayP} p`}</span>
-                          <div className="flex items-baseline gap-1">
-                            <span className="text-xs text-slate-500">未計画残数:</span>
-                            <span className="font-black text-xl text-red-600">{remainCs}</span><span className="text-xs font-normal text-slate-500">c/s</span>
-                            {remainP > 0 && <><span className="font-bold text-lg text-slate-700 ml-1">{remainP}</span><span className="text-[10px] font-normal text-slate-500">p</span></>}
-                          </div>
-                        </div>
-                        <div className="w-full bg-slate-100 h-2 rounded-full mt-2 overflow-hidden"><div className="bg-blue-500 h-full transition-all" style={{ width: `${(order.plannedPieces / order.quantity) * 100}%` }}></div></div>
-                      </CardContent>
-                    </Card>
-                  )
-                })}
-              </div>
-            </div>
-
-            <div className="w-full lg:w-[65%] flex flex-col gap-4">
-              <h2 className="font-bold text-slate-700 mb-1 flex items-center gap-2"><span className="bg-blue-100 text-blue-800 rounded-full w-6 h-6 flex items-center justify-center text-xs">2</span>日別の製造予定を入力</h2>
-
-              {canEdit ? (
-                <Card className="border-slate-200 shadow-sm overflow-hidden shrink-0">
-                  {selectedOrder || isStockProduction ? (
-                    <div className="p-4 md:p-6">
-                      <div className="bg-slate-100 p-4 rounded-md mb-6 flex flex-col md:flex-row md:justify-between md:items-center gap-4 border border-slate-200 shadow-inner">
-                        {isStockProduction ? (
-                          <div className="w-full">
-                            <div className="text-xs text-slate-500 font-bold mb-1 flex items-center gap-1"><PackageCheck className="w-3 h-3" /> 見込み生産 (在庫補充)</div>
-                            <select value={stockProductId} onChange={e => setStockProductId(e.target.value)} className="w-full border-slate-300 rounded p-2 text-sm font-bold bg-white focus:ring-blue-500">
-                              <option value="">製造する製品を選択してください...</option>
-                              {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.variant_name})</option>)}
-                            </select>
-                          </div>
-                        ) : (
-                          <>
-                            <div><div className="text-xs text-slate-500 mb-1">対象製品</div><div className="font-bold text-lg text-slate-800">{selectedOrder?.products?.name} ({selectedOrder?.products?.variant_name})</div></div>
-                            <div className="md:text-right border-t md:border-none pt-2 md:pt-0 mt-2 md:mt-0">
-                              <div className="text-xs text-slate-500 mb-1">この受注の残数</div>
-                              <div className="font-black text-2xl text-red-600">
-                                {Math.floor((selectedOrder?.remainPieces || 0) / (selectedOrder?.products?.unit_per_cs || 24))} <span className="text-sm font-normal text-slate-500">c/s</span>
-                                {Math.floor(((selectedOrder?.remainPieces || 0) % (selectedOrder?.products?.unit_per_cs || 24)) / 2) > 0 && <span className="ml-1 text-xl">{Math.floor(((selectedOrder?.remainPieces || 0) % (selectedOrder?.products?.unit_per_cs || 24)) / 2)} <span className="text-xs font-normal text-slate-500">p</span></span>}
-                              </div>
-                            </div>
-                          </>
-                        )}
-                      </div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                        <div className="space-y-4">
-                          <div><label className="text-sm font-bold mb-2 text-slate-700 flex items-center gap-1"><CalendarIcon className="h-4 w-4" /> 製造予定日</label><Input type="date" value={planDate} onChange={e => setPlanDate(e.target.value)} className="text-lg bg-white h-12 border-blue-300 shadow-sm" /></div>
-                          <div><label className="block text-sm font-bold mb-2 text-slate-700">この日の製造量 (kg)</label><div className="flex items-center gap-3"><Input type="number" min="0" value={planKg} onChange={e => setPlanKg(e.target.value === "" ? "" : Number(e.target.value))} className="text-xl font-bold bg-white h-12 text-right border-blue-300 shadow-sm" /><span className="text-lg font-bold text-slate-500">kg</span></div><div className="text-xs text-slate-500 mt-2 text-right">自動計算 👉 <span className="font-bold text-blue-700 text-sm">{calculatedCs} c/s</span></div></div>
-                        </div>
-                        <div className="flex flex-col h-full"><label className="block text-sm font-bold mb-2 text-slate-700">備考 (任意)</label><textarea value={planNotes} onChange={e => setPlanNotes(e.target.value)} className="flex-1 w-full p-3 border rounded-md text-sm border-blue-300 shadow-sm min-h-[100px] resize-none" /></div>
-                      </div>
-                      <div className="bg-blue-50/50 border border-blue-200 rounded-lg p-5 relative">
-                        <h3 className="font-bold text-blue-900 mb-3 flex items-center gap-2 text-md"><PackageCheck className="h-5 w-5" /> 発行されるLot情報</h3>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                          <div className="bg-white p-3 rounded-md border border-blue-100 shadow-sm text-center"><div className="text-xs font-bold text-slate-500 mb-1">製造Lot番号</div><div className="text-2xl font-black text-blue-700 tracking-wider">{calculatedLot || "-"}</div></div>
-                          <div className="bg-white p-3 rounded-md border border-blue-100 shadow-sm text-center"><div className="text-xs font-bold text-slate-500 mb-1">賞味期限</div><div className="text-2xl font-black text-slate-800 tracking-wider">{calculatedExpiry ? new Date(calculatedExpiry).toLocaleDateString() : "-"}</div></div>
-                        </div>
-                      </div>
-                      <div className="mt-6 flex justify-end">
-                        <Button onClick={handleSavePlan} disabled={!planKg || !calculatedLot || (isStockProduction && !stockProductId)} className="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white h-12 px-6 font-bold shadow-sm"><ListPlus className="h-5 w-5 mr-2" /> 計画を追加する</Button>
-                      </div>
+                  <div>
+                    <label className="block text-xs font-black text-slate-500 mb-1 leading-none uppercase tracking-widest">製造予定数 (c/s)</label>
+                    <div className="flex items-center gap-3">
+                      <Input type="number" min="0" value={newPlan.cs || ""} onChange={e => setNewPlan({...newPlan, cs: Number(e.target.value)})} className="text-2xl font-black h-14 bg-white border-slate-200 w-32 text-right" />
+                      <span className="text-xl font-black text-slate-400">c/s</span>
                     </div>
-                  ) : (<div className="p-16 text-center text-slate-400 flex flex-col items-center bg-slate-50"><Factory className="h-16 w-16 mb-4 opacity-30 text-blue-500" /><p className="text-xl font-bold text-slate-500">リストから受注を選ぶか、見込み生産を開始してください</p></div>)}
-                </Card>
-              ) : (
-                <Card className="border-slate-200 bg-slate-50 opacity-70">
-                  <CardContent className="p-16 text-center text-slate-500"><Lock className="w-12 h-12 mx-auto mb-4 text-slate-300" /><p className="font-bold">閲覧モードのため、新規計画の追加はできません。</p></CardContent>
-                </Card>
-              )}
+                  </div>
+                  <Button onClick={handleSavePlan} disabled={isProcessing} className="w-full h-14 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-lg shadow-lg shadow-emerald-100 transition-all active:scale-95">
+                    {isProcessing ? <Loader2 className="animate-spin h-5 w-5" /> : <Save className="h-5 w-5 mr-2" />} 計画を保存する
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
+          )}
+        </div>
+      </div>
 
-              {!selectedOrder && (
-                <div className="mt-4">
-                  <h2 className="font-bold text-slate-700 mb-3 flex items-center gap-2"><CheckCircle2 className="h-5 w-5 text-green-600" /> 直近の製造計画一覧</h2>
-                  <div className="bg-white border rounded-lg shadow-sm overflow-hidden">
-                    <Table>
-                      <TableHeader className="bg-slate-50"><TableRow><TableHead>予定日</TableHead><TableHead>Lot / 製品</TableHead><TableHead className="text-right">数量(c/s)</TableHead><TableHead className="text-center w-24">状態</TableHead><TableHead className="w-20 text-center">詳細</TableHead></TableRow></TableHeader>
-                      <TableBody>
-                        {plans.map(plan => {
-                          const isCompleted = plan.status === 'completed';
-                          const displayCs = isCompleted ? (plan.actual_cs !== undefined ? plan.actual_cs : plan.planned_cs) : plan.planned_cs;
-                          const displayP = isCompleted ? (plan.actual_piece || 0) : 0;
+      <div className="space-y-8">
+        {Object.entries(groupedPlans).sort().map(([date, dayPlans]) => (
+          <div key={date} className="relative pl-6 before:content-[''] before:absolute before:left-0 before:top-2 before:bottom-0 before:w-1 before:bg-slate-200">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="bg-slate-800 text-white px-4 py-1 rounded-full font-black text-sm shadow-sm">{new Date(date).toLocaleDateString('ja-JP', { month: 'short', day: 'numeric', weekday: 'short' })}</div>
+              <div className="h-px bg-slate-200 flex-1"></div>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pb-8">
+              {dayPlans.map((plan) => (
+                <Card key={plan.id} className={`group border-2 transition-all ${plan.status === 'completed' ? 'border-slate-100 grayscale-[0.5] opacity-80' : 'border-white hover:border-emerald-200 shadow-sm shadow-slate-100'}`}>
+                  <CardHeader className="pb-2 p-4">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        {plan.orders ? (
+                          <Badge variant="outline" className="mb-1 text-[9px] bg-blue-50 text-blue-600 font-bold border-blue-100">紐付受注: {plan.orders.customers?.name}</Badge>
+                        ) : (
+                          <Badge variant="outline" className="mb-1 text-[9px] bg-slate-100 text-slate-500 font-bold border-slate-200">見込み生産</Badge>
+                        )}
+                        <CardTitle className="text-lg font-black text-slate-800 tracking-tight leading-tight group-hover:text-emerald-700">{plan.products?.name}</CardTitle>
+                        <div className="text-[11px] font-bold text-slate-400 mt-1 uppercase leading-none italic">{plan.products?.variant_name}</div>
+                      </div>
+                      {plan.status === 'planned' ? (
+                        <Badge className="bg-amber-100 text-amber-800 border-none px-2 shadow-sm shadow-amber-50 font-black">計画中</Badge>
+                      ) : (
+                        <Badge className="bg-emerald-100 text-emerald-800 border-none px-2 shadow-sm shadow-emerald-50 font-black flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> 完了</Badge>
+                      )}
+                    </div>
+                  </CardHeader>
+                  <CardContent className="p-4 pt-0">
+                    <div className="flex justify-between items-end mb-4">
+                      <div className="text-slate-400 text-xs font-bold leading-none">製造目標</div>
+                      <div className="text-2xl font-black text-slate-700 tracking-tighter">{plan.quantity} <span className="text-xs font-normal text-slate-400 not-italic">c/s</span></div>
+                    </div>
+                    
+                    {plan.status === 'completed' ? (
+                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-1">
+                        <div className="flex justify-between text-xs font-bold"><span className="text-slate-400 italic">LOT:</span> <span className="text-slate-900 font-mono tracking-widest">{plan.lot_code}</span></div>
+                        <div className="flex justify-between text-xs font-bold"><span className="text-slate-400">実績数量:</span> <span className="text-slate-900">{plan.actual_cs} c/s + {plan.actual_piece} p</span></div>
+                      </div>
+                    ) : (
+                      canEdit && (
+                        <Button onClick={() => handleOpenComplete(plan)} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black h-10 shadow-md shadow-emerald-50 flex items-center justify-center gap-2 transition-all">
+                          <CheckCircle2 className="w-4 h-4" /> 実績を入力して完了
+                        </Button>
+                      )
+                    )}
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </div>
+        ))}
+        {loading && plans.length === 0 && <div className="text-center py-24"><Loader2 className="animate-spin h-10 w-10 text-slate-300 mx-auto" /></div>}
+        {!loading && plans.length === 0 && (
+          <Card className="p-20 text-center text-slate-400 border-2 border-dashed border-slate-100 bg-white/50 rounded-3xl">
+            <LayoutDashboard className="w-16 h-16 mx-auto mb-4 opacity-10" />
+            <p className="font-black text-lg tracking-tight">現在、予定されている製造計画はありません。</p>
+          </Card>
+        )}
+      </div>
 
-                          return (
-                            <TableRow key={plan.id}>
-                              <TableCell>
-                                <div className="font-bold text-slate-700">{new Date(plan.production_date).toLocaleDateString()}</div>
-                                {!plan.order_id && <Badge className="bg-slate-100 text-slate-500 border-none shadow-none text-[10px] mt-1 py-0">見込み生産</Badge>}
-                              </TableCell>
-                              <TableCell><div className="font-bold text-blue-600">{plan.lot_code}</div><div className="text-xs text-slate-600">{plan.products?.name}</div></TableCell>
-                              <TableCell className="text-right font-bold">
-                                {displayCs} c/s
-                                {displayP > 0 && <span className="ml-1">{displayP} p</span>}
-                              </TableCell>
-                              <TableCell className="text-center">
-                                {plan.status === 'planned' && <Badge className="bg-blue-100 text-blue-700 border-none shadow-sm">計画</Badge>}
-                                {plan.status === 'in_progress' && <Badge className="bg-amber-500 text-white border-none shadow-sm">製造中</Badge>}
-                                {plan.status === 'completed' && <Badge className="bg-green-600 text-white border-none shadow-sm">完了</Badge>}
-                              </TableCell>
-                              <TableCell className="text-center"><Button variant="outline" size="sm" onClick={() => canEdit ? openEditDialog(plan) : alert("閲覧モードです")} className="text-blue-600 border-blue-200 hover:bg-blue-50">確認</Button></TableCell>
-                            </TableRow>
-                          );
-                        })}
-                      </TableBody>
-                    </Table>
+      {/* 実績入力ダイアログ */}
+      <Dialog open={completeDialogOpen} onOpenChange={setCompleteDialogOpen}>
+        <DialogContent className="max-w-md bg-white">
+          <DialogHeader><DialogTitle className="font-black text-xl flex items-center gap-2"><CheckCircle2 className="w-6 h-6 text-emerald-600" /> 製造実績の報告</DialogTitle></DialogHeader>
+          <div className="space-y-6 pt-4 pb-2">
+            <div className="bg-slate-100 px-4 py-3 rounded-xl border border-slate-200 flex justify-between items-center">
+              <div><div className="text-[10px] text-slate-400 font-black mb-1 leading-none">計画品目</div><div className="font-black text-slate-800">{selectedPlan?.products?.name}</div></div>
+              <div className="text-right"><div className="text-[10px] text-slate-400 font-black mb-1 leading-none">目標</div><div className="font-black text-slate-800">{selectedPlan?.quantity} c/s</div></div>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-black text-slate-500 mb-1 leading-none uppercase tracking-widest flex items-center gap-1">製造ロット番号 (Lot) <AlertCircle className="w-3 h-3 text-emerald-500" /></label>
+                <div className="relative">
+                  <Input value={actualResults.lotCode} onChange={e => setActualResults({...actualResults, lotCode: e.target.value})} className="bg-slate-50 border-slate-200 font-mono tracking-widest text-lg h-12" placeholder="YYMMDD-01" />
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-300 italic">MANUAL INPUT</div>
+                </div>
+              </div>
+              
+              <div className="bg-emerald-50/50 p-5 rounded-2xl border-2 border-emerald-100">
+                <label className="block text-xs font-black text-emerald-700 mb-3 leading-none uppercase tracking-widest border-l-4 border-emerald-500 pl-2">最終製造実績（数量）</label>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <span className="block text-[10px] font-black text-emerald-600 mb-1">ケース (cs)</span>
+                    <div className="flex items-center gap-2"><Input type="number" value={actualResults.cs} onChange={e => setActualResults({...actualResults, cs: Number(e.target.value)})} className="bg-white border-emerald-200 font-black text-xl h-12 text-right" /><span className="text-xs font-bold text-emerald-500">cs</span></div>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] font-black text-emerald-600 mb-1">端数 (p)</span>
+                    <div className="flex items-center gap-2"><Input type="number" value={actualResults.p} onChange={e => setActualResults({...actualResults, p: Number(e.target.value)})} className="bg-white border-emerald-200 font-black text-xl h-12 text-right" /><span className="text-xs font-bold text-emerald-500">p</span></div>
                   </div>
                 </div>
-              )}
+              </div>
             </div>
+
+            <div className="bg-indigo-50 border border-indigo-100 p-3 rounded-lg flex items-center gap-3">
+              <FlaskConical className="w-6 h-6 text-indigo-500" />
+              <div className="text-[10px] font-bold text-indigo-700 leading-tight">完了と同時に、規定の【保存サンプル(1個)】が<br/>自動的にシステムへ登録されます。</div>
+            </div>
+
+            <Button onClick={handleCompleteProduction} disabled={isProcessing || !actualResults.lotCode} className="w-full h-16 bg-slate-800 hover:bg-slate-900 text-white font-black text-xl shadow-xl transition-all flex items-center justify-center gap-3 active:scale-[0.98]">
+              {isProcessing ? <Loader2 className="animate-spin w-6 h-6" /> : <Save className="w-6 h-6" />} 製造を完了とし、在庫へ在庫反映
+            </Button>
           </div>
-        </>
-      )}
-      {renderAllDialogs()}
+        </DialogContent>
+      </Dialog>
     </div>
   );
-}
-
-function PlusIcon() {
-  return <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14" /><path d="M12 5v14" /></svg>;
 }
