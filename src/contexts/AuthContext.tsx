@@ -11,13 +11,13 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType>({ 
-  role: "admin", 
+  role: "viewer", // ★初期値をviewerに
   setRole: () => {}, 
-  canEdit: true 
+  canEdit: false 
 });
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
-  const [role, setRole] = useState<Role>("admin"); // デフォルトは管理者
+  const [role, setRole] = useState<Role>("viewer"); // ★初期値をviewerに
 
   // ブラウザを閉じても前回の権限を記憶しておく処理
   useEffect(() => {
