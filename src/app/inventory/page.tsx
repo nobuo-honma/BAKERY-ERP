@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import { Package, Wheat, Box, Boxes, ClipboardEdit, ArrowRight, Save, Loader2, AlertCircle, CheckCircle2, ListChecks, TrendingUp, Filter, Lock } from "lucide-react";
+import { Package, Wheat, Box, Boxes, ClipboardEdit, ArrowRight, Save, Loader2, AlertCircle, CheckCircle2, ListChecks, TrendingUp, Filter, Lock, Printer, ArrowLeft, Plus } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 
 type ItemStock = { id: string; name: string; item_type: string; unit: string; safety_stock: number; current_qty: number; };
@@ -18,25 +18,35 @@ type AdjustmentHistory = { id: string; adjusted_at: string; items?: { name: stri
 
 export default function InventoryPage() {
   const { canEdit } = useAuth();
+  const [viewMode, setViewMode] = useState<'list' | 'print'>('list');
   const [loading, setLoading] = useState(true);
+
   const [rawMaterials, setRawMaterials] = useState<ItemStock[]>([]);
   const [materials, setMaterials] = useState<ItemStock[]>([]);
   const [productStocks, setProductStocks] = useState<ProductStock[]>([]);
   const [histories, setHistories] = useState<AdjustmentHistory[]>([]);
 
+  // 予測(MRP)用
   const [boms, setBoms] = useState<any[]>([]);
   const [pendingPlans, setPendingPlans] = useState<any[]>([]);
   const [pendingArrivals, setPendingArrivals] = useState<any[]>([]);
   const [forecastFilter, setForecastFilter] = useState<'all' | 'raw_material' | 'material'>('all');
 
+  // 棚卸(調整)用
   const [adjustmentModal, setAdjustmentModal] = useState<{ isOpen: boolean; type: 'item' | 'product'; targetId: string; targetName: string; currentQty: number; unit: string; lotCode?: string; productId?: string }>({ isOpen: false, type: 'item', targetId: '', targetName: '', currentQty: 0, unit: '' });
   const [actualQty, setActualQty] = useState<number | "">("");
   const [adjReason, setAdjReason] = useState("定例棚卸");
   const [isProcessing, setIsProcessing] = useState(false);
 
+  // 一括棚卸用
   const [isBatchMode, setIsBatchMode] = useState(false);
   const [batchInputs, setBatchInputs] = useState<Record<string, number | "">>({});
   const [batchReason, setBatchReason] = useState("月末一斉棚卸");
+
+  // ★追加: 既存(過去)Lotの新規登録用State
+  const [newStockModalOpen, setNewStockModalOpen] = useState(false);
+  const [productsList, setProductsList] = useState<{ id: string, name: string, variant: string, unit: number }[]>([]);
+  const [newStockData, setNewStockData] = useState({ lotCode: "", productId: "", expiryDate: "", cs: 0, p: 0 });
 
   const fetchInventory = useCallback(async () => {
     setLoading(true);
@@ -48,17 +58,13 @@ export default function InventoryPage() {
     const { data: plData } = await supabase.from("production_plans").select("*").eq("status", "planned");
     const { data: aData } = await supabase.from("arrivals").select("*").eq("status", "pending");
 
+    // ★追加: 製品マスタのリストもプルダウン用に取得
+    const { data: prData } = await supabase.from("products").select("id, name, variant_name, unit_per_cs");
+
     if (itemsData) {
       const formattedItems = itemsData.map((item: any) => {
-        // ★修正: 配列で返ってきた場合と、オブジェクトで返ってきた場合の両方に対応
-        const qty = Array.isArray(item.item_stocks)
-          ? (item.item_stocks[0]?.quantity || 0)
-          : (item.item_stocks?.quantity || 0);
-
-        return {
-          id: item.id, name: item.name, item_type: item.item_type, unit: item.unit, safety_stock: item.safety_stock,
-          current_qty: qty
-        };
+        const qty = Array.isArray(item.item_stocks) ? (item.item_stocks[0]?.quantity || 0) : (item.item_stocks?.quantity || 0);
+        return { id: item.id, name: item.name, item_type: item.item_type, unit: item.unit, safety_stock: item.safety_stock, current_qty: qty };
       });
       setRawMaterials(formattedItems.filter(i => i.item_type === 'raw_material'));
       setMaterials(formattedItems.filter(i => i.item_type === 'material'));
@@ -68,6 +74,7 @@ export default function InventoryPage() {
     if (bData) setBoms(bData);
     if (plData) setPendingPlans(plData);
     if (aData) setPendingArrivals(aData);
+    if (prData) setProductsList(prData.map(p => ({ id: p.id, name: p.name, variant: p.variant_name, unit: p.unit_per_cs })));
 
     setLoading(false);
   }, []);
@@ -91,7 +98,11 @@ export default function InventoryPage() {
         await supabase.from("item_stocks").upsert({ item_id: targetId, quantity: Number(actualQty) }, { onConflict: 'item_id' });
         await supabase.from("inventory_adjustments").insert({ item_id: targetId, before_qty: currentQty, after_qty: Number(actualQty), reason: adjReason });
       } else {
-        await supabase.from("product_stocks").update({ total_pieces: Number(actualQty) }).eq("id", targetId);
+        if (Number(actualQty) <= 0) {
+          await supabase.from("product_stocks").delete().eq("id", targetId);
+        } else {
+          await supabase.from("product_stocks").update({ total_pieces: Number(actualQty) }).eq("id", targetId);
+        }
         await supabase.from("inventory_adjustments").insert({ product_id: productId, lot_code: lotCode, before_qty: currentQty, after_qty: Number(actualQty), reason: adjReason });
       }
       setAdjustmentModal({ ...adjustmentModal, isOpen: false }); setActualQty(""); setAdjReason("定例棚卸"); fetchInventory();
@@ -114,7 +125,7 @@ export default function InventoryPage() {
   const handleBatchSubmit = async () => {
     setIsProcessing(true);
     try {
-      const itemUpdates = []; const productUpdates = []; const historyInserts = [];
+      const itemUpdates = []; const productUpdates = []; const productDeletes = []; const historyInserts = [];
 
       for (const item of [...rawMaterials, ...materials]) {
         const newVal = batchInputs[item.id];
@@ -127,26 +138,72 @@ export default function InventoryPage() {
       for (const stock of productStocks) {
         const newVal = batchInputs[stock.id];
         if (newVal !== undefined && newVal !== "" && Number(newVal) !== stock.total_pieces) {
-          productUpdates.push({ id: stock.id, total_pieces: Number(newVal) });
+          if (Number(newVal) <= 0) {
+            productDeletes.push(stock.id);
+          } else {
+            productUpdates.push({ id: stock.id, total_pieces: Number(newVal) });
+          }
           historyInserts.push({ product_id: stock.product_id, lot_code: stock.lot_code, before_qty: stock.total_pieces, after_qty: Number(newVal), reason: batchReason });
         }
       }
 
-      if (itemUpdates.length === 0 && productUpdates.length === 0) {
+      if (itemUpdates.length === 0 && productUpdates.length === 0 && productDeletes.length === 0) {
         alert("変更された在庫はありません。"); setIsProcessing(false); return;
       }
 
-      if (!confirm(`合計 ${itemUpdates.length + productUpdates.length} 件の在庫を一括で上書き更新しますか？\n(理由は「${batchReason}」として記録されます)`)) {
+      if (!confirm(`合計 ${itemUpdates.length + productUpdates.length + productDeletes.length} 件の在庫を一括で上書き更新しますか？\n(理由は「${batchReason}」として記録されます)`)) {
         setIsProcessing(false); return;
       }
 
       if (itemUpdates.length > 0) await supabase.from('item_stocks').upsert(itemUpdates, { onConflict: 'item_id' });
       if (productUpdates.length > 0) await supabase.from('product_stocks').upsert(productUpdates, { onConflict: 'id' });
+      if (productDeletes.length > 0) await supabase.from('product_stocks').delete().in('id', productDeletes);
       if (historyInserts.length > 0) await supabase.from('inventory_adjustments').insert(historyInserts);
 
-      alert(`一括棚卸を完了しました！\n（${itemUpdates.length + productUpdates.length} 件の在庫を更新しました）`);
+      alert(`一括棚卸を完了しました！\n（${itemUpdates.length + productUpdates.length + productDeletes.length} 件の在庫を更新しました）`);
       setIsBatchMode(false); setBatchInputs({}); fetchInventory();
     } catch (err: any) { alert("エラー: " + err.message); }
+    setIsProcessing(false);
+  };
+
+  // --- ★追加: 既存Lotの新規登録処理 ---
+  const handleAddNewStock = async () => {
+    if (!newStockData.lotCode || !newStockData.productId || !newStockData.expiryDate) {
+      alert("必須項目を入力してください。"); return;
+    }
+    if (newStockData.cs === 0 && newStockData.p === 0) {
+      alert("在庫数を入力してください。"); return;
+    }
+
+    setIsProcessing(true);
+    try {
+      const selectedProduct = productsList.find(p => p.id === newStockData.productId);
+      const unitPerCs = selectedProduct?.unit || 24;
+      const totalPieces = (newStockData.cs * unitPerCs) + (newStockData.p * 2);
+
+      // すでに同じLotが存在しないか確認
+      const { data: existingStock } = await supabase.from('product_stocks').select('id, total_pieces').eq('lot_code', newStockData.lotCode).single();
+
+      if (existingStock) {
+        if (!confirm(`Lot番号「${newStockData.lotCode}」は既に存在します。\n現在の在庫(${Math.floor(existingStock.total_pieces / unitPerCs)}c/s)に、入力した数を追加加算しますか？`)) {
+          setIsProcessing(false); return;
+        }
+        // 既存に追加加算
+        await supabase.from('product_stocks').update({ total_pieces: existingStock.total_pieces + totalPieces }).eq('id', existingStock.id);
+        await supabase.from('inventory_adjustments').insert({ product_id: newStockData.productId, lot_code: newStockData.lotCode, before_qty: existingStock.total_pieces, after_qty: existingStock.total_pieces + totalPieces, reason: `既存Lotへの追加登録` });
+      } else {
+        // 新規登録
+        await supabase.from('product_stocks').insert({ lot_code: newStockData.lotCode, product_id: newStockData.productId, total_pieces: totalPieces, expiry_date: newStockData.expiryDate });
+        await supabase.from('inventory_adjustments').insert({ product_id: newStockData.productId, lot_code: newStockData.lotCode, before_qty: 0, after_qty: totalPieces, reason: `システム導入前在庫の新規登録` });
+      }
+
+      alert("在庫の追加登録が完了しました！");
+      setNewStockModalOpen(false);
+      setNewStockData({ lotCode: "", productId: "", expiryDate: "", cs: 0, p: 0 }); // フォームリセット
+      fetchInventory();
+    } catch (err: any) {
+      alert("エラーが発生しました: " + err.message);
+    }
     setIsProcessing(false);
   };
 
@@ -154,8 +211,7 @@ export default function InventoryPage() {
     const dates = Array.from({ length: 30 }, (_, i) => { const d = new Date(); d.setDate(d.getDate() + i); return d.toISOString().split('T')[0]; });
     const todayStr = dates[0];
 
-    const fData: Record<string, any> = {};
-    [...rawMaterials, ...materials].forEach(item => {
+    const fData: Record<string, any> = {};[...rawMaterials, ...materials].forEach(item => {
       fData[item.id] = { item, days: {} };
       dates.forEach(date => { fData[item.id].days[date] = { date, inQty: 0, outQty: 0, endQty: 0 }; });
     });
@@ -218,7 +274,7 @@ export default function InventoryPage() {
                   <TableCell className="text-right font-black text-xl text-slate-700">
                     {isBatchMode ? (
                       <div className="flex justify-end items-center gap-2">
-                        <Input type="number" inputMode="decimal" min="0" step="0.1" value={batchInputs[item.id] !== undefined ? batchInputs[item.id] : ""} onChange={e => setBatchInputs({ ...batchInputs, [item.id]: e.target.value === "" ? "" : Number(e.target.value) })} className={`w-28 text-right font-bold h-10 ${isChanged ? 'border-amber-400 bg-white ring-2 ring-amber-200' : 'border-blue-300 shadow-sm'}`} />
+                        <Input type="number" inputMode="decimal" min="0" step="0.1" value={batchInputs[item.id] !== undefined ? batchInputs[item.id] : ""} onChange={e => setBatchInputs({ ...batchInputs, [item.id]: e.target.value === "" ? "" : Number(e.target.value) })} className={`w-28 text-right font-bold h-9 ${isChanged ? 'border-amber-400 bg-white ring-2 ring-amber-200' : 'border-blue-300 shadow-sm'}`} />
                         {isChanged && <span className="text-xs text-amber-600 font-bold ml-1 w-6 block bg-amber-100 rounded px-1">変更</span>}
                       </div>
                     ) : item.current_qty.toLocaleString(undefined, { maximumFractionDigits: 1 })}
@@ -248,7 +304,7 @@ export default function InventoryPage() {
               <div className="text-xs text-slate-500 mb-3 flex gap-3"><span>ID: {item.id}</span><span>安全在庫: {item.safety_stock}</span></div>
               {isBatchMode ? (
                 <div className="bg-white p-3 rounded-lg border shadow-inner flex flex-col gap-2">
-                  <div className="flex justify-between items-center text-sm font-bold text-slate-600"><span>実数入力</span>{isChanged && <span className="text-xs text-amber-700 bg-amber-100 px-2 py-0.5 rounded font-black">変更あり</span>}</div>
+                  <div className="flex justify-between items-center text-sm font-bold text-slate-600"><span>実数入力 (現在: {item.current_qty})</span>{isChanged && <span className="text-xs text-amber-700 bg-amber-100 px-2 py-0.5 rounded font-black">変更あり</span>}</div>
                   <div className="flex items-center gap-2"><Input type="number" inputMode="decimal" min="0" step="0.1" value={batchInputs[item.id] !== undefined ? batchInputs[item.id] : ""} onChange={e => setBatchInputs({ ...batchInputs, [item.id]: e.target.value === "" ? "" : Number(e.target.value) })} className={`flex-1 text-right font-black text-2xl h-14 ${isChanged ? 'border-amber-400 bg-amber-50 focus-visible:ring-amber-500' : 'border-blue-300'}`} /><span className="font-bold text-slate-500 text-lg w-8">{item.unit}</span></div>
                 </div>
               ) : (
@@ -264,24 +320,103 @@ export default function InventoryPage() {
     </>
   );
 
+  if (viewMode === 'print') {
+    const todayStr = new Date().toLocaleDateString('ja-JP');
+
+    const printItems: { id: string; category: string; name: string; qty: string; rawQty: number; expiry?: string }[] = [
+      ...rawMaterials.map(i => ({ id: i.id, category: '原材料', name: i.name, qty: `${i.current_qty.toLocaleString(undefined, { maximumFractionDigits: 1 })} ${i.unit}`, rawQty: i.current_qty })),
+      ...materials.map(i => ({ id: i.id, category: '資材', name: i.name, qty: `${i.current_qty.toLocaleString()} ${i.unit}`, rawQty: i.current_qty })),
+      ...productStocks.map(p => {
+        const u = p.products.unit_per_cs || 24;
+        const cs = Math.floor(p.total_pieces / u);
+        const pc = Math.floor((p.total_pieces % u) / 2);
+        return {
+          id: p.lot_code, category: '製品 (Lot別)',
+          name: `${p.products.name} (${p.products.variant_name})`,
+          qty: `${cs} c/s${pc > 0 ? ` ${pc} p` : ''}`,
+          rawQty: p.total_pieces,
+          expiry: new Date(p.expiry_date).toLocaleDateString()
+        };
+      })
+    ];
+
+    const chunkedItems = [];
+    for (let i = 0; i < printItems.length; i += 35) {
+      chunkedItems.push(printItems.slice(i, i + 35));
+    }
+
+    return (
+      <div className="bg-slate-200 min-h-screen py-8 print:p-0 print:bg-white flex flex-col items-center">
+        <style dangerouslySetInnerHTML={{ __html: `@media print { header, nav { display: none !important; } main { padding: 0 !important; margin: 0 !important; max-width: 100% !important; background: white !important; } @page { size: A4 portrait; margin: 10mm; } body { background-color: white !important; color: black !important; } .print-hide { display: none !important; } .page-break { page-break-after: always; } }` }} />
+        <div className="w-[210mm] print:w-full flex justify-between mb-4 print-hide">
+          <Button variant="outline" onClick={() => setViewMode('list')} className="bg-white text-slate-700 font-bold border-slate-300"><ArrowLeft className="h-4 w-4 mr-2" /> 戻る</Button>
+          <Button onClick={() => window.print()} className="bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-lg"><Printer className="h-5 w-5 mr-2" /> 印刷する (PDFに保存)</Button>
+        </div>
+
+        {chunkedItems.length === 0 ? (
+          <div className="w-[210mm] bg-white p-8 text-center text-slate-500 font-bold shadow-xl">データがありません</div>
+        ) : (
+          chunkedItems.map((chunk, pageIdx) => (
+            <div key={pageIdx} className={`w-[210mm] min-h-[297mm] bg-white p-10 print:p-0 shadow-xl print:shadow-none text-black font-sans box-border flex flex-col ${pageIdx < chunkedItems.length - 1 ? 'page-break mb-8 print:mb-0' : ''}`}>
+              <div className="flex justify-between items-end mb-4 border-b-2 border-black pb-2">
+                <h1 className="text-2xl font-bold tracking-widest">在庫一覧 兼 実地棚卸表</h1>
+                <div className="text-sm font-medium">作成日: {todayStr}　({pageIdx + 1} / {chunkedItems.length} ページ)</div>
+              </div>
+              <table className="w-full border-collapse border-2 border-black text-sm flex-1">
+                <thead><tr className="bg-gray-100"><th className="border border-black py-1.5 w-[15%] font-medium">ID / Lot</th><th className="border border-black py-1.5 w-[12%] font-medium">区分</th><th className="border border-black py-1.5 w-[33%] font-medium">品目名 / 製品名</th><th className="border border-black py-1.5 w-[20%] font-medium">システム在庫</th><th className="border border-black py-1.5 w-[20%] font-medium">実数記入欄</th></tr></thead>
+                <tbody>
+                  {chunk.map((item, idx) => (
+                    <tr key={idx} className="h-7 text-[13px]">
+                      <td className="border border-black px-2 text-center font-mono">{item.id}</td><td className="border border-black px-2 text-center text-xs">{item.category}</td>
+                      <td className="border border-black px-2 font-bold">{item.name}{item.expiry && <span className="text-[10px] font-normal ml-2 text-gray-500">(期限: {item.expiry})</span>}</td>
+                      <td className="border border-black px-2 text-right font-medium">{item.qty}</td><td className="border border-black px-2 bg-gray-50/50"></td>
+                    </tr>
+                  ))}
+                  {Array.from({ length: Math.max(0, 35 - chunk.length) }).map((_, idx) => (
+                    <tr key={`empty-${idx}`} className="h-7"><td className="border border-black"></td><td className="border border-black"></td><td className="border border-black"></td><td className="border border-black"></td><td className="border border-black"></td></tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="mt-4 flex justify-end gap-4 text-sm font-medium">
+                <div className="border border-black w-48 h-20 flex flex-col"><div className="border-b border-black text-center py-0.5 bg-gray-100">棚卸 担当者</div></div>
+                <div className="border border-black w-48 h-20 flex flex-col"><div className="border-b border-black text-center py-0.5 bg-gray-100">システム入力 担当者</div></div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    );
+  }
+
   if (loading) return <div className="flex justify-center items-center h-64"><Loader2 className="animate-spin h-8 w-8 text-slate-500" /></div>;
 
   return (
-    <div className="bg-slate-50 min-h-screen md:bg-transparent -mx-4 px-4 md:mx-0 md:px-0">
-      <div className="flex justify-between items-center mb-4 md:mb-6 pt-4 md:pt-0">
+    <div className="bg-slate-50 min-h-screen md:bg-transparent -mx-4 px-4 md:mx-0 md:px-0 pt-4 md:pt-0">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4 md:mb-6">
         <div className="flex items-center gap-4">
           <h1 className="text-xl md:text-2xl font-black flex items-center gap-2 text-slate-800"><Package className="h-6 w-6 text-blue-600" /> 在庫管理・棚卸</h1>
           {!canEdit && <Badge variant="outline" className="bg-slate-100 text-slate-500 border-slate-300 px-3 py-1 shadow-sm hidden md:flex"><Lock className="w-3 h-3 mr-1" /> 閲覧モード</Badge>}
         </div>
+        <div className="flex gap-2 w-full md:w-auto">
+          {/* ★追加: 新規(過去)Lot登録ボタン */}
+          {canEdit && (
+            <Button onClick={() => setNewStockModalOpen(true)} className="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-sm h-12 md:h-10">
+              <Plus className="h-4 w-4 mr-2" /> 既存Lotの追加登録
+            </Button>
+          )}
+          <Button onClick={() => setViewMode('print')} className="w-full md:w-auto bg-slate-800 hover:bg-slate-900 text-white font-bold shadow-sm h-12 md:h-10">
+            <Printer className="h-4 w-4 mr-2" /> 在庫表(PDF)を印刷
+          </Button>
+        </div>
       </div>
 
-      <Tabs defaultValue="raw" className="w-full">
+      <Tabs defaultValue="product" className="w-full">
         <div className="flex flex-col mb-4 md:mb-6 gap-3">
           <div className="overflow-x-auto pb-1 -mx-4 px-4 md:mx-0 md:px-0 hide-scrollbar">
             <TabsList className="bg-slate-200/80 flex w-max h-auto p-1.5 rounded-xl">
+              <TabsTrigger value="product" className="font-bold py-2.5 px-4 md:px-6 text-sm md:text-md rounded-lg data-[state=active]:bg-white data-[state=active]:text-blue-700 data-[state=active]:shadow-sm"><Boxes className="w-4 h-4 mr-1.5" /> 製品(Lot別)</TabsTrigger>
               <TabsTrigger value="raw" className="font-bold py-2.5 px-4 md:px-6 text-sm md:text-md rounded-lg data-[state=active]:bg-white data-[state=active]:text-blue-700 data-[state=active]:shadow-sm"><Wheat className="w-4 h-4 mr-1.5" /> 原材料</TabsTrigger>
               <TabsTrigger value="material" className="font-bold py-2.5 px-4 md:px-6 text-sm md:text-md rounded-lg data-[state=active]:bg-white data-[state=active]:text-blue-700 data-[state=active]:shadow-sm"><Box className="w-4 h-4 mr-1.5" /> 資材</TabsTrigger>
-              <TabsTrigger value="product" className="font-bold py-2.5 px-4 md:px-6 text-sm md:text-md rounded-lg data-[state=active]:bg-white data-[state=active]:text-blue-700 data-[state=active]:shadow-sm"><Boxes className="w-4 h-4 mr-1.5" /> 製品</TabsTrigger>
               <TabsTrigger value="forecast" className="font-bold py-2.5 px-4 md:px-6 text-sm md:text-md rounded-lg data-[state=active]:bg-white data-[state=active]:text-blue-700 data-[state=active]:shadow-sm bg-blue-100 text-blue-800 ml-2"><TrendingUp className="w-4 h-4 mr-1.5" /> 在庫予測</TabsTrigger>
               <TabsTrigger value="history" className="font-bold py-2.5 px-4 md:px-6 text-sm md:text-md rounded-lg data-[state=active]:bg-white data-[state=active]:text-slate-700 data-[state=active]:shadow-sm ml-auto"><ClipboardEdit className="w-4 h-4 mr-1.5" /> 履歴</TabsTrigger>
             </TabsList>
@@ -321,7 +456,8 @@ export default function InventoryPage() {
                 {productStocks.map((stock) => {
                   const unit_per_cs = stock.products.unit_per_cs || 24; const isExpired = new Date(stock.expiry_date) < new Date();
                   const displayTotal = isBatchMode && batchInputs[stock.id] !== undefined ? Number(batchInputs[stock.id]) : stock.total_pieces;
-                  const cs = Math.floor(displayTotal / unit_per_cs); const piece = displayTotal % unit_per_cs;
+                  const cs = Math.floor(displayTotal / unit_per_cs);
+                  const piece = Math.floor((displayTotal % unit_per_cs) / 2); // ★パック数
                   const isChanged = isBatchMode && batchInputs[stock.id] !== undefined && Number(batchInputs[stock.id]) !== stock.total_pieces;
 
                   return (
@@ -333,7 +469,7 @@ export default function InventoryPage() {
                         {isBatchMode ? (
                           <div className="flex items-center justify-end gap-1">
                             {isChanged && <span className="text-xs text-amber-600 font-bold mr-2 bg-amber-100 rounded px-1">変更</span>}
-                            <Input type="number" inputMode="numeric" min="0" value={cs} onChange={e => setBatchInputs({ ...batchInputs, [stock.id]: (Number(e.target.value === "" ? 0 : e.target.value) * unit_per_cs) + piece })} className={`w-20 text-right font-bold h-10 ${isChanged ? 'border-amber-400 bg-white ring-2 ring-amber-200' : 'border-blue-300'}`} />
+                            <Input type="number" inputMode="numeric" min="0" value={cs} onChange={e => setBatchInputs({ ...batchInputs, [stock.id]: (Number(e.target.value === "" ? 0 : e.target.value) * unit_per_cs) + (piece * 2) })} className={`w-20 text-right font-bold h-9 ${isChanged ? 'border-amber-400 bg-white ring-2 ring-amber-200' : 'border-blue-300'}`} />
                             <span className="text-xs text-slate-500 font-bold">c/s</span>
                           </div>
                         ) : <span className="font-black text-2xl text-blue-900">{cs.toLocaleString()} <span className="text-sm font-normal text-slate-500">c/s</span></span>}
@@ -341,7 +477,7 @@ export default function InventoryPage() {
                       <TableCell className="text-right">
                         {isBatchMode ? (
                           <div className="flex items-center justify-end gap-1">
-                            <Input type="number" inputMode="numeric" min="0" max={unit_per_cs - 1} value={piece} onChange={e => setBatchInputs({ ...batchInputs, [stock.id]: (cs * unit_per_cs) + Number(e.target.value === "" ? 0 : e.target.value) })} className={`w-16 text-right font-bold h-10 ${isChanged ? 'border-amber-400 bg-white ring-2 ring-amber-200' : 'border-blue-300'}`} />
+                            <Input type="number" inputMode="numeric" min="0" max={Math.floor(unit_per_cs / 2) - 1} value={piece} onChange={e => setBatchInputs({ ...batchInputs, [stock.id]: (cs * unit_per_cs) + (Number(e.target.value === "" ? 0 : e.target.value) * 2) })} className={`w-16 text-right font-bold h-9 ${isChanged ? 'border-amber-400 bg-white ring-2 ring-amber-200' : 'border-blue-300'}`} />
                             <span className="text-xs text-slate-500 font-bold">p</span>
                           </div>
                         ) : <span className="font-bold text-lg text-slate-600">{piece} <span className="text-xs font-normal text-slate-400">p</span></span>}
@@ -359,7 +495,7 @@ export default function InventoryPage() {
             {productStocks.map((stock) => {
               const unit_per_cs = stock.products.unit_per_cs || 24; const isExpired = new Date(stock.expiry_date) < new Date();
               const displayTotal = isBatchMode && batchInputs[stock.id] !== undefined ? Number(batchInputs[stock.id]) : stock.total_pieces;
-              const cs = Math.floor(displayTotal / unit_per_cs); const piece = displayTotal % unit_per_cs;
+              const cs = Math.floor(displayTotal / unit_per_cs); const piece = Math.floor((displayTotal % unit_per_cs) / 2);
               const isChanged = isBatchMode && batchInputs[stock.id] !== undefined && Number(batchInputs[stock.id]) !== stock.total_pieces;
 
               return (
@@ -376,9 +512,9 @@ export default function InventoryPage() {
                     <div className="bg-white p-3 rounded-lg border shadow-inner flex flex-col gap-2">
                       <div className="flex justify-between items-center text-sm font-bold text-slate-600"><span>実数入力</span>{isChanged && <span className="text-xs text-amber-700 bg-amber-100 px-2 py-0.5 rounded font-black">変更あり</span>}</div>
                       <div className="flex items-center gap-3">
-                        <Input type="number" inputMode="numeric" min="0" value={cs} onChange={e => setBatchInputs({ ...batchInputs, [stock.id]: (Number(e.target.value === "" ? 0 : e.target.value) * unit_per_cs) + piece })} className={`flex-1 text-right font-black text-2xl h-14 ${isChanged ? 'border-amber-400 bg-amber-50 focus-visible:ring-amber-500' : 'border-blue-300'}`} />
+                        <Input type="number" inputMode="numeric" min="0" value={cs} onChange={e => setBatchInputs({ ...batchInputs, [stock.id]: (Number(e.target.value === "" ? 0 : e.target.value) * unit_per_cs) + (piece * 2) })} className={`flex-1 text-right font-black text-2xl h-14 ${isChanged ? 'border-amber-400 bg-amber-50 focus-visible:ring-amber-500' : 'border-blue-300'}`} />
                         <span className="font-bold text-slate-500 text-lg w-8">c/s</span>
-                        <Input type="number" inputMode="numeric" min="0" max={unit_per_cs - 1} value={piece} onChange={e => setBatchInputs({ ...batchInputs, [stock.id]: (cs * unit_per_cs) + Number(e.target.value === "" ? 0 : e.target.value) })} className={`flex-1 text-right font-black text-2xl h-14 ${isChanged ? 'border-amber-400 bg-amber-50 focus-visible:ring-amber-500' : 'border-blue-300'}`} />
+                        <Input type="number" inputMode="numeric" min="0" max={Math.floor(unit_per_cs / 2) - 1} value={piece} onChange={e => setBatchInputs({ ...batchInputs, [stock.id]: (cs * unit_per_cs) + (Number(e.target.value === "" ? 0 : e.target.value) * 2) })} className={`flex-1 text-right font-black text-2xl h-14 ${isChanged ? 'border-amber-400 bg-amber-50 focus-visible:ring-amber-500' : 'border-blue-300'}`} />
                         <span className="font-bold text-slate-500 text-lg w-4">p</span>
                       </div>
                     </div>
@@ -395,6 +531,7 @@ export default function InventoryPage() {
         </TabsContent>
 
         <TabsContent value="forecast" className="mt-0">
+          {/* ...省略なし(変更がないためそのまま残す)... */}
           <div className="bg-white border rounded-lg shadow-sm">
             <div className="p-4 border-b bg-blue-50/30 flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div><h2 className="font-bold text-blue-900 flex items-center gap-2"><TrendingUp className="w-5 h-5 text-blue-600" />原料・資材 在庫推移予測 (30日間)</h2><p className="text-xs text-slate-600 mt-1">製造計画(未着手)と入荷予定から、将来の在庫不足を自動シミュレーションします。</p></div>
@@ -427,6 +564,43 @@ export default function InventoryPage() {
         </TabsContent>
       </Tabs>
 
+      {/* --- ★追加: 既存Lotの新規登録用モーダル --- */}
+      <Dialog open={newStockModalOpen} onOpenChange={setNewStockModalOpen}>
+        <DialogContent className="max-w-md bg-white p-6 rounded-xl">
+          <DialogHeader><DialogTitle className="flex items-center gap-2 text-blue-800"><Plus className="w-5 h-5" /> 既存(過去)Lotの新規登録</DialogTitle></DialogHeader>
+          <div className="space-y-4 mt-2">
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">製品</label>
+              <select value={newStockData.productId} onChange={e => setNewStockData({ ...newStockData, productId: e.target.value })} className="w-full border-2 border-slate-200 rounded-lg p-2.5 bg-white font-bold text-slate-700">
+                <option value="">選択してください</option>
+                {productsList.map(p => <option key={p.id} value={p.id}>{p.name} ({p.variant})</option>)}
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div><label className="block text-xs font-bold text-slate-500 mb-1">Lot番号</label><Input value={newStockData.lotCode} onChange={e => setNewStockData({ ...newStockData, lotCode: e.target.value })} placeholder="例: スB26SB" className="font-bold h-10" /></div>
+              <div><label className="block text-xs font-bold text-slate-500 mb-1">賞味期限</label><Input type="date" value={newStockData.expiryDate} onChange={e => setNewStockData({ ...newStockData, expiryDate: e.target.value })} className="h-10" /></div>
+            </div>
+
+            <div className="bg-slate-50 p-4 rounded-lg border">
+              <label className="block text-sm font-bold text-blue-800 mb-2">現在の在庫数</label>
+              <div className="flex items-center gap-2">
+                <Input type="number" inputMode="numeric" min="0" value={newStockData.cs || ""} onChange={e => setNewStockData({ ...newStockData, cs: Number(e.target.value) })} className="w-24 text-right font-black text-2xl h-12" />
+                <span className="font-bold text-slate-500">c/s</span>
+                <Input type="number" inputMode="numeric" min="0" value={newStockData.p || ""} onChange={e => setNewStockData({ ...newStockData, p: Number(e.target.value) })} className="w-20 text-right font-black text-xl h-12 ml-2" />
+                <span className="font-bold text-slate-500">p</span>
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="mt-4 pt-4 border-t flex gap-2">
+            <Button variant="outline" onClick={() => setNewStockModalOpen(false)} className="flex-1">キャンセル</Button>
+            <Button onClick={handleAddNewStock} disabled={isProcessing || !newStockData.productId || !newStockData.lotCode} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold">
+              {isProcessing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />} 登録する
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* --- 個別棚卸入力モーダル --- */}
       <Dialog open={adjustmentModal.isOpen} onOpenChange={(open) => !open && setAdjustmentModal({ ...adjustmentModal, isOpen: false })}>
         <DialogContent className="w-[95vw] max-w-md bg-white p-4 md:p-6 rounded-2xl">
           <DialogHeader><DialogTitle className="flex items-center gap-2"><ClipboardEdit className="w-5 h-5 text-blue-600" /> 実地棚卸の入力</DialogTitle></DialogHeader>
