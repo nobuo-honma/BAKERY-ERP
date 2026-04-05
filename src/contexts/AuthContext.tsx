@@ -1,37 +1,60 @@
 "use client";
+
 import React, { createContext, useContext, useState, useEffect } from "react";
 
 // ロール（権限）の定義
-type Role = "admin" | "viewer"; 
+type Role = "admin" | "viewer";
 
 interface AuthContextType {
   role: Role;
-  setRole: (role: Role) => void;
-  canEdit: boolean; // 編集可能かどうか (adminならtrue)
+  isLoggedIn: boolean;
+  login: () => void;   // ★追加: ログイン処理
+  logout: () => void;  // ★追加: ログアウト処理
+  canEdit: boolean;
 }
 
-const AuthContext = createContext<AuthContextType>({ 
-  role: "viewer", // ★初期値をviewerに
-  setRole: () => {}, 
-  canEdit: false 
+const AuthContext = createContext<AuthContextType>({
+  role: "viewer",
+  isLoggedIn: false,
+  login: () => { },
+  logout: () => { },
+  canEdit: false
 });
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
-  const [role, setRole] = useState<Role>("viewer"); // ★初期値をviewerに
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
 
-  // ブラウザを閉じても前回の権限を記憶しておく処理
+  // 画面を開いた時、前回ログインしたままかチェックする
   useEffect(() => {
-    const saved = localStorage.getItem("app_role") as Role;
-    if (saved) setRole(saved);
-  },[]);
+    const saved = localStorage.getItem("app_logged_in");
+    if (saved === "true") {
+      setIsLoggedIn(true);
+    }
+  }, []);
 
-  const handleSetRole = (newRole: Role) => {
-    setRole(newRole);
-    localStorage.setItem("app_role", newRole);
+  // ログイン成功時の処理
+  const login = () => {
+    setIsLoggedIn(true);
+    localStorage.setItem("app_logged_in", "true");
   };
 
+  // ログアウト時の処理
+  const logout = () => {
+    setIsLoggedIn(false);
+    localStorage.removeItem("app_logged_in");
+  };
+
+  // ログインしていれば admin、していなければ viewer
+  const currentRole: Role = isLoggedIn ? "admin" : "viewer";
+
   return (
-    <AuthContext.Provider value={{ role, setRole: handleSetRole, canEdit: role === "admin" }}>
+    <AuthContext.Provider value={{
+      role: currentRole,
+      isLoggedIn,
+      login,
+      logout,
+      canEdit: currentRole === "admin"
+    }}>
       {children}
     </AuthContext.Provider>
   );

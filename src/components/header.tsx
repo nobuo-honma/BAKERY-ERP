@@ -2,21 +2,27 @@
 
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetTrigger } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
-import { Menu, Home, ShoppingCart, Factory, Package, ArrowDownToLine, Truck, Database, BookOpen, ShieldAlert, FileText, Beaker, Key } from "lucide-react";
+import { Menu, Home, ShoppingCart, Factory, Package, ArrowDownToLine, Truck, Database, BookOpen, FileText, Sun, Moon, Beaker, Key, LogOut, LogIn, ShieldCheck, ShieldAlert } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
+import { useTheme } from "next-themes";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 
 export default function Header() {
-  const { role, setRole } = useAuth();
+  // ★変更: login, logout関数を取得する
+  const { role, isLoggedIn, login, logout } = useAuth();
   const [open, setOpen] = useState(false);
+  const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
 
-  // ★追加: パスワード入力モーダル用のState
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
   const [passwordInput, setPasswordInput] = useState("");
   const [passwordError, setPasswordError] = useState("");
+
+  useEffect(() => setMounted(true), []);
 
   const menuItems = [
     { title: "ダッシュボード", href: "/", icon: Home },
@@ -31,27 +37,20 @@ export default function Header() {
     { title: "マニュアル", href: "/manual", icon: BookOpen },
   ];
 
-  // ★追加: 権限プルダウンが操作された時の処理
-  const handleRoleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const selectedRole = e.target.value;
-    if (selectedRole === "admin") {
-      // 管理者を選ぼうとしたら、パスワードモーダルを開く
-      setPasswordModalOpen(true);
-      setPasswordInput("");
-      setPasswordError("");
-    } else {
-      // 閲覧者に戻す時はパスワード不要で即時変更
-      setRole("viewer");
-    }
+  // ★追加: ログインボタンが押された時
+  const handleLoginClick = () => {
+    setPasswordModalOpen(true);
+    setPasswordInput("");
+    setPasswordError("");
   };
 
-  // ★追加: パスワードの判定処理
+  // ★追加: パスワード判定処理
   const handlePasswordSubmit = () => {
     // ※今回は簡易的にシステム内にパスワードを設定しています。
     const ADMIN_PASSWORD = "7777"; // ← ★ここの文字がパスワードです。自由に変更してください。
 
     if (passwordInput === ADMIN_PASSWORD) {
-      setRole("admin");
+      login(); // ★変更: ログイン処理を呼び出す
       setPasswordModalOpen(false);
     } else {
       setPasswordError("パスワードが違います");
@@ -59,23 +58,17 @@ export default function Header() {
   };
 
   return (
-    <header className="bg-slate-900 text-white h-16 flex items-center px-4 shadow-md sticky top-0 z-50">
+    <header className="bg-slate-950 text-white h-16 flex items-center px-4 shadow-md sticky top-0 z-50">
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetTrigger asChild>
-          <Button variant="ghost" size="icon" className="text-white hover:bg-slate-800 hover:text-white">
-            <Menu className="h-6 w-6" />
-          </Button>
+          <Button variant="ghost" size="icon" className="text-white hover:bg-slate-800 hover:text-white"><Menu className="h-6 w-6" /></Button>
         </SheetTrigger>
-        <SheetContent side="left" className="w-64 bg-slate-900 text-white border-r-slate-800 p-0">
-          <SheetHeader className="p-6 border-b border-slate-800 text-left">
-            <SheetTitle className="text-white font-bold text-xl">メニュー</SheetTitle>
-            <SheetDescription className="sr-only">ナビゲーション</SheetDescription>
-          </SheetHeader>
+        <SheetContent side="left" className="w-64 bg-slate-950 text-white border-r-slate-800 p-0">
+          <SheetHeader className="p-6 border-b border-slate-800 text-left"><SheetTitle className="text-white font-bold text-xl">メニュー</SheetTitle><SheetDescription className="sr-only">ナビゲーション</SheetDescription></SheetHeader>
           <nav className="flex flex-col p-4 space-y-2">
             {menuItems.map((item) => (
               <Link key={item.href} href={item.href} onClick={() => setOpen(false)} className="flex items-center gap-3 px-4 py-3 rounded-md hover:bg-slate-800 transition-colors">
-                <item.icon className="h-5 w-5 text-slate-400" />
-                <span className="font-medium">{item.title}</span>
+                <item.icon className="h-5 w-5 text-slate-400" /><span className="font-medium">{item.title}</span>
               </Link>
             ))}
           </nav>
@@ -85,29 +78,60 @@ export default function Header() {
       <div className="ml-4 font-bold tracking-wide hidden sm:block">災害備蓄用パン 製造・HACCP統合管理</div>
       <div className="ml-4 font-bold tracking-wide sm:hidden">備蓄パン ERP</div>
 
-      {/* 右上の権限切り替えスイッチ */}
-      <div className="ml-auto flex items-center gap-2 bg-slate-800 p-1.5 rounded-lg border border-slate-700 print:hidden">
-        <ShieldAlert className={`h-4 w-4 hidden sm:block ${role === 'admin' ? 'text-amber-400' : 'text-slate-400'}`} />
-        <select
-          value={role}
-          onChange={handleRoleChange} // ★変更: handleRoleChange を呼び出す
-          className={`text-xs font-bold bg-transparent border-none focus:ring-0 cursor-pointer ${role === 'admin' ? 'text-amber-400' : 'text-slate-300'}`}
-        >
-          <option value="admin" className="text-black">👑 管理者 (編集可)</option>
-          <option value="viewer" className="text-black">👀 閲覧者 (見るだけ)</option>
-        </select>
+      <div className="ml-auto flex items-center gap-3 print:hidden">
+        {mounted && (
+          <Button
+            variant="ghost" size="icon"
+            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+            className="text-slate-300 hover:text-white hover:bg-slate-800 rounded-full"
+            title="テーマを切り替える"
+          >
+            {theme === "dark" ? <Sun className="h-5 w-5 text-amber-400" /> : <Moon className="h-5 w-5 text-blue-200" />}
+          </Button>
+        )}
+
+        {/* --- ★変更: ログイン / ログアウト ボタン --- */}
+        <div className="flex items-center">
+          {isLoggedIn ? (
+            // ログイン中（管理者）の表示
+            <div className="flex items-center bg-slate-800 rounded-lg border border-slate-700 overflow-hidden shadow-sm">
+              <div className="px-3 py-1.5 flex items-center gap-1.5 bg-slate-800 text-amber-400 font-bold text-xs border-r border-slate-700">
+                <ShieldCheck className="h-4 w-4" /> <span className="hidden sm:inline">管理者</span>
+              </div>
+              <Button
+                onClick={logout}
+                variant="ghost"
+                className="h-8 px-3 rounded-none text-slate-300 hover:bg-slate-700 hover:text-white text-xs font-bold"
+              >
+                <LogOut className="h-3 w-3 mr-1" /> ログアウト
+              </Button>
+            </div>
+          ) : (
+            // 未ログイン（閲覧者）の表示
+            <div className="flex items-center gap-2">
+              <Badge variant="outline" className="hidden sm:flex items-center gap-1 bg-slate-800/50 border-slate-700 text-slate-400">
+                <ShieldAlert className="h-3 w-3" /> 閲覧モード
+              </Badge>
+              <Button
+                onClick={handleLoginClick}
+                className="h-8 px-4 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm"
+              >
+                <LogIn className="h-3 w-3 mr-1.5" /> ログイン
+              </Button>
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* --- ★追加: パスワード入力ダイアログ --- */}
       <Dialog open={passwordModalOpen} onOpenChange={setPasswordModalOpen}>
         <DialogContent className="max-w-sm bg-white p-6 rounded-xl text-slate-800">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-slate-800">
-              <Key className="w-5 h-5 text-amber-500" /> 管理者ロックの解除
+              <Key className="w-5 h-5 text-amber-500" /> 管理者としてログイン
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 mt-2">
-            <p className="text-sm text-slate-600 font-bold">管理者モードに切り替えるには、パスワードを入力してください。</p>
+            <p className="text-sm text-slate-600 font-bold">システムを編集するには、管理者パスワードを入力してください。</p>
             <div>
               <Input
                 type="password"
@@ -123,7 +147,7 @@ export default function Header() {
           </div>
           <DialogFooter className="mt-6 border-t pt-4 flex gap-2">
             <Button variant="ghost" onClick={() => setPasswordModalOpen(false)} className="flex-1 border border-slate-200">キャンセル</Button>
-            <Button onClick={handlePasswordSubmit} className="flex-1 bg-slate-800 hover:bg-slate-900 text-white font-bold">ロック解除</Button>
+            <Button onClick={handlePasswordSubmit} className="flex-1 bg-slate-800 hover:bg-slate-900 text-white font-bold">ログイン</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

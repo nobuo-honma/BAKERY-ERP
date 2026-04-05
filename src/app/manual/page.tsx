@@ -164,13 +164,21 @@ function Step({ n, title, children }: { n: number; title: string; children?: Rea
 }
 
 /** ▼画面プレースホルダー */
-function ScreenLabel({ label = "システム画面" }: { label?: string }) {
+function ScreenLabel({ label = "システム画面", src }: { label?: string; src?: string }) {
     return (
         <div className="my-3">
             <div className="text-xs text-slate-500 mb-1">▼{label}</div>
-            <div className="border border-dashed border-slate-300 rounded bg-slate-50 flex items-center justify-center py-5 text-xs text-slate-400">
-                ［スクリーンショット挿入位置］
-            </div>
+            {src ? (
+                <img
+                    src={src}
+                    alt={label}
+                    className="border border-slate-200 rounded w-full shadow-sm"
+                />
+            ) : (
+                <div className="border border-dashed border-slate-300 rounded bg-slate-50 flex items-center justify-center py-5 text-xs text-slate-400">
+                    ［スクリーンショット挿入位置］
+                </div>
+            )}
         </div>
     );
 }
@@ -533,7 +541,7 @@ export default function ManualPage() {
 
                             <SectionHead>新規受注の登録手順</SectionHead>
                             <Step n={1} title='画面右上の「新規受注登録」ボタンを押します。（管理者モード時のみ表示）'>
-                                <ScreenLabel label="利用状況 Web サイト画面" />
+                                <ScreenLabel label="受注管理画面" src="/screenshots/order-screen.png" />
                             </Step>
                             <Step n={2} title="以下の基本情報を入力します。">
                                 <FieldTable rows={[
@@ -546,7 +554,7 @@ export default function ManualPage() {
                             <Step n={3} title='製品と数量を入力します。1枚の注文書に複数の味がある場合は「製品を追加する」ボタンで行を追加し、まとめて登録できます。数量は c/s とパック(p) の両方で入力可能です。' />
                             <Step n={4} title="数量を入力した瞬間、BOMシミュレーション結果が右側に表示されます。">
                                 <NoteBox type="caution">不足品目がある場合は赤色で警告が表示されます。受注登録は可能ですが、製造前に<strong>入荷管理で調達</strong>を行ってください。</NoteBox>
-                                <ScreenLabel label="BOM シミュレーション結果" />
+                                <ScreenLabel label="新規受注登録・BOM シミュレーション結果" src="/screenshots/BOM.png" />
                             </Step>
                             <Step n={5} title='BOM 確認後、「受注を確定する」ボタンを押して保存します。' />
 
@@ -578,7 +586,7 @@ export default function ManualPage() {
 
                             <SectionHead>入荷受け入れの手順（在庫加算）</SectionHead>
                             <Step n={1} title='実際に資材が届いたら、右側リストの該当行の「確認」ボタンを押します。'>
-                                <ScreenLabel />
+                                <ScreenLabel label="入荷確認ダイアログ" src="/screenshots/arrival-check.png" />
                             </Step>
                             <Step n={2} title='確認ダイアログが開きます。実際の入荷数量を確認または修正します。' />
                             <Step n={3} title='緑色の「入荷済にする（在庫に加算）」ボタンを押します。'>
@@ -596,7 +604,7 @@ export default function ManualPage() {
                             <SectionHead>製造計画の登録手順</SectionHead>
                             <Step n={1} title='「製造管理」画面を開きます。' />
                             <Step n={2} title='左側「未計画の残数がある受注」リストから、製造したい受注をクリックします。受注がない場合は右上の「見込み生産」ボタンを使用します。'>
-                                <ScreenLabel />
+                                <ScreenLabel label="製造計画登録画面" src="/screenshots/production-plan.png" />
                             </Step>
                             <Step n={3} title='右側フォームに以下を入力します。'>
                                 <FieldTable rows={[
@@ -671,7 +679,7 @@ export default function ManualPage() {
                             <Step n={1} title='「在庫管理」画面を開き、「一括棚卸を開始」ボタンを押します。' />
                             <Step n={2} title='全項目に入力枠が現れます。実際に在庫を数えながら、ズレている項目を書き換えます。製品在庫はケース (c/s) とパック (p) を別々の枠に入力できます。' />
                             <Step n={3} title='変更した項目は黄色くハイライトされます。内容を確認したら「一括で上書き保存」ボタンを押します。'>
-                                <ScreenLabel label="棚卸入力画面" />
+                                <ScreenLabel label="棚卸入力・実数調整画面" src="/screenshots/inventory-adjustment.png" />
                             </Step>
                             <Step n={4} title='調整履歴（変更前・変更後・差分・日時）が inventory_adjustments テーブルに自動記録されます。' />
 
@@ -688,7 +696,7 @@ export default function ManualPage() {
                             <SectionHead>出荷手順</SectionHead>
                             <Step n={1} title='「出荷管理」画面を開きます。' />
                             <Step n={2} title='左側リストから出荷する受注をクリックして選択します。同じ注文書の製品はまとめて表示されます。'>
-                                <ScreenLabel />
+                                <ScreenLabel label="出荷引き当て・Lot 選択画面" src="/screenshots/shipment-select.png" />
                             </Step>
                             <Step n={3} title='右側に「出荷可能な Lot 一覧」が古い順（先入れ先出し）で表示されます。'>
                                 <NoteBox type="supplement">顧客の残存賞味期限要求に合わせ、古い Lot を優先しつつ、要求期限を下回らない Lot を選んでください。</NoteBox>
