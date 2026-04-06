@@ -586,7 +586,7 @@ export default function ManualPage() {
 
                             <SectionHead>入荷受け入れの手順（在庫加算）</SectionHead>
                             <Step n={1} title='実際に資材が届いたら、右側リストの該当行の「確認」ボタンを押します。'>
-                                <ScreenLabel label="入荷確認ダイアログ" src="/screenshots/arrival-check.png" />
+                                <ScreenLabel label="入荷確認ダイアログ" src="/screenshots/arrivals.png" />
                             </Step>
                             <Step n={2} title='確認ダイアログが開きます。実際の入荷数量を確認または修正します。' />
                             <Step n={3} title='緑色の「入荷済にする（在庫に加算）」ボタンを押します。'>
