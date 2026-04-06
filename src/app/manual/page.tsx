@@ -541,7 +541,7 @@ export default function ManualPage() {
 
                             <SectionHead>新規受注の登録手順</SectionHead>
                             <Step n={1} title='画面右上の「新規受注登録」ボタンを押します。（管理者モード時のみ表示）'>
-                                <ScreenLabel label="受注管理画面" src="/screenshots/order-screen.png" />
+                                <ScreenLabel label="受注登録ダイアログ" src="/screenshots/order-screen.png" />
                             </Step>
                             <Step n={2} title="以下の基本情報を入力します。">
                                 <FieldTable rows={[
