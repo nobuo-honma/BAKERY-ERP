@@ -626,10 +626,10 @@ export default function ArrivalsPage() {
                                 <div
                                     key={d}
                                     className={`p-2 text-center font-bold text-sm border-r border-slate-300 print:border-black last:border-r-0 ${i === 0
-                                            ? "text-red-600"
-                                            : i === 6
-                                                ? "text-blue-600"
-                                                : "text-slate-700 print:text-black"
+                                        ? "text-red-600"
+                                        : i === 6
+                                            ? "text-blue-600"
+                                            : "text-slate-700 print:text-black"
                                         }`}
                                 >
                                     {d}
@@ -657,10 +657,10 @@ export default function ArrivalsPage() {
                                             <>
                                                 <div
                                                     className={`text-right font-bold text-sm mb-1 ${idx % 7 === 0
-                                                            ? "text-red-600"
-                                                            : idx % 7 === 6
-                                                                ? "text-blue-600"
-                                                                : "text-slate-700 print:text-black"
+                                                        ? "text-red-600"
+                                                        : idx % 7 === 6
+                                                            ? "text-blue-600"
+                                                            : "text-slate-700 print:text-black"
                                                         }`}
                                                 >
                                                     {day}
@@ -672,8 +672,8 @@ export default function ArrivalsPage() {
                                                             key={arr.id}
                                                             onClick={() => openEditDialog(arr)}
                                                             className={`${arr.status === "arrived"
-                                                                    ? "bg-green-50 border-green-300"
-                                                                    : "bg-blue-50 border-blue-200"
+                                                                ? "bg-green-50 border-green-300"
+                                                                : "bg-blue-50 border-blue-200"
                                                                 } border rounded p-1.5 print:p-1 cursor-pointer hover:shadow-md text-xs leading-tight break-words relative group`}
                                                         >
                                                             {canEdit && (
@@ -735,8 +735,8 @@ export default function ArrivalsPage() {
                                                     key={arr.id}
                                                     onClick={() => openEditDialog(arr)}
                                                     className={`${arr.status === "arrived"
-                                                            ? "bg-green-50 border-green-300"
-                                                            : "bg-blue-50 border-blue-200"
+                                                        ? "bg-green-50 border-green-300"
+                                                        : "bg-blue-50 border-blue-200"
                                                         } border rounded p-2.5 text-xs shadow-sm relative group cursor-pointer hover:bg-slate-50`}
                                                 >
                                                     <div className="flex justify-between items-start mb-1.5 border-b border-white/40 pb-1.5">
