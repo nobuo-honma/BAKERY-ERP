@@ -61,7 +61,6 @@ export default function ProductionPage() {
   const [ordersModalOpen, setOrdersModalOpen] = useState(false);
   const [ordersModalDate, setOrdersModalDate] = useState("");
 
-  // ★追加: 月別備考用State
   const [monthlyNote, setMonthlyNote] = useState("");
   const [isSavingNote, setIsSavingNote] = useState(false);
 
@@ -75,7 +74,6 @@ export default function ProductionPage() {
       const unitPerCs = o.products?.unit_per_cs || 24;
       const plannedPieces = o.production_plans ? o.production_plans.reduce((sum: number, p: any) => sum + (p.planned_cs * unitPerCs), 0) : 0;
       const remainPieces = o.quantity - plannedPieces;
-
       return { ...o, plannedPieces, remainPieces };
     }).filter(o => o.remainPieces > 0) || [];
 
@@ -114,7 +112,6 @@ export default function ProductionPage() {
     const { data: eData } = await supabase.from("events").select("*").gte("event_date", startDate).lte("event_date", endDate).order("event_date", { ascending: true });
     if (eData) setCalendarEvents(eData as Event[]);
 
-    // ★追加: 月別の備考データを取得
     const { data: noteData } = await supabase.from("calendar_notes").select("note_content").eq("month_str", currentMonthStr).single();
     setMonthlyNote(noteData ? noteData.note_content : "");
 
@@ -123,37 +120,26 @@ export default function ProductionPage() {
 
   useEffect(() => { if (viewMode === 'calendar') fetchCalendarPlans(); }, [fetchCalendarPlans, viewMode]);
 
-  // ★追加: 月別備考の保存処理
   const handleSaveMonthlyNote = async () => {
     setIsSavingNote(true);
     const y = calendarMonth.getFullYear(); const m = calendarMonth.getMonth() + 1;
     const currentMonthStr = `${y}-${String(m).padStart(2, '0')}`;
-
     try {
-      await supabase.from("calendar_notes").upsert({
-        month_str: currentMonthStr,
-        note_content: monthlyNote,
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'month_str' });
+      await supabase.from("calendar_notes").upsert({ month_str: currentMonthStr, note_content: monthlyNote, updated_at: new Date().toISOString() }, { onConflict: 'month_str' });
       alert(`${m}月の備考を保存しました。`);
-    } catch (err: any) {
-      alert("エラー: " + err.message);
-    }
+    } catch (err: any) { alert("エラー: " + err.message); }
     setIsSavingNote(false);
   };
 
   useEffect(() => {
     const pId = isStockProduction ? stockProductId : selectedOrder?.product_id;
     const targetProduct = isStockProduction ? products.find(p => p.id === stockProductId) : selectedOrder?.products;
-
     if (pId && targetProduct && planDate && planKg) {
       setCalculatedExpiry(calculateExpiryDate(planDate));
       setCalculatedLot(generateLotNumber(planDate, pId, 1));
       const pcs = (planKg as number) * targetProduct.unit_per_kg;
       setCalculatedCs(Math.floor(pcs / targetProduct.unit_per_cs));
-    } else {
-      setCalculatedLot(""); setCalculatedExpiry(""); setCalculatedCs(0);
-    }
+    } else { setCalculatedLot(""); setCalculatedExpiry(""); setCalculatedCs(0); }
   }, [selectedOrder, planDate, planKg, isStockProduction, stockProductId, products]);
 
   const handleSelectOrder = (order: Order) => {
@@ -179,41 +165,26 @@ export default function ProductionPage() {
   const handleSavePlan = async () => {
     const pId = isStockProduction ? stockProductId : selectedOrder?.product_id;
     const targetProduct = isStockProduction ? products.find(p => p.id === stockProductId) : selectedOrder?.products;
-
     if (!pId || !targetProduct || !planDate || !planKg || !calculatedLot) return;
     setIsProcessing(true);
-
     const dateStr = planDate.replace(/-/g, "");
     const random3 = Math.floor(Math.random() * 1000).toString().padStart(3, "0");
-    const newPlan = {
-      id: `PLN-${dateStr}-${random3}`, order_id: isStockProduction ? null : selectedOrder?.id, product_id: pId,
-      production_date: planDate, production_kg: planKg, planned_units: (planKg as number) * targetProduct.unit_per_kg,
-      planned_cs: calculatedCs, lot_code: calculatedLot, expiry_date: calculatedExpiry, status: "planned", notes: planNotes
-    };
-
+    const newPlan = { id: `PLN-${dateStr}-${random3}`, order_id: isStockProduction ? null : selectedOrder?.id, product_id: pId, production_date: planDate, production_kg: planKg, planned_units: (planKg as number) * targetProduct.unit_per_kg, planned_cs: calculatedCs, lot_code: calculatedLot, expiry_date: calculatedExpiry, status: "planned", notes: planNotes };
     const { error } = await supabase.from("production_plans").insert(newPlan);
     if (!error) {
       if (!isStockProduction && selectedOrder?.status === 'received') {
         await supabase.from("orders").update({ status: "in_production" }).eq("id", selectedOrder.id);
         fetchData(selectedOrder.id);
-      } else {
-        alert(isStockProduction ? "在庫品としての製造計画を登録しました！" : "計画を登録しました！");
-        fetchData();
-        if (isStockProduction) { setPlanKg(""); setPlanNotes(""); }
-      }
+      } else { alert(isStockProduction ? "在庫品としての製造計画を登録しました！" : "計画を登録しました！"); fetchData(); if (isStockProduction) { setPlanKg(""); setPlanNotes(""); } }
     } else alert("エラー: " + error.message);
     setIsProcessing(false);
   };
+
   const openEditDialog = (plan: Plan) => {
-    setEditingPlan(plan);
-    setEditDate(plan.production_date);
-    setEditKg(plan.production_kg);
-    setEditNotes(plan.notes || "");
+    setEditingPlan(plan); setEditDate(plan.production_date); setEditKg(plan.production_kg); setEditNotes(plan.notes || "");
   };
 
-  const openOrdersModal = (dateStr: string) => {
-    setOrdersModalDate(dateStr); setOrdersModalOpen(true);
-  };
+  const openOrdersModal = (dateStr: string) => { setOrdersModalDate(dateStr); setOrdersModalOpen(true); };
 
   const handleUpdatePlan = async () => {
     if (!editingPlan || !editDate || !editKg) return;
@@ -230,12 +201,10 @@ export default function ProductionPage() {
   const handleDeletePlan = async () => {
     if (!editingPlan) return;
     let confirmMsg = "この製造計画を削除（キャンセル）しますか？";
-    if (editingPlan.status === 'in_progress') confirmMsg = "【重要】この計画は「製造中」です。\nキャンセルすると、引き落とされた「原料・資材の在庫」が自動的に元に戻されます。\n本当に削除してよろしいですか？";
-    else if (editingPlan.status === 'completed') confirmMsg = "【超重要】この計画は「完了」しています。\nキャンセルすると、完成した「製品在庫」が自動的に取り消し(マイナス)されますがよろしいですか？\n（※すでに出荷済みの場合は削除しないでください）";
-
+    if (editingPlan.status === 'in_progress') confirmMsg = "【重要】この計画は「製造中」です。\nキャンセルすると、引き落とされた原料在庫が元に戻されます。削除してよろしいですか？";
+    else if (editingPlan.status === 'completed') confirmMsg = "【超重要】この計画は「完了」しています。\nキャンセルすると、製品在庫がマイナスされます。削除してよろしいですか？";
     if (!confirm(confirmMsg)) return;
     setIsProcessing(true);
-
     try {
       if (editingPlan.status === 'in_progress') {
         const { data: boms } = await supabase.from('bom').select('*').eq('product_id', editingPlan.product_id);
@@ -245,42 +214,35 @@ export default function ProductionPage() {
             const { data: stock } = await supabase.from('item_stocks').select('quantity').eq('item_id', bom.item_id).single();
             const currentQty = stock?.quantity || 0;
             await supabase.from('item_stocks').upsert({ item_id: bom.item_id, quantity: currentQty + usedQty });
-            await supabase.from('inventory_adjustments').insert({ item_id: bom.item_id, before_qty: currentQty, after_qty: currentQty + usedQty, reason: `製造キャンセルによる原料戻し (Lot: ${editingPlan.lot_code})` });
+            await supabase.from('inventory_adjustments').insert({ item_id: bom.item_id, before_qty: currentQty, after_qty: currentQty + usedQty, reason: `製造キャンセルによる原料戻し` });
           }
         }
       }
-
       if (editingPlan.status === 'completed') {
         const unit_per_cs = editingPlan.products?.unit_per_cs || 24;
         const actualCsVal = editingPlan.actual_cs || editingPlan.planned_cs;
         const actualPieceVal = editingPlan.actual_piece || 0;
         const cancelPieces = (actualCsVal * unit_per_cs) + actualPieceVal;
-
         const { data: existingStock } = await supabase.from('product_stocks').select('id, total_pieces').eq('lot_code', editingPlan.lot_code).single();
         if (existingStock) {
           const newPieces = existingStock.total_pieces - cancelPieces;
-          if (newPieces <= 0) {
-            await supabase.from('product_stocks').delete().eq('id', existingStock.id);
-          } else {
-            await supabase.from('product_stocks').update({ total_pieces: newPieces }).eq('id', existingStock.id);
-          }
+          if (newPieces <= 0) await supabase.from('product_stocks').delete().eq('id', existingStock.id);
+          else await supabase.from('product_stocks').update({ total_pieces: newPieces }).eq('id', existingStock.id);
           await supabase.from('inventory_adjustments').insert({ product_id: editingPlan.product_id, lot_code: editingPlan.lot_code, before_qty: existingStock.total_pieces, after_qty: newPieces, reason: `製造完了取り消しによる製品減算` });
         }
       }
-
       const { error } = await supabase.from("production_plans").delete().eq("id", editingPlan.id);
       if (error) throw error;
-
       setEditingPlan(null); if (viewMode === 'calendar') fetchCalendarPlans(); fetchData();
-      alert("計画をキャンセル（削除）し、必要な在庫のロールバックを完了しました。");
-    } catch (err: any) { alert("削除処理中にエラーが発生しました: " + err.message); }
+      alert("計画を削除し、在庫のロールバックを完了しました。");
+    } catch (err: any) { alert("エラー: " + err.message); }
     setIsProcessing(false);
   };
 
   const handleStartProduction = async () => {
     if (!editingPlan) return;
     if (editingPlan.status !== 'planned') { alert("この計画はすでに製造開始されています！"); return; }
-    if (!confirm("製造を開始しますか？\n（BOMに基づいて原材料・資材の在庫が引き落とされます）")) return;
+    if (!confirm("製造を開始しますか？（原料在庫が引き落とされます）")) return;
     setIsProcessing(true);
     try {
       const { data: boms } = await supabase.from('bom').select('*').eq('product_id', editingPlan.product_id);
@@ -290,11 +252,11 @@ export default function ProductionPage() {
           const { data: stock } = await supabase.from('item_stocks').select('quantity').eq('item_id', bom.item_id).single();
           const currentQty = stock?.quantity || 0;
           await supabase.from('item_stocks').upsert({ item_id: bom.item_id, quantity: currentQty - requiredQty });
-          await supabase.from('inventory_adjustments').insert({ item_id: bom.item_id, before_qty: currentQty, after_qty: currentQty - requiredQty, reason: `製造消費 (Lot: ${editingPlan.lot_code})` });
+          await supabase.from('inventory_adjustments').insert({ item_id: bom.item_id, before_qty: currentQty, after_qty: currentQty - requiredQty, reason: `製造消費` });
         }
       }
       await supabase.from("production_plans").update({ status: "in_progress" }).eq("id", editingPlan.id);
-      setEditingPlan(null); if (viewMode === 'calendar') fetchCalendarPlans(); fetchData(); alert("製造を開始し、資材の在庫を減算しました。");
+      setEditingPlan(null); if (viewMode === 'calendar') fetchCalendarPlans(); fetchData(); alert("製造を開始しました。");
     } catch (err) { alert("エラーが発生しました。"); }
     setIsProcessing(false);
   };
@@ -302,16 +264,13 @@ export default function ProductionPage() {
   const openCompletionModal = () => {
     if (!editingPlan) return;
     if (editingPlan.status === 'completed') { alert("すでに完了処理されています。"); return; }
-    setActualCs(editingPlan.planned_cs);
-    setActualPiece(0);
-    setCompletionModalOpen(true);
+    setActualCs(editingPlan.planned_cs); setActualPiece(0); setCompletionModalOpen(true);
   };
 
   const handleCompleteProductionWithActuals = async () => {
     if (!editingPlan || actualCs === "") { alert("実績ケース数を入力してください。"); return; }
     if (editingPlan.status === 'completed') { alert("この計画はすでに完了済みです。"); return; }
-    const aCs = Number(actualCs) || 0;
-    const aP = Number(actualPiece) || 0;
+    const aCs = Number(actualCs) || 0; const aP = Number(actualPiece) || 0;
     if (aCs === 0 && aP === 0) { alert("実績数が0になっています。"); return; }
 
     setIsProcessing(true);
@@ -334,25 +293,20 @@ export default function ProductionPage() {
         await supabase.from('inventory_adjustments').insert({ product_id: editingPlan.product_id, lot_code: editingPlan.lot_code, before_qty: existingStock.total_pieces, after_qty: existingStock.total_pieces + addPiecesToStock, reason: `製造完成 (サンプル引当後)` });
       } else {
         await supabase.from('product_stocks').insert({ lot_code: editingPlan.lot_code, product_id: editingPlan.product_id, total_pieces: addPiecesToStock, expiry_date: editingPlan.expiry_date });
-        await supabase.from('inventory_adjustments').insert({ product_id: editingPlan.product_id, lot_code: editingPlan.lot_code, before_qty: 0, after_qty: addPiecesToStock, reason: `製造完成 (新規Lot / サンプル引当後)` });
+        await supabase.from('inventory_adjustments').insert({ product_id: editingPlan.product_id, lot_code: editingPlan.lot_code, before_qty: 0, after_qty: addPiecesToStock, reason: `製造完成 (新規Lot)` });
       }
 
       const randomManageNo = `KS-${editingPlan.lot_code}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
       await supabase.from("keep_samples").insert({
-        lot_code: editingPlan.lot_code,
-        product_id: editingPlan.product_id,
-        management_no: randomManageNo,
-        saved_quantity: keepQuantity,
-        production_date: editingPlan.production_date,
-        expiry_date: editingPlan.expiry_date
+        lot_code: editingPlan.lot_code, product_id: editingPlan.product_id, management_no: randomManageNo, saved_quantity: keepQuantity, production_date: editingPlan.production_date, expiry_date: editingPlan.expiry_date
       });
 
       try { await supabase.from("production_plans").update({ status: "completed", actual_cs: aCs, actual_piece: aP }).eq("id", editingPlan.id); }
       catch (e) { await supabase.from("production_plans").update({ status: "completed" }).eq("id", editingPlan.id); }
 
       setCompletionModalOpen(false); setEditingPlan(null); if (viewMode === 'calendar') fetchCalendarPlans(); fetchData();
-      alert(`製造完了！\nキープサンプルを ${keepQuantity}個 自動登録し、\n残りの実績を製品在庫に追加しました。`);
-    } catch (err: any) { alert("エラーが発生しました: " + err.message); }
+      alert(`製造完了！\nサンプルを ${keepQuantity}個 保管し、残りを製品在庫に追加しました。`);
+    } catch (err: any) { alert("エラー: " + err.message); }
     setIsProcessing(false);
   };
 
@@ -364,15 +318,14 @@ export default function ProductionPage() {
   const handleSaveEvent = async () => {
     if (!eventDate || !eventTitle) { alert("日付とタイトルは必須です。"); return; }
     setIsProcessing(true); const eventData = { event_date: eventDate, title: eventTitle, notes: eventNotes };
-    if (editingEvent) { const { error } = await supabase.from("events").update(eventData).eq("id", editingEvent.id); if (!error) { setEventModalOpen(false); fetchCalendarPlans(); } else alert("エラー: " + error.message); }
-    else { const { error } = await supabase.from("events").insert(eventData); if (!error) { setEventModalOpen(false); fetchCalendarPlans(); } else alert("エラー: " + error.message); }
-    setIsProcessing(false);
+    if (editingEvent) { await supabase.from("events").update(eventData).eq("id", editingEvent.id); }
+    else { await supabase.from("events").insert(eventData); }
+    setEventModalOpen(false); fetchCalendarPlans(); setIsProcessing(false);
   };
   const handleDeleteEvent = async () => {
     if (!editingEvent || !confirm("このイベントを削除しますか？")) return;
-    setIsProcessing(true); const { error } = await supabase.from("events").delete().eq("id", editingEvent.id);
-    if (!error) { setEventModalOpen(false); fetchCalendarPlans(); } else alert("エラー: " + error.message);
-    setIsProcessing(false);
+    setIsProcessing(true); await supabase.from("events").delete().eq("id", editingEvent.id);
+    setEventModalOpen(false); fetchCalendarPlans(); setIsProcessing(false);
   };
 
   const getCalendarDays = () => {
@@ -380,6 +333,158 @@ export default function ProductionPage() {
     const blanks = Array(firstDay).fill(null); const days = Array.from({ length: daysInMonth }, (_, i) => i + 1); const totalSlots = blanks.length + days.length; const trailingBlanks = Array(Math.ceil(totalSlots / 7) * 7 - totalSlots).fill(null);
     return [...blanks, ...days, ...trailingBlanks];
   };
+  // =======================================================================
+  // 共通のダイアログコンポーネントを返す関数
+  // =======================================================================
+  const renderAllDialogs = () => (
+    <div className="print:hidden">
+      <Dialog open={eventModalOpen} onOpenChange={setEventModalOpen}>
+        <DialogContent className="w-[95vw] max-w-sm bg-white p-4 md:p-6 rounded-xl">
+          <DialogHeader><DialogTitle className="flex items-center gap-2 text-slate-800"><Flag className="w-5 h-5 text-slate-600" /> {editingEvent ? "イベントの編集" : "新規イベントの登録"}</DialogTitle></DialogHeader>
+          <div className="space-y-4 mt-2">
+            <div><label className="block text-xs font-bold text-slate-500 mb-1">日付</label><Input type="date" value={eventDate} onChange={e => setEventDate(e.target.value)} className="h-10 md:h-9" /></div>
+            <div><label className="block text-xs font-bold text-slate-500 mb-1">イベント名・内容 (必須)</label><Input value={eventTitle} onChange={e => setEventTitle(e.target.value)} placeholder="例: 月末棚卸、大掃除..." className="h-10 md:h-9 font-bold" /></div>
+            <div><label className="block text-xs font-bold text-slate-500 mb-1">備考 (任意)</label><textarea value={eventNotes} onChange={e => setEventNotes(e.target.value)} placeholder="詳細なメモ..." className="w-full p-3 md:p-2 border border-slate-200 rounded-md text-sm resize-none h-24 md:h-20 bg-slate-50" /></div>
+          </div>
+          <DialogFooter className="mt-6 border-t pt-4 flex flex-col sm:flex-row gap-2 sm:justify-between">
+            {editingEvent ? <Button onClick={handleDeleteEvent} disabled={isProcessing} variant="outline" className="w-full sm:w-auto border-red-200 text-red-600 hover:bg-red-50"><Trash2 className="h-4 w-4 mr-2" />削除</Button> : <div className="hidden sm:block"></div>}
+            <div className="flex gap-2 w-full sm:w-auto mt-2 sm:mt-0">
+              <Button variant="ghost" onClick={() => setEventModalOpen(false)} className="flex-1 sm:flex-none">キャンセル</Button>
+              <Button onClick={handleSaveEvent} disabled={isProcessing || !eventTitle} className="flex-1 sm:flex-none bg-slate-800 hover:bg-slate-900 text-white font-bold h-10 md:h-9">{isProcessing ? <Loader2 className="animate-spin h-4 w-4 mr-2" /> : null}保存</Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!editingPlan} onOpenChange={(open) => !open && setEditingPlan(null)}>
+        <DialogContent className="w-[95vw] max-w-md bg-white p-4 md:p-6 rounded-xl">
+          <DialogHeader><DialogTitle className="flex justify-between items-center"><span>計画詳細 / ステータス更新</span></DialogTitle></DialogHeader>
+          {editingPlan && (
+            <div className="space-y-4 mt-2">
+              <div className="bg-slate-50 p-3 rounded-lg border text-sm">
+                <div className="text-slate-500 text-xs mb-1">Lot番号: <span className="font-bold text-slate-800">{editingPlan.lot_code}</span></div>
+                <div className="font-bold text-lg text-blue-900 leading-tight">{editingPlan.products?.name}</div>
+                <div className="text-slate-600 mt-1">{editingPlan.products?.variant_name}</div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div><label className="block text-xs font-bold text-slate-500 mb-1">製造予定日</label><Input type="date" value={editDate} onChange={e => setEditDate(e.target.value)} disabled={editingPlan.status !== 'planned' || !canEdit} className="h-10 md:h-9" /></div>
+                <div><label className="block text-xs font-bold text-slate-500 mb-1">製造量 (kg)</label><Input type="number" value={editKg} onChange={e => setEditKg(e.target.value === "" ? "" : Number(e.target.value))} disabled={editingPlan.status !== 'planned' || !canEdit} className="h-10 md:h-9 text-right font-bold text-lg" /></div>
+              </div>
+              <div className="text-xs text-right text-slate-500">予定ケース数: <span className="font-bold">{editingPlan.planned_cs} c/s</span></div>
+
+              <div><label className="block text-xs font-bold text-slate-500 mb-1">備考</label><Input value={editNotes} onChange={e => setEditNotes(e.target.value)} disabled={editingPlan.status !== 'planned' || !canEdit} className="h-10 md:h-9" placeholder="備考を入力..." /></div>
+
+              {canEdit && (
+                <div className="pt-4 border-t flex flex-col gap-3">
+                  <div className="flex gap-2">
+                    <Button onClick={handleUpdatePlan} disabled={isProcessing || editingPlan.status !== 'planned'} className="flex-1 bg-slate-800 hover:bg-slate-900 text-white h-10 md:h-9"><Edit className="h-4 w-4 mr-2" /> 内容更新</Button>
+                    <Button onClick={handleDeletePlan} disabled={isProcessing} variant="outline" className="border-red-200 text-red-600 hover:bg-red-50 h-10 md:h-9"><Trash2 className="h-4 w-4 mr-2" /> {editingPlan.status === 'planned' ? '削除' : 'キャンセル'}</Button>
+                  </div>
+
+                  {editingPlan.status === 'planned' && (
+                    <Button onClick={handleStartProduction} disabled={isProcessing} className="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold h-12 shadow-sm text-base">
+                      <Play className="h-5 w-5 mr-2" />製造を開始する (在庫減算)
+                    </Button>
+                  )}
+
+                  {editingPlan.status === 'in_progress' && (
+                    <Button onClick={openCompletionModal} disabled={isProcessing} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold h-12 shadow-sm text-base">
+                      <CheckCircle className="h-5 w-5 mr-2" />製造を完了し、実績数を入力
+                    </Button>
+                  )}
+                </div>
+              )}
+              {editingPlan.status === 'completed' && <div className="text-center text-sm font-bold text-green-700 bg-green-50 py-3 rounded-md border border-green-200">この計画は完了し、在庫へ反映済みです。</div>}
+              {!canEdit && editingPlan.status !== 'completed' && <div className="text-center text-sm font-bold text-slate-500 bg-slate-50 py-3 rounded-md"><Lock className="w-4 h-4 inline mr-1" />閲覧モードのため処理はできません</div>}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={completionModalOpen} onOpenChange={setCompletionModalOpen}>
+        <DialogContent className="max-w-sm bg-white p-6 rounded-xl">
+          <DialogHeader><DialogTitle className="flex items-center gap-2 text-green-700"><CheckCircle2 className="w-5 h-5" /> 製造完了と実績の登録</DialogTitle></DialogHeader>
+          <div className="space-y-4 mt-4">
+            <div className="bg-slate-50 p-4 rounded-lg text-center border">
+              <div className="text-xs text-slate-500 mb-1">予定ケース数</div>
+              <div className="text-2xl font-black text-slate-400 line-through">{editingPlan?.planned_cs} <span className="text-sm font-normal">c/s</span></div>
+            </div>
+
+            <div className="text-center">
+              <label className="block text-sm font-bold text-blue-800 mb-2">実際の完成数を入力してください</label>
+              <div className="flex items-center justify-center gap-2">
+                <Input type="number" inputMode="numeric" min="0" autoFocus value={actualCs} onChange={e => setActualCs(e.target.value === "" ? "" : Number(e.target.value))} className="w-24 h-14 text-3xl font-black text-right border-blue-400 focus-visible:ring-blue-500 shadow-sm" />
+                <span className="font-bold text-slate-500">c/s</span>
+                <Input type="number" inputMode="numeric" min="0" max={Math.floor(((editingPlan?.products?.unit_per_cs || 24) - 1) / 2)} value={actualPiece} onChange={e => setActualPiece(e.target.value === "" ? "" : Number(e.target.value))} className="w-16 h-14 text-2xl font-bold text-right border-blue-400 focus-visible:ring-blue-500 shadow-sm ml-2" />
+                <span className="font-bold text-slate-500">p</span>
+              </div>
+            </div>
+
+            {actualCs !== "" && editingPlan && (
+              <div className={`text-center font-bold text-sm mt-4 ${Number(actualCs) === editingPlan.planned_cs && (actualPiece === "" || Number(actualPiece) === 0) ? 'text-green-600' : 'text-amber-600'}`}>
+                予定との誤差: {
+                  ((Number(actualCs) * (editingPlan.products?.unit_per_cs || 24)) + (Number(actualPiece) * 2)) - (editingPlan.planned_cs * (editingPlan.products?.unit_per_cs || 24)) > 0 ? "+" : ""
+                }
+                {((Number(actualCs) * (editingPlan.products?.unit_per_cs || 24)) + (Number(actualPiece) * 2)) - (editingPlan.planned_cs * (editingPlan.products?.unit_per_cs || 24))} 個
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="mt-6 border-t pt-4 flex gap-2">
+            <Button variant="outline" onClick={() => setCompletionModalOpen(false)} className="flex-1">戻る</Button>
+            <Button onClick={handleCompleteProductionWithActuals} disabled={isProcessing || actualCs === ""} className="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold">
+              {isProcessing ? <Loader2 className="animate-spin h-4 w-4 mr-2" /> : <CheckCircle2 className="h-4 w-4 mr-2" />} 完了して在庫に加算
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={ordersModalOpen} onOpenChange={setOrdersModalOpen}>
+        <DialogContent className="w-[95vw] max-w-md bg-white p-4 md:p-6 rounded-xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-purple-800">
+              <Truck className="w-5 h-5" /> 出荷予定 ({ordersModalDate ? new Date(ordersModalDate).toLocaleDateString('ja-JP') : ''})
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 mt-2 max-h-[60vh] overflow-y-auto pr-2">
+            {calendarOrders.filter(o => o.planned_ship_date === ordersModalDate).map(ord => {
+              const isShipped = ord.status === 'shipped';
+              const unitPerCs = ord.products?.unit_per_cs || 24;
+              const displayCs = Math.floor(ord.quantity / unitPerCs);
+              const displayP = Math.floor((ord.quantity % unitPerCs) / 2);
+
+              return (
+                <div key={ord.id} className={`p-4 rounded-lg border ${isShipped ? 'bg-slate-50 border-slate-200 opacity-70' : 'bg-purple-50 border-purple-200'}`}>
+                  <div className="flex justify-between items-start mb-2">
+                    <div className={`font-bold text-base ${isShipped ? 'text-slate-500 line-through' : 'text-slate-800'}`}>{ord.customers?.name}</div>
+                    {isShipped ? <Badge className="bg-slate-200 text-slate-600 border-none shadow-none text-xs">出荷済</Badge> : <Badge className="bg-purple-500 text-white border-none shadow-sm text-xs">出荷予定</Badge>}
+                  </div>
+                  <div className="flex justify-between items-end border-t border-purple-200/50 pt-2">
+                    <div>
+                      <div className="text-slate-700 font-bold">{ord.products?.name}</div>
+                      <div className="text-xs text-slate-500">{ord.products?.variant_name}</div>
+                      {ord.customer_order_no && <div className="text-[10px] text-slate-400 mt-1">発注: {ord.customer_order_no}</div>}
+                    </div>
+                    <div className="font-black text-purple-800 text-2xl">
+                      {displayCs} <span className="font-normal text-sm text-slate-500">c/s</span>
+                      {displayP > 0 && <span className="text-lg ml-1">{displayP} <span className="text-xs font-normal text-slate-500">p</span></span>}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            {calendarOrders.filter(o => o.planned_ship_date === ordersModalDate).length === 0 && (
+              <div className="text-center py-8 text-slate-400 font-bold bg-slate-50 rounded-lg">この日の出荷予定はありません</div>
+            )}
+          </div>
+          <DialogFooter className="mt-4 border-t pt-4">
+            <Button variant="outline" onClick={() => setOrdersModalOpen(false)} className="w-full font-bold h-10 md:h-9">閉じる</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
 
   if (loading && orders.length === 0 && plans.length === 0) return <div className="flex justify-center items-center h-64"><Loader2 className="animate-spin h-8 w-8 text-slate-500" /></div>;
 
@@ -418,7 +523,6 @@ export default function ProductionPage() {
 
         <div className="border border-slate-300 rounded-lg md:rounded-sm overflow-hidden print:border-black print:border-2 flex flex-col">
 
-          {/* --- PC・印刷用 横型カレンダー --- */}
           <div className="hidden md:block print:block">
             <div className="grid grid-cols-7 bg-slate-100 print:bg-gray-100 border-b border-slate-300 print:border-black">
               {['日', '月', '火', '水', '木', '金', '土'].map((d, i) => (<div key={d} className={`p-2 text-center font-bold text-sm border-r border-slate-300 print:border-black last:border-r-0 ${i === 0 ? 'text-red-600' : i === 6 ? 'text-blue-600' : 'text-slate-700 print:text-black'}`}>{d}</div>))}
@@ -440,7 +544,6 @@ export default function ProductionPage() {
                         </div>
 
                         <div className="space-y-1.5 print:space-y-1">
-                          {/* ① 社内イベント */}
                           {dayEvents.map(ev => (
                             <div key={ev.id} onClick={() => canEdit && openEventDialog(ev)} className={`bg-slate-100 border border-slate-300 rounded p-1.5 print:p-1 print:border-black text-xs leading-tight wrap-break-word relative group ${canEdit ? 'cursor-pointer hover:bg-slate-200' : ''}`}>
                               {canEdit && <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity print:hidden text-slate-400"><Edit className="h-3 w-3" /></div>}
@@ -449,7 +552,6 @@ export default function ProductionPage() {
                             </div>
                           ))}
 
-                          {/* ② 出荷予定 */}
                           {dayOrders.length > 0 && (
                             <div onClick={() => openOrdersModal(dateStr!)} className="bg-purple-100 border border-purple-300 rounded px-2 py-1 print:p-1 print:border-black text-xs font-bold text-purple-800 print:text-black flex items-center justify-between shadow-sm cursor-pointer hover:bg-purple-200 transition-colors">
                               <span className="flex items-center gap-1"><Truck className="w-3.5 h-3.5" /> 出荷</span>
@@ -457,7 +559,6 @@ export default function ProductionPage() {
                             </div>
                           )}
 
-                          {/* ③ 製造予定 */}
                           {dayPlans.map(plan => {
                             let cardColor = "bg-blue-50 border-blue-200";
                             if (plan.status === 'in_progress') cardColor = "bg-amber-50 border-amber-300";
@@ -497,11 +598,11 @@ export default function ProductionPage() {
             </div>
           </div>
 
-          {/* --- スマホ用 縦型カレンダー (リスト形式) --- */}
+          {/* スマホ用 */}
           <div className="block md:hidden print:hidden divide-y divide-slate-200 bg-slate-50 flex-1">
-            {daysArray.filter(d => d !== null).map((day) => {
-              const dateStr = `${calendarMonth.getFullYear()}-${String(calendarMonth.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-              const dObj = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), day as number);
+            {getCalendarDays().filter(d => d !== null).map((day) => {
+              const dateStr = `${currentYear}-${currentMonthStr}-${String(day).padStart(2, '0')}`;
+              const dObj = new Date(currentYear, calendarMonth.getMonth(), day as number);
               const dow = dObj.getDay();
               const dowStr = ['日', '月', '火', '水', '木', '金', '土'][dow];
               const dowColor = dow === 0 ? 'text-red-600' : dow === 6 ? 'text-blue-600' : 'text-slate-700';
@@ -523,7 +624,7 @@ export default function ProductionPage() {
                     )}
                   </div>
 
-                  <div className="flex-1 space-y-2.5 py-1 min-h-12">
+                  <div className="flex-1 space-y-2.5 py-1 min-h-[3rem]">
                     {dayEvents.map(ev => (
                       <div key={ev.id} onClick={() => canEdit && openEventDialog(ev)} className={`bg-slate-100 border border-slate-300 rounded p-2 text-xs relative group shadow-sm ${canEdit ? 'cursor-pointer hover:bg-slate-200' : ''}`}>
                         <div className="font-bold text-slate-800 flex items-start gap-1.5 text-sm"><Flag className="w-4 h-4 text-slate-500 mt-0.5 shrink-0" />{ev.title}</div>
@@ -578,7 +679,6 @@ export default function ProductionPage() {
             })}
           </div>
 
-          {/* ★追加: カレンダー下部の月別備考欄 */}
           <div className="bg-slate-100 print:bg-white border-t border-slate-300 print:border-black p-4 flex flex-col gap-2 shrink-0">
             <div className="text-sm font-bold text-slate-700 print:text-black flex items-center justify-between">
               <span>{currentMonthStr}月の備考・連絡事項</span>
@@ -661,7 +761,7 @@ export default function ProductionPage() {
           <h2 className="font-bold text-slate-700 mb-1 flex items-center gap-2"><span className="bg-blue-100 text-blue-800 rounded-full w-6 h-6 flex items-center justify-center text-xs">2</span>日別の製造予定を入力</h2>
 
           {canEdit ? (
-            <Card className="border-slate-200 shadow-sm overflow-hidden shrink-0">
+            <Card className="border-slate-200 shadow-sm overflow-hidden flex-shrink-0">
               {selectedOrder || isStockProduction ? (
                 <div className="p-4 md:p-6">
                   <div className="bg-slate-100 p-4 rounded-md mb-6 flex flex-col md:flex-row md:justify-between md:items-center gap-4 border border-slate-200 shadow-inner">
@@ -688,7 +788,7 @@ export default function ProductionPage() {
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                     <div className="space-y-4">
-                      <div><label className="text-sm font-bold mb-2 text-slate-700 flex items-center gap-1"><CalendarIcon className="h-4 w-4" /> 製造予定日</label><Input type="date" value={planDate} onChange={e => setPlanDate(e.target.value)} className="text-lg bg-white h-12 border-blue-300 shadow-sm" /></div>
+                      <div><label className="block text-sm font-bold mb-2 text-slate-700 flex items-center gap-1"><CalendarIcon className="h-4 w-4" /> 製造予定日</label><Input type="date" value={planDate} onChange={e => setPlanDate(e.target.value)} className="text-lg bg-white h-12 border-blue-300 shadow-sm" /></div>
                       <div><label className="block text-sm font-bold mb-2 text-slate-700">この日の製造量 (kg)</label><div className="flex items-center gap-3"><Input type="number" min="0" value={planKg} onChange={e => setPlanKg(e.target.value === "" ? "" : Number(e.target.value))} className="text-xl font-bold bg-white h-12 text-right border-blue-300 shadow-sm" /><span className="text-lg font-bold text-slate-500">kg</span></div><div className="text-xs text-slate-500 mt-2 text-right">自動計算 👉 <span className="font-bold text-blue-700 text-sm">{calculatedCs} c/s</span></div></div>
                     </div>
                     <div className="flex flex-col h-full"><label className="block text-sm font-bold mb-2 text-slate-700">備考 (任意)</label><textarea value={planNotes} onChange={e => setPlanNotes(e.target.value)} className="flex-1 w-full p-3 border rounded-md text-sm border-blue-300 shadow-sm min-h-[100px] resize-none" /></div>
@@ -751,154 +851,7 @@ export default function ProductionPage() {
           )}
         </div>
       </div>
-
-      <div className="print:hidden">
-        <Dialog open={eventModalOpen} onOpenChange={setEventModalOpen}>
-          <DialogContent className="w-[95vw] max-w-sm bg-white p-4 md:p-6 rounded-xl">
-            <DialogHeader><DialogTitle className="flex items-center gap-2 text-slate-800"><Flag className="w-5 h-5 text-slate-600" /> {editingEvent ? "イベントの編集" : "新規イベントの登録"}</DialogTitle></DialogHeader>
-            <div className="space-y-4 mt-2">
-              <div><label className="block text-xs font-bold text-slate-500 mb-1">日付</label><Input type="date" value={eventDate} onChange={e => setEventDate(e.target.value)} className="h-10 md:h-9" /></div>
-              <div><label className="block text-xs font-bold text-slate-500 mb-1">イベント名・内容 (必須)</label><Input value={eventTitle} onChange={e => setEventTitle(e.target.value)} placeholder="例: 月末棚卸、大掃除..." className="h-10 md:h-9 font-bold" /></div>
-              <div><label className="block text-xs font-bold text-slate-500 mb-1">備考 (任意)</label><textarea value={eventNotes} onChange={e => setEventNotes(e.target.value)} placeholder="詳細なメモ..." className="w-full p-3 md:p-2 border border-slate-200 rounded-md text-sm resize-none h-24 md:h-20 bg-slate-50" /></div>
-            </div>
-            <DialogFooter className="mt-6 border-t pt-4 flex flex-col sm:flex-row gap-2 sm:justify-between">
-              {editingEvent ? <Button onClick={handleDeleteEvent} disabled={isProcessing} variant="outline" className="w-full sm:w-auto border-red-200 text-red-600 hover:bg-red-50"><Trash2 className="h-4 w-4 mr-2" />削除</Button> : <div className="hidden sm:block"></div>}
-              <div className="flex gap-2 w-full sm:w-auto mt-2 sm:mt-0">
-                <Button variant="ghost" onClick={() => setEventModalOpen(false)} className="flex-1 sm:flex-none">キャンセル</Button>
-                <Button onClick={handleSaveEvent} disabled={isProcessing || !eventTitle} className="flex-1 sm:flex-none bg-slate-800 hover:bg-slate-900 text-white font-bold h-10 md:h-9">{isProcessing ? <Loader2 className="animate-spin h-4 w-4 mr-2" /> : null}保存</Button>
-              </div>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        <Dialog open={!!editingPlan} onOpenChange={(open) => !open && setEditingPlan(null)}>
-          <DialogContent className="w-[95vw] max-w-md bg-white p-4 md:p-6 rounded-xl">
-            <DialogHeader><DialogTitle className="flex justify-between items-center"><span>計画詳細 / ステータス更新</span></DialogTitle></DialogHeader>
-            {editingPlan && (
-              <div className="space-y-4 mt-2">
-                <div className="bg-slate-50 p-3 rounded-lg border text-sm">
-                  <div className="text-slate-500 text-xs mb-1">Lot番号: <span className="font-bold text-slate-800">{editingPlan.lot_code}</span></div>
-                  <div className="font-bold text-lg text-blue-900 leading-tight">{editingPlan.products?.name}</div>
-                  <div className="text-slate-600 mt-1">{editingPlan.products?.variant_name}</div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div><label className="block text-xs font-bold text-slate-500 mb-1">製造予定日</label><Input type="date" value={editDate} onChange={e => setEditDate(e.target.value)} disabled={editingPlan.status !== 'planned' || !canEdit} className="h-10 md:h-9" /></div>
-                  <div><label className="block text-xs font-bold text-slate-500 mb-1">製造量 (kg)</label><Input type="number" value={editKg} onChange={e => setEditKg(e.target.value === "" ? "" : Number(e.target.value))} disabled={editingPlan.status !== 'planned' || !canEdit} className="h-10 md:h-9 text-right font-bold text-lg" /></div>
-                </div>
-                <div className="text-xs text-right text-slate-500">予定ケース数: <span className="font-bold">{editingPlan.planned_cs} c/s</span></div>
-
-                <div><label className="block text-xs font-bold text-slate-500 mb-1">備考</label><Input value={editNotes} onChange={e => setEditNotes(e.target.value)} disabled={editingPlan.status !== 'planned' || !canEdit} className="h-10 md:h-9" placeholder="備考を入力..." /></div>
-
-                {canEdit && (
-                  <div className="pt-4 border-t flex flex-col gap-3">
-                    <div className="flex gap-2">
-                      <Button onClick={handleUpdatePlan} disabled={isProcessing || editingPlan.status !== 'planned'} className="flex-1 bg-slate-800 hover:bg-slate-900 text-white h-10 md:h-9"><Edit className="h-4 w-4 mr-2" /> 内容更新</Button>
-                      <Button onClick={handleDeletePlan} disabled={isProcessing} variant="outline" className="border-red-200 text-red-600 hover:bg-red-50 h-10 md:h-9"><Trash2 className="h-4 w-4 mr-2" /> {editingPlan.status === 'planned' ? '削除' : 'キャンセル'}</Button>
-                    </div>
-
-                    {editingPlan.status === 'planned' && (
-                      <Button onClick={handleStartProduction} disabled={isProcessing} className="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold h-12 shadow-sm text-base">
-                        <Play className="h-5 w-5 mr-2" />製造を開始する (在庫減算)
-                      </Button>
-                    )}
-
-                    {editingPlan.status === 'in_progress' && (
-                      <Button onClick={openCompletionModal} disabled={isProcessing} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold h-12 shadow-sm text-base">
-                        <CheckCircle className="h-5 w-5 mr-2" />製造を完了し、実績数を入力
-                      </Button>
-                    )}
-                  </div>
-                )}
-                {editingPlan.status === 'completed' && <div className="text-center text-sm font-bold text-green-700 bg-green-50 py-3 rounded-md border border-green-200">この計画は完了し、在庫へ反映済みです。</div>}
-                {!canEdit && editingPlan.status !== 'completed' && <div className="text-center text-sm font-bold text-slate-500 bg-slate-50 py-3 rounded-md"><Lock className="w-4 h-4 inline mr-1" />閲覧モードのため処理はできません</div>}
-              </div>
-            )}
-          </DialogContent>
-        </Dialog>
-
-        <Dialog open={completionModalOpen} onOpenChange={setCompletionModalOpen}>
-          <DialogContent className="max-w-sm bg-white p-6 rounded-xl">
-            <DialogHeader><DialogTitle className="flex items-center gap-2 text-green-700"><CheckCircle2 className="w-5 h-5" /> 製造完了と実績の登録</DialogTitle></DialogHeader>
-            <div className="space-y-4 mt-4">
-              <div className="bg-slate-50 p-4 rounded-lg text-center border">
-                <div className="text-xs text-slate-500 mb-1">予定ケース数</div>
-                <div className="text-2xl font-black text-slate-400 line-through">{editingPlan?.planned_cs} <span className="text-sm font-normal">c/s</span></div>
-              </div>
-
-              <div className="text-center">
-                <label className="block text-sm font-bold text-blue-800 mb-2">実際の完成数を入力してください</label>
-                <div className="flex items-center justify-center gap-2">
-                  <Input type="number" inputMode="numeric" min="0" autoFocus value={actualCs} onChange={e => setActualCs(e.target.value === "" ? "" : Number(e.target.value))} className="w-24 h-14 text-3xl font-black text-right border-blue-400 focus-visible:ring-blue-500 shadow-sm" />
-                  <span className="font-bold text-slate-500">c/s</span>
-                  <Input type="number" inputMode="numeric" min="0" max={Math.floor(((editingPlan?.products?.unit_per_cs || 24) - 1) / 2)} value={actualPiece} onChange={e => setActualPiece(e.target.value === "" ? "" : Number(e.target.value))} className="w-16 h-14 text-2xl font-bold text-right border-blue-400 focus-visible:ring-blue-500 shadow-sm ml-2" />
-                  <span className="font-bold text-slate-500">p</span>
-                </div>
-              </div>
-
-              {actualCs !== "" && editingPlan && (
-                <div className={`text-center font-bold text-sm mt-4 ${Number(actualCs) === editingPlan.planned_cs && (actualPiece === "" || Number(actualPiece) === 0) ? 'text-green-600' : 'text-amber-600'}`}>
-                  予定との誤差: {
-                    ((Number(actualCs) * (editingPlan.products?.unit_per_cs || 24)) + (Number(actualPiece) * 2)) - (editingPlan.planned_cs * (editingPlan.products?.unit_per_cs || 24)) > 0 ? "+" : ""
-                  }
-                  {((Number(actualCs) * (editingPlan.products?.unit_per_cs || 24)) + (Number(actualPiece) * 2)) - (editingPlan.planned_cs * (editingPlan.products?.unit_per_cs || 24))} 個
-                </div>
-              )}
-            </div>
-
-            <DialogFooter className="mt-6 border-t pt-4 flex gap-2">
-              <Button variant="outline" onClick={() => setCompletionModalOpen(false)} className="flex-1">戻る</Button>
-              <Button onClick={handleCompleteProductionWithActuals} disabled={isProcessing || actualCs === ""} className="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold">
-                {isProcessing ? <Loader2 className="animate-spin h-4 w-4 mr-2" /> : <CheckCircle2 className="h-4 w-4 mr-2" />} 完了して在庫に加算
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        <Dialog open={ordersModalOpen} onOpenChange={setOrdersModalOpen}>
-          <DialogContent className="w-[95vw] max-w-md bg-white p-4 md:p-6 rounded-xl">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2 text-purple-800">
-                <Truck className="w-5 h-5" /> 出荷予定 ({ordersModalDate ? new Date(ordersModalDate).toLocaleDateString('ja-JP') : ''})
-              </DialogTitle>
-            </DialogHeader>
-            <div className="space-y-3 mt-2 max-h-[60vh] overflow-y-auto pr-2">
-              {calendarOrders.filter(o => o.planned_ship_date === ordersModalDate).map(ord => {
-                const isShipped = ord.status === 'shipped';
-                const unitPerCs = ord.products?.unit_per_cs || 24;
-                const displayCs = Math.floor(ord.quantity / unitPerCs);
-                const displayP = Math.floor((ord.quantity % unitPerCs) / 2);
-
-                return (
-                  <div key={ord.id} className={`p-4 rounded-lg border ${isShipped ? 'bg-slate-50 border-slate-200 opacity-70' : 'bg-purple-50 border-purple-200'}`}>
-                    <div className="flex justify-between items-start mb-2">
-                      <div className={`font-bold text-base ${isShipped ? 'text-slate-500 line-through' : 'text-slate-800'}`}>{ord.customers?.name}</div>
-                      {isShipped ? <Badge className="bg-slate-200 text-slate-600 border-none shadow-none text-xs">出荷済</Badge> : <Badge className="bg-purple-500 text-white border-none shadow-sm text-xs">出荷予定</Badge>}
-                    </div>
-                    <div className="flex justify-between items-end border-t border-purple-200/50 pt-2">
-                      <div>
-                        <div className="text-slate-700 font-bold">{ord.products?.name}</div>
-                        <div className="text-xs text-slate-500">{ord.products?.variant_name}</div>
-                        {ord.customer_order_no && <div className="text-[10px] text-slate-400 mt-1">発注: {ord.customer_order_no}</div>}
-                      </div>
-                      <div className="font-black text-purple-800 text-2xl">
-                        {displayCs} <span className="font-normal text-sm text-slate-500">c/s</span>
-                        {displayP > 0 && <span className="text-lg ml-1">{displayP} <span className="text-xs font-normal text-slate-500">p</span></span>}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-              {calendarOrders.filter(o => o.planned_ship_date === ordersModalDate).length === 0 && (
-                <div className="text-center py-8 text-slate-400 font-bold bg-slate-50 rounded-lg">この日の出荷予定はありません</div>
-              )}
-            </div>
-            <DialogFooter className="mt-4 border-t pt-4">
-              <Button variant="outline" onClick={() => setOrdersModalOpen(false)} className="w-full font-bold h-10 md:h-9">閉じる</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </div>
+      {renderAllDialogs()}
     </div>
   );
 }
