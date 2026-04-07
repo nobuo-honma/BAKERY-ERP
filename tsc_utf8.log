@@ -1,0 +1,1 @@
+﻿BAKERY-ERP/src/components/header.tsx(11,17): error TS2339: Property 'setRole' does not exist on type 'AuthContextType'.

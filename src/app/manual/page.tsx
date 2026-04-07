@@ -541,7 +541,7 @@ export default function ManualPage() {
 
                             <SectionHead>新規受注の登録手順</SectionHead>
                             <Step n={1} title='画面右上の「新規受注登録」ボタンを押します。（管理者モード時のみ表示）'>
-                                <ScreenLabel label="受注管理画面" src="/screenshots/order-screen.png" />
+                                <ScreenLabel label="受注登録ダイアログ" src="/screenshots/order-screen.png" />
                             </Step>
                             <Step n={2} title="以下の基本情報を入力します。">
                                 <FieldTable rows={[
@@ -586,7 +586,7 @@ export default function ManualPage() {
 
                             <SectionHead>入荷受け入れの手順（在庫加算）</SectionHead>
                             <Step n={1} title='実際に資材が届いたら、右側リストの該当行の「確認」ボタンを押します。'>
-                                <ScreenLabel label="入荷確認ダイアログ" src="/screenshots/arrival-check.png" />
+                                <ScreenLabel label="入荷確認ダイアログ" src="/screenshots/arrivals.png" />
                             </Step>
                             <Step n={2} title='確認ダイアログが開きます。実際の入荷数量を確認または修正します。' />
                             <Step n={3} title='緑色の「入荷済にする（在庫に加算）」ボタンを押します。'>

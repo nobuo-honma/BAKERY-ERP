@@ -202,7 +202,7 @@ export default function Dashboard() {
                     <div>
                       <div className={`text-sm font-bold ${group.isLate ? 'text-red-600' : 'text-blue-800'}`}>出荷予定: {new Date(group.plannedShipDate).toLocaleDateString('ja-JP')} {group.isLate && <span className="block text-[10px] text-red-500 md:mt-0.5 font-bold">(期限超過!)</span>}</div>
                       <div className="text-xs text-slate-500 font-bold mt-1">着予定(納期): {new Date(group.desiredShipDate).toLocaleDateString('ja-JP')}</div>
-                      {group.shipWarning && !group.isLate && <span className="text-[10px] text-amber-600 mt-1 font-bold flex items-center justify-end gap-0.5"><AlertTriangle className="w-3 h-3" />出荷が間に合いません</span>}
+                      {group.shipWarning && !group.isLate && <span className="flex text-[10px] text-amber-600 mt-1 font-bold items-center justify-end gap-0.5"><AlertTriangle className="w-3 h-3" />出荷が間に合いません</span>}
                     </div>
                     {group.status === 'in_production' ? <Badge className="bg-blue-100 text-blue-800 border-none px-2 py-0.5 text-xs shadow-sm">製造中あり</Badge> : <Badge className="bg-amber-100 text-amber-800 border-none px-2 py-0.5 text-xs shadow-sm">未処理 (引当待)</Badge>}
                   </div>

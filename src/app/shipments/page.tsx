@@ -349,7 +349,7 @@ export default function ShipmentsPage() {
               );
             })}
             {loading && orderGroups.length === 0 && <div className="text-center py-12"><Loader2 className="animate-spin h-8 w-8 text-slate-400 mx-auto" /></div>}
-            {!loading && orderGroups.length === 0 && <div className="text-center py-12 text-slate-500 border border-dashed rounded-lg bg-white">出荷待ちのデータはありません。</div>}
+            {!loading && orderGroups.length === 0 && <div className="text-center py-12 text-slate-500 border border-dashed rounded-lg bg-white">出荷待ち hostのデータはありません。</div>}
           </div>
         </div>
 
