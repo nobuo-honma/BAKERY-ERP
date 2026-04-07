@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-// ★追加: ExternalLink アイコンを読み込み
 import { ArrowDownToLine, CalendarDays, Loader2, Plus, Printer, ArrowLeft, ChevronLeft, ChevronRight, Edit, Trash2, CheckCircle2, PackageCheck, Lock, FileText, ExternalLink } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useAuth } from "@/contexts/AuthContext";
@@ -93,7 +92,13 @@ export default function ArrivalsPage() {
         if (!error) { alert("予定を登録しました！"); setNewItemId(""); setNewQuantity(""); setNewNotes(""); fetchData(); } else alert("エラー: " + error.message);
     };
 
-    const openEditDialog = (arrival: Arrival) => { setEditingArrival(arrival); setEditExpectedDate(arrival.expected_date); setEditQuantity(arrival.quantity); setEditNotes(arrival.notes || ""); };
+    const openEditDialog = (arrival: Arrival) => {
+        setEditingArrival(arrival);
+        // 念のため時刻を切り捨てて日付だけをセット
+        setEditExpectedDate(arrival.expected_date.split('T')[0]);
+        setEditQuantity(arrival.quantity);
+        setEditNotes(arrival.notes || "");
+    };
 
     const handleUpdateArrival = async () => {
         if (!editingArrival || !editExpectedDate || !editQuantity) return;
@@ -177,9 +182,21 @@ export default function ArrivalsPage() {
     }
 
     if (viewMode === 'calendar') {
-        const daysArray = getCalendarDays(); const currentYear = calendarMonth.getFullYear(); const currentMonthStr = String(calendarMonth.getMonth() + 1).padStart(2, '0');
-        const startDate = `${currentYear}-${currentMonthStr}-01`; const endDate = new Date(currentYear, calendarMonth.getMonth() + 1, 0).toISOString().split('T')[0];
-        const calendarData = arrivals.filter(a => a.expected_date >= startDate && a.expected_date <= endDate);
+        const daysArray = getCalendarDays();
+        const currentYear = calendarMonth.getFullYear();
+        const currentMonthStr = String(calendarMonth.getMonth() + 1).padStart(2, '0');
+
+        // ★修正: 月末の日付を確実に文字列で生成し、タイムゾーンのズレを防止
+        const startDate = `${currentYear}-${currentMonthStr}-01`;
+        const endDay = new Date(currentYear, calendarMonth.getMonth() + 1, 0).getDate();
+        const endDate = `${currentYear}-${currentMonthStr}-${String(endDay).padStart(2, '0')}`;
+
+        // ★修正: 時刻情報が入っていても安全なように split('T')[0] で純粋な日付文字列として比較
+        const calendarData = arrivals.filter(a => {
+            if (!a.expected_date) return false;
+            const d = a.expected_date.split('T')[0];
+            return d >= startDate && d <= endDate;
+        });
 
         return (
             <div className="bg-white min-h-screen print:p-0 print:m-0 -mx-4 px-4 md:mx-0 md:px-0 pt-4 md:pt-0">
@@ -207,7 +224,8 @@ export default function ArrivalsPage() {
                         <div className="grid grid-cols-7">
                             {daysArray.map((day, idx) => {
                                 const dateStr = day ? `${currentYear}-${currentMonthStr}-${String(day).padStart(2, '0')}` : null;
-                                const dayArrivals = dateStr ? calendarData.filter(a => a.expected_date === dateStr) : [];
+                                // ★修正: ここも split('T')[0] で比較
+                                const dayArrivals = dateStr ? calendarData.filter(a => a.expected_date && a.expected_date.split('T')[0] === dateStr) : [];
                                 return (
                                     <div key={idx} className={`min-h-[140px] print:min-h-[100px] border-b border-slate-300 print:border-black p-1 ${idx % 7 !== 6 ? 'border-r print:border-black' : ''} ${!day ? 'bg-slate-50 print:bg-white' : 'bg-white'}`}>
                                         {day && (
@@ -215,7 +233,12 @@ export default function ArrivalsPage() {
                                                 <div className={`text-right font-bold text-sm mb-1 ${idx % 7 === 0 ? 'text-red-600' : idx % 7 === 6 ? 'text-blue-600' : 'text-slate-700 print:text-black'}`}>{day}</div>
                                                 <div className="space-y-1.5 print:space-y-1">
                                                     {dayArrivals.map(arr => (
-                                                        <div key={arr.id} onClick={() => canEdit && openEditDialog(arr)} className={`${arr.status === 'arrived' ? "bg-green-50 border-green-300" : "bg-blue-50 border-blue-200"} border rounded p-1.5 print:p-1 cursor-pointer hover:shadow-md text-xs leading-tight wrap-break-word relative group`}>
+                                                        <div
+                                                            key={arr.id}
+                                                            // ★修正: e.stopPropagation() を追加してクリックの干渉を防ぐ
+                                                            onClick={(e) => { e.stopPropagation(); if (canEdit) openEditDialog(arr); }}
+                                                            className={`${arr.status === 'arrived' ? "bg-green-50 border-green-300" : "bg-blue-50 border-blue-200"} border rounded p-1.5 print:p-1 cursor-pointer hover:shadow-md text-xs leading-tight wrap-break-word relative group`}
+                                                        >
                                                             {canEdit && <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 print:hidden text-slate-400"><Edit className="h-3 w-3" /></div>}
                                                             <div className="text-[10px] text-slate-500 print:text-black mb-0.5">{arr.items?.item_type === 'raw_material' ? '原料' : '資材'}</div>
                                                             <div className="font-bold text-slate-800 print:text-black pr-3">{arr.items?.name}</div>
@@ -237,7 +260,10 @@ export default function ArrivalsPage() {
                             const dow = dObj.getDay();
                             const dowStr = ['日', '月', '火', '水', '木', '金', '土'][dow];
                             const dowColor = dow === 0 ? 'text-red-600' : dow === 6 ? 'text-blue-600' : 'text-slate-700';
-                            const dayArrivals = calendarData.filter(a => a.expected_date === dateStr);
+
+                            // ★修正: ここも split('T')[0] で比較
+                            const dayArrivals = calendarData.filter(a => a.expected_date && a.expected_date.split('T')[0] === dateStr);
+
                             return (
                                 <div key={day} className={`flex p-3 ${dow === 0 ? 'bg-red-50/30' : dow === 6 ? 'bg-blue-50/30' : 'bg-white'}`}>
                                     <div className="w-12 shrink-0 flex flex-col items-center pt-1 border-r border-slate-100 mr-3 pr-1">
@@ -246,7 +272,12 @@ export default function ArrivalsPage() {
                                     </div>
                                     <div className="flex-1 space-y-2.5 py-1 min-h-12">
                                         {dayArrivals.map(arr => (
-                                            <div key={arr.id} onClick={() => canEdit && openEditDialog(arr)} className={`${arr.status === 'arrived' ? "bg-green-50 border-green-300" : "bg-blue-50 border-blue-200"} border rounded p-2.5 text-xs shadow-sm relative group ${canEdit ? 'cursor-pointer hover:bg-slate-50' : ''}`}>
+                                            <div
+                                                key={arr.id}
+                                                // ★修正: e.stopPropagation() を追加
+                                                onClick={(e) => { e.stopPropagation(); if (canEdit) openEditDialog(arr); }}
+                                                className={`${arr.status === 'arrived' ? "bg-green-50 border-green-300" : "bg-blue-50 border-blue-200"} border rounded p-2.5 text-xs shadow-sm relative group ${canEdit ? 'cursor-pointer hover:bg-slate-50' : ''}`}
+                                            >
                                                 <div className="flex justify-between items-start mb-1.5 border-b border-white/40 pb-1.5">
                                                     <div className="text-[10px] text-slate-500 font-bold">{arr.items?.item_type === 'raw_material' ? '原料' : '資材'}</div>
                                                     {arr.status === 'arrived' ? <span className="text-[10px] bg-green-600 text-white px-1.5 rounded font-bold flex items-center gap-0.5"><CheckCircle2 className="h-2.5 w-2.5" /> 入荷済</span> : <span className="text-[10px] bg-blue-500 text-white px-1.5 rounded font-bold flex items-center gap-0.5"><PackageCheck className="h-2.5 w-2.5" /> 発注済</span>}
@@ -280,7 +311,6 @@ export default function ArrivalsPage() {
                     {!canEdit && <Badge variant="outline" className="bg-slate-100 text-slate-500 border-slate-300 px-3 py-1 shadow-sm hidden md:flex"><Lock className="w-3 h-3 mr-1" /> 閲覧モード</Badge>}
                 </div>
                 <div className="flex flex-wrap gap-2 w-full xl:w-auto">
-                    {/* ★追加: ネット注文サイトを開くボタン */}
                     <Button onClick={() => window.open("https://tano.mu/item?page=1", "_blank")} className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-sm h-12 md:h-10">
                         <ExternalLink className="h-4 w-4 mr-2" /> 大槻食材へ
                     </Button>
@@ -326,7 +356,10 @@ export default function ArrivalsPage() {
                                         <TableCell><div className="font-bold text-slate-800">{arrival.items?.name}</div><div className="text-[10px] text-slate-500">{arrival.items?.item_type === 'raw_material' ? '原料' : '資材'}</div></TableCell>
                                         <TableCell className="text-right font-bold text-lg text-blue-700">{arrival.quantity.toLocaleString()} <span className="text-sm font-normal text-slate-500">{arrival.unit}</span></TableCell>
                                         <TableCell>{arrival.status === 'arrived' ? <Badge className="bg-green-100 text-green-800 border-none shadow-sm"><CheckCircle2 className="w-3 h-3 mr-1" />入荷済</Badge> : <Badge className="bg-blue-500 text-white border-none shadow-sm"><PackageCheck className="w-3 h-3 mr-1" />発注済</Badge>}</TableCell>
-                                        <TableCell className="text-center"><Button variant="outline" size="sm" onClick={() => openEditDialog(arrival)} className="text-blue-600 border-blue-200 hover:bg-blue-50">確認</Button></TableCell>
+                                        <TableCell className="text-center">
+                                            {/* ★修正: e.stopPropagation() を追加 */}
+                                            <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); openEditDialog(arrival); }} className="text-blue-600 border-blue-200 hover:bg-blue-50">確認</Button>
+                                        </TableCell>
                                     </TableRow>
                                 ))}
                                 {loading && arrivals.length === 0 && <TableRow><TableCell colSpan={5} className="text-center py-12"><Loader2 className="animate-spin h-8 w-8 text-slate-400 mx-auto" /></TableCell></TableRow>}

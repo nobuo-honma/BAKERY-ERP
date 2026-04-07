@@ -61,7 +61,6 @@ export default function ProductionPage() {
   const [ordersModalOpen, setOrdersModalOpen] = useState(false);
   const [ordersModalDate, setOrdersModalDate] = useState("");
 
-  // ★追加: 月別備考用State
   const [monthlyNote, setMonthlyNote] = useState("");
   const [isSavingNote, setIsSavingNote] = useState(false);
 
@@ -114,7 +113,6 @@ export default function ProductionPage() {
     const { data: eData } = await supabase.from("events").select("*").gte("event_date", startDate).lte("event_date", endDate).order("event_date", { ascending: true });
     if (eData) setCalendarEvents(eData as Event[]);
 
-    // ★追加: 月別の備考データを取得
     const { data: noteData } = await supabase.from("calendar_notes").select("note_content").eq("month_str", currentMonthStr).single();
     setMonthlyNote(noteData ? noteData.note_content : "");
 
@@ -123,7 +121,6 @@ export default function ProductionPage() {
 
   useEffect(() => { if (viewMode === 'calendar') fetchCalendarPlans(); }, [fetchCalendarPlans, viewMode]);
 
-  // ★追加: 月別備考の保存処理
   const handleSaveMonthlyNote = async () => {
     setIsSavingNote(true);
     const y = calendarMonth.getFullYear(); const m = calendarMonth.getMonth() + 1;
@@ -204,14 +201,17 @@ export default function ProductionPage() {
     } else alert("エラー: " + error.message);
     setIsProcessing(false);
   };
-  const openEditDialog = (plan: Plan) => {
+
+  const openEditDialog = (e: React.MouseEvent, plan: Plan) => {
+    e.stopPropagation();
     setEditingPlan(plan);
     setEditDate(plan.production_date);
     setEditKg(plan.production_kg);
     setEditNotes(plan.notes || "");
   };
 
-  const openOrdersModal = (dateStr: string) => {
+  const openOrdersModal = (e: React.MouseEvent, dateStr: string) => {
+    e.stopPropagation();
     setOrdersModalDate(dateStr); setOrdersModalOpen(true);
   };
 
@@ -299,7 +299,8 @@ export default function ProductionPage() {
     setIsProcessing(false);
   };
 
-  const openCompletionModal = () => {
+  const openCompletionModal = (e: React.MouseEvent) => {
+    e.stopPropagation();
     if (!editingPlan) return;
     if (editingPlan.status === 'completed') { alert("すでに完了処理されています。"); return; }
     setActualCs(editingPlan.planned_cs);
@@ -356,11 +357,13 @@ export default function ProductionPage() {
     setIsProcessing(false);
   };
 
-  const openEventDialog = (ev?: Event, dateStr?: string) => {
+  const openEventDialog = (e: React.MouseEvent, ev?: Event, dateStr?: string) => {
+    e.stopPropagation();
     if (ev) { setEditingEvent(ev); setEventDate(ev.event_date); setEventTitle(ev.title); setEventNotes(ev.notes || ""); }
     else { setEditingEvent(null); setEventDate(dateStr || new Date().toISOString().split('T')[0]); setEventTitle(""); setEventNotes(""); }
     setEventModalOpen(true);
   };
+
   const handleSaveEvent = async () => {
     if (!eventDate || !eventTitle) { alert("日付とタイトルは必須です。"); return; }
     setIsProcessing(true); const eventData = { event_date: eventDate, title: eventTitle, notes: eventNotes };
@@ -383,375 +386,381 @@ export default function ProductionPage() {
 
   if (loading && orders.length === 0 && plans.length === 0) return <div className="flex justify-center items-center h-64"><Loader2 className="animate-spin h-8 w-8 text-slate-500" /></div>;
 
-  // =======================================================================
-  // --- カレンダー画面の描画 ---
-  // =======================================================================
-  if (viewMode === 'calendar') {
-    const daysArray = getCalendarDays();
-    const currentYear = calendarMonth.getFullYear();
-    const currentMonthStr = String(calendarMonth.getMonth() + 1).padStart(2, '0');
-    const todayStr = new Date().toLocaleDateString('ja-JP');
+  // カレンダー表示用の変数
+  const daysArray = viewMode === 'calendar' ? getCalendarDays() : [];
+  const currentYear = calendarMonth.getFullYear();
+  const currentMonthStr = String(calendarMonth.getMonth() + 1).padStart(2, '0');
+  const todayStr = new Date().toLocaleDateString('ja-JP');
 
-    return (
-      <div className="bg-white min-h-screen print:p-0 print:m-0 -mx-4 px-4 md:mx-0 md:px-0 pt-4 md:pt-0">
-        <style dangerouslySetInnerHTML={{ __html: `@media print { header { display: none !important; } main { padding: 0 !important; margin: 0 !important; max-width: 100% !important; } @page { size: landscape; margin: 10mm; } body { background-color: white !important; } }` }} />
+  return (
+    <>
+      {/* =======================================================================
+          --- カレンダー画面の描画 ---
+          ======================================================================= */}
+      {viewMode === 'calendar' && (
+        <div className="bg-white min-h-screen print:p-0 print:m-0 -mx-4 px-4 md:mx-0 md:px-0 pt-4 md:pt-0">
+          <style dangerouslySetInnerHTML={{ __html: `@media print { header { display: none !important; } main { padding: 0 !important; margin: 0 !important; max-width: 100% !important; } @page { size: landscape; margin: 10mm; } body { background-color: white !important; } }` }} />
 
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 print:hidden bg-slate-50 p-4 rounded-lg border shadow-sm">
-          <Button variant="outline" onClick={() => setViewMode('list')} className="gap-2"><ArrowLeft className="h-4 w-4" /> <span className="hidden sm:inline">計画入力へ戻る</span><span className="sm:hidden">戻る</span></Button>
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 print:hidden bg-slate-50 p-4 rounded-lg border shadow-sm">
+            <Button variant="outline" onClick={() => setViewMode('list')} className="gap-2"><ArrowLeft className="h-4 w-4" /> <span className="hidden sm:inline">計画入力へ戻る</span><span className="sm:hidden">戻る</span></Button>
 
-          <div className="flex items-center justify-center gap-4 w-full md:w-auto">
-            <Button variant="ghost" size="icon" onClick={() => setCalendarMonth(new Date(currentYear, calendarMonth.getMonth() - 1, 1))}><ChevronLeft className="h-6 w-6" /></Button>
-            <h2 className="text-xl font-bold text-slate-800 w-32 text-center">{currentYear}年 {currentMonthStr}月</h2>
-            <Button variant="ghost" size="icon" onClick={() => setCalendarMonth(new Date(currentYear, calendarMonth.getMonth() + 1, 1))}><ChevronRight className="h-6 w-6" /></Button>
-          </div>
-
-          <div className="flex gap-2 w-full md:w-auto justify-end">
-            {canEdit && <Button onClick={() => openEventDialog()} className="bg-slate-700 hover:bg-slate-800 text-white gap-1 font-bold shadow-sm flex-1 md:flex-none"><Flag className="h-4 w-4" /> イベント<span className="hidden sm:inline">登録</span></Button>}
-            <Button onClick={() => window.print()} className="bg-blue-600 hover:bg-blue-700 text-white gap-1 font-bold shadow-sm flex-1 md:flex-none"><Printer className="h-4 w-4" /> 印刷</Button>
-          </div>
-        </div>
-
-        <div className="hidden print:flex justify-between items-end mb-3 border-b-2 border-black pb-2">
-          <div className="text-2xl font-black">製造・出荷スケジュール表 ({currentYear}年 {currentMonthStr}月)</div>
-          <div className="text-sm font-bold text-slate-800">更新日: {todayStr}</div>
-        </div>
-
-        <div className="border border-slate-300 rounded-lg md:rounded-sm overflow-hidden print:border-black print:border-2 flex flex-col">
-
-          {/* --- PC・印刷用 横型カレンダー --- */}
-          <div className="hidden md:block print:block">
-            <div className="grid grid-cols-7 bg-slate-100 print:bg-gray-100 border-b border-slate-300 print:border-black">
-              {['日', '月', '火', '水', '木', '金', '土'].map((d, i) => (<div key={d} className={`p-2 text-center font-bold text-sm border-r border-slate-300 print:border-black last:border-r-0 ${i === 0 ? 'text-red-600' : i === 6 ? 'text-blue-600' : 'text-slate-700 print:text-black'}`}>{d}</div>))}
+            <div className="flex items-center justify-center gap-4 w-full md:w-auto">
+              <Button variant="ghost" size="icon" onClick={() => setCalendarMonth(new Date(currentYear, calendarMonth.getMonth() - 1, 1))}><ChevronLeft className="h-6 w-6" /></Button>
+              <h2 className="text-xl font-bold text-slate-800 w-32 text-center">{currentYear}年 {currentMonthStr}月</h2>
+              <Button variant="ghost" size="icon" onClick={() => setCalendarMonth(new Date(currentYear, calendarMonth.getMonth() + 1, 1))}><ChevronRight className="h-6 w-6" /></Button>
             </div>
-            <div className="grid grid-cols-7">
-              {daysArray.map((day, idx) => {
-                const dateStr = day ? `${currentYear}-${currentMonthStr}-${String(day).padStart(2, '0')}` : null;
-                const dayPlans = dateStr ? calendarPlans.filter(p => p.production_date === dateStr) : [];
-                const dayOrders = dateStr ? calendarOrders.filter(o => o.planned_ship_date === dateStr) : [];
-                const dayEvents = dateStr ? calendarEvents.filter(e => e.event_date === dateStr) : [];
+
+            <div className="flex gap-2 w-full md:w-auto justify-end">
+              {canEdit && <Button onClick={(e) => openEventDialog(e)} className="bg-slate-700 hover:bg-slate-800 text-white gap-1 font-bold shadow-sm flex-1 md:flex-none"><Flag className="h-4 w-4" /> イベント<span className="hidden sm:inline">登録</span></Button>}
+              <Button onClick={() => window.print()} className="bg-blue-600 hover:bg-blue-700 text-white gap-1 font-bold shadow-sm flex-1 md:flex-none"><Printer className="h-4 w-4" /> 印刷</Button>
+            </div>
+          </div>
+
+          <div className="hidden print:flex justify-between items-end mb-3 border-b-2 border-black pb-2">
+            <div className="text-2xl font-black">製造・出荷スケジュール表 ({currentYear}年 {currentMonthStr}月)</div>
+            <div className="text-sm font-bold text-slate-800">更新日: {todayStr}</div>
+          </div>
+
+          <div className="border border-slate-300 rounded-lg md:rounded-sm overflow-hidden print:border-black print:border-2 flex flex-col">
+
+            {/* --- PC・印刷用 横型カレンダー --- */}
+            <div className="hidden md:block print:block">
+              <div className="grid grid-cols-7 bg-slate-100 print:bg-gray-100 border-b border-slate-300 print:border-black">
+                {['日', '月', '火', '水', '木', '金', '土'].map((d, i) => (<div key={d} className={`p-2 text-center font-bold text-sm border-r border-slate-300 print:border-black last:border-r-0 ${i === 0 ? 'text-red-600' : i === 6 ? 'text-blue-600' : 'text-slate-700 print:text-black'}`}>{d}</div>))}
+              </div>
+              <div className="grid grid-cols-7">
+                {daysArray.map((day, idx) => {
+                  const dateStr = day ? `${currentYear}-${currentMonthStr}-${String(day).padStart(2, '0')}` : null;
+                  const dayPlans = dateStr ? calendarPlans.filter(p => p.production_date === dateStr) : [];
+                  const dayOrders = dateStr ? calendarOrders.filter(o => o.planned_ship_date === dateStr) : [];
+                  const dayEvents = dateStr ? calendarEvents.filter(e => e.event_date === dateStr) : [];
+
+                  return (
+                    <div key={idx} className={`min-h-[140px] print:min-h-[100px] border-b border-slate-300 print:border-black p-1 ${idx % 7 !== 6 ? 'border-r print:border-black' : ''} ${!day ? 'bg-slate-50 print:bg-white' : 'bg-white'}`}>
+                      {day && (
+                        <>
+                          <div className="flex justify-between items-start mb-1">
+                            <div onClick={(e) => canEdit && openEventDialog(e, undefined, dateStr ?? undefined)} className={`print:hidden p-0.5 ${canEdit ? 'text-slate-300 hover:text-blue-500 cursor-pointer' : 'text-transparent'}`}><PlusIcon /></div>
+                            <div className={`text-right font-bold text-sm ${idx % 7 === 0 ? 'text-red-600' : idx % 7 === 6 ? 'text-blue-600' : 'text-slate-700 print:text-black'}`}>{day}</div>
+                          </div>
+
+                          <div className="space-y-1.5 print:space-y-1">
+                            {/* ① 社内イベント */}
+                            {dayEvents.map(ev => (
+                              <div key={ev.id} onClick={(e) => canEdit && openEventDialog(e, ev)} className={`bg-slate-100 border border-slate-300 rounded p-1.5 print:p-1 print:border-black text-xs leading-tight wrap-break-word relative group ${canEdit ? 'cursor-pointer hover:bg-slate-200' : ''}`}>
+                                {canEdit && <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity print:hidden text-slate-400"><Edit className="h-3 w-3" /></div>}
+                                <div className="font-bold text-slate-800 print:text-black flex items-start gap-1"><Flag className="w-3 h-3 text-slate-500 mt-0.5 shrink-0" />{ev.title}</div>
+                                {ev.notes && <div className="text-[10px] text-slate-600 print:text-black mt-0.5 ml-4 italic">{ev.notes}</div>}
+                              </div>
+                            ))}
+
+                            {/* ② 出荷予定 */}
+                            {dayOrders.length > 0 && (
+                              <div onClick={(e) => openOrdersModal(e, dateStr!)} className="bg-purple-100 border border-purple-300 rounded px-2 py-1 print:p-1 print:border-black text-xs font-bold text-purple-800 print:text-black flex items-center justify-between shadow-sm cursor-pointer hover:bg-purple-200 transition-colors">
+                                <span className="flex items-center gap-1"><Truck className="w-3.5 h-3.5" /> 出荷</span>
+                                <span className="text-[10px] bg-white px-1.5 rounded-sm">{dayOrders.length}件</span>
+                              </div>
+                            )}
+
+                            {/* ③ 製造予定 */}
+                            {dayPlans.map(plan => {
+                              let cardColor = "bg-blue-50 border-blue-200";
+                              if (plan.status === 'in_progress') cardColor = "bg-amber-50 border-amber-300";
+                              if (plan.status === 'completed') cardColor = "bg-green-50 border-green-300";
+
+                              const isCompleted = plan.status === 'completed';
+                              const displayCs = isCompleted ? (plan.actual_cs !== undefined ? plan.actual_cs : plan.planned_cs) : plan.planned_cs;
+                              const displayP = isCompleted ? (plan.actual_piece || 0) : 0;
+
+                              return (
+                                <div key={plan.id} onClick={(e) => canEdit && openEditDialog(e, plan)} className={`${cardColor} border rounded p-1.5 print:p-1 print:border-black print:bg-white text-xs leading-tight wrap-break-word relative group ${canEdit ? 'cursor-pointer hover:shadow-md transition-shadow' : ''}`}>
+                                  {canEdit && <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity print:hidden text-slate-400"><Edit className="h-3 w-3" /></div>}
+                                  <div className="flex items-center gap-1 text-[10px] text-blue-700 font-bold mb-0.5"><Factory className="w-3 h-3" /> {isCompleted ? '製造実績' : '製造予定'}</div>
+                                  <div className="font-bold text-slate-800 print:text-black pr-3">{plan.products?.name}</div>
+                                  <div className="text-slate-600 print:text-black mb-0.5">{plan.products?.variant_name}</div>
+                                  <div className="font-black text-slate-900 print:text-black">
+                                    {displayCs} <span className="font-normal text-[10px]">c/s</span>
+                                    {displayP > 0 && <span className="ml-1">{displayP} <span className="font-normal text-[10px]">p</span></span>}
+                                    {!isCompleted && <span className="text-slate-600 font-normal ml-1">({plan.production_kg}kg)</span>}
+                                  </div>
+                                  {plan.notes && <div className="mt-1 pt-1 border-t border-slate-200 print:border-black text-[10px] text-slate-700 print:text-black italic wrap-break-word">{plan.notes}</div>}
+
+                                  <div className="mt-1 flex justify-end print:hidden">
+                                    {plan.status === 'planned' && <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 rounded font-bold">計画</span>}
+                                    {plan.status === 'in_progress' && <span className="text-[10px] bg-amber-500 text-white px-1.5 rounded font-bold flex items-center gap-0.5"><Play className="h-2 w-2" /> 製造中</span>}
+                                    {plan.status === 'completed' && <span className="text-[10px] bg-green-600 text-white px-1.5 rounded font-bold flex items-center gap-0.5"><CheckCircle className="h-2 w-2" /> 完了</span>}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* --- スマホ用 縦型カレンダー (リスト形式) --- */}
+            <div className="block md:hidden print:hidden divide-y divide-slate-200 bg-slate-50 flex-1">
+              {daysArray.filter(d => d !== null).map((day) => {
+                const dateStr = `${calendarMonth.getFullYear()}-${String(calendarMonth.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                const dObj = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), day as number);
+                const dow = dObj.getDay();
+                const dowStr = ['日', '月', '火', '水', '木', '金', '土'][dow];
+                const dowColor = dow === 0 ? 'text-red-600' : dow === 6 ? 'text-blue-600' : 'text-slate-700';
+
+                const dayPlans = calendarPlans.filter(p => p.production_date === dateStr);
+                const dayOrders = calendarOrders.filter(o => o.planned_ship_date === dateStr);
+                const dayEvents = calendarEvents.filter(e => e.event_date === dateStr);
+                const hasAnyEvent = dayPlans.length > 0 || dayOrders.length > 0 || dayEvents.length > 0;
 
                 return (
-                  <div key={idx} className={`min-h-[140px] print:min-h-[100px] border-b border-slate-300 print:border-black p-1 ${idx % 7 !== 6 ? 'border-r print:border-black' : ''} ${!day ? 'bg-slate-50 print:bg-white' : 'bg-white'}`}>
-                    {day && (
-                      <>
-                        <div className="flex justify-between items-start mb-1">
-                          <div onClick={() => canEdit && openEventDialog(undefined, dateStr ?? undefined)} className={`print:hidden p-0.5 ${canEdit ? 'text-slate-300 hover:text-blue-500 cursor-pointer' : 'text-transparent'}`}><PlusIcon /></div>
-                          <div className={`text-right font-bold text-sm ${idx % 7 === 0 ? 'text-red-600' : idx % 7 === 6 ? 'text-blue-600' : 'text-slate-700 print:text-black'}`}>{day}</div>
+                  <div key={day} className={`flex p-3 ${dow === 0 ? 'bg-red-50/30' : dow === 6 ? 'bg-blue-50/30' : 'bg-white'}`}>
+                    <div className="w-12 shrink-0 flex flex-col items-center pt-1 border-r border-slate-100 mr-3 pr-1">
+                      <span className={`text-xl font-black leading-none ${dowColor}`}>{day}</span>
+                      <span className={`text-[10px] mt-1 font-bold ${dowColor}`}>{dowStr}</span>
+                      {canEdit && (
+                        <div onClick={(e) => openEventDialog(e, undefined, dateStr)} className="mt-3 text-slate-400 hover:text-blue-500 hover:bg-slate-100 cursor-pointer p-1.5 rounded-full border shadow-sm bg-white">
+                          <PlusIcon />
                         </div>
+                      )}
+                    </div>
 
-                        <div className="space-y-1.5 print:space-y-1">
-                          {/* ① 社内イベント */}
-                          {dayEvents.map(ev => (
-                            <div key={ev.id} onClick={() => canEdit && openEventDialog(ev)} className={`bg-slate-100 border border-slate-300 rounded p-1.5 print:p-1 print:border-black text-xs leading-tight wrap-break-word relative group ${canEdit ? 'cursor-pointer hover:bg-slate-200' : ''}`}>
-                              {canEdit && <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity print:hidden text-slate-400"><Edit className="h-3 w-3" /></div>}
-                              <div className="font-bold text-slate-800 print:text-black flex items-start gap-1"><Flag className="w-3 h-3 text-slate-500 mt-0.5 shrink-0" />{ev.title}</div>
-                              {ev.notes && <div className="text-[10px] text-slate-600 print:text-black mt-0.5 ml-4 italic">{ev.notes}</div>}
+                    <div className="flex-1 space-y-2.5 py-1 min-h-12">
+                      {dayEvents.map(ev => (
+                        <div key={ev.id} onClick={(e) => canEdit && openEventDialog(e, ev)} className={`bg-slate-100 border border-slate-300 rounded p-2 text-xs relative group shadow-sm ${canEdit ? 'cursor-pointer hover:bg-slate-200' : ''}`}>
+                          <div className="font-bold text-slate-800 flex items-start gap-1.5 text-sm"><Flag className="w-4 h-4 text-slate-500 mt-0.5 shrink-0" />{ev.title}</div>
+                          {ev.notes && <div className="text-[11px] text-slate-600 mt-1.5 ml-5 italic bg-white/50 p-1.5 rounded border border-slate-200">{ev.notes}</div>}
+                        </div>
+                      ))}
+
+                      {dayOrders.length > 0 && (
+                        <div onClick={(e) => openOrdersModal(e, dateStr!)} className="bg-purple-100 border border-purple-300 rounded px-3 py-2 text-sm font-bold text-purple-800 flex items-center justify-between shadow-sm cursor-pointer hover:bg-purple-200 transition-colors">
+                          <span className="flex items-center gap-1.5"><Truck className="w-4 h-4" /> 出荷</span>
+                          <span className="text-xs bg-white px-2 py-0.5 rounded-sm">{dayOrders.length} 件の予定</span>
+                        </div>
+                      )}
+
+                      {dayPlans.map(plan => {
+                        let cardColor = "bg-blue-50 border-blue-200";
+                        if (plan.status === 'in_progress') cardColor = "bg-amber-50 border-amber-300";
+                        if (plan.status === 'completed') cardColor = "bg-green-50 border-green-300";
+
+                        const isCompleted = plan.status === 'completed';
+                        const displayCs = isCompleted ? (plan.actual_cs !== undefined ? plan.actual_cs : plan.planned_cs) : plan.planned_cs;
+                        const displayP = isCompleted ? (plan.actual_piece || 0) : 0;
+
+                        return (
+                          <div key={plan.id} onClick={(e) => canEdit && openEditDialog(e, plan)} className={`${cardColor} border rounded p-2.5 text-xs shadow-sm relative group ${canEdit ? 'cursor-pointer' : ''}`}>
+                            <div className="flex justify-between items-start mb-1.5 border-b border-white/40 pb-1.5">
+                              <div className="flex items-center gap-1 text-[10px] text-blue-800 font-bold"><Factory className="w-3.5 h-3.5" /> {isCompleted ? '製造実績' : '製造予定'}</div>
+                              {plan.status === 'planned' && <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 rounded font-bold">計画</span>}
+                              {plan.status === 'in_progress' && <span className="text-[10px] bg-amber-500 text-white px-1.5 rounded font-bold flex items-center gap-0.5"><Play className="h-2.5 w-2.5" /> 製造中</span>}
+                              {plan.status === 'completed' && <span className="text-[10px] bg-green-600 text-white px-1.5 rounded font-bold flex items-center gap-0.5"><CheckCircle className="h-2.5 w-2.5" /> 完了</span>}
                             </div>
-                          ))}
-
-                          {/* ② 出荷予定 */}
-                          {dayOrders.length > 0 && (
-                            <div onClick={() => openOrdersModal(dateStr!)} className="bg-purple-100 border border-purple-300 rounded px-2 py-1 print:p-1 print:border-black text-xs font-bold text-purple-800 print:text-black flex items-center justify-between shadow-sm cursor-pointer hover:bg-purple-200 transition-colors">
-                              <span className="flex items-center gap-1"><Truck className="w-3.5 h-3.5" /> 出荷</span>
-                              <span className="text-[10px] bg-white px-1.5 rounded-sm">{dayOrders.length}件</span>
-                            </div>
-                          )}
-
-                          {/* ③ 製造予定 */}
-                          {dayPlans.map(plan => {
-                            let cardColor = "bg-blue-50 border-blue-200";
-                            if (plan.status === 'in_progress') cardColor = "bg-amber-50 border-amber-300";
-                            if (plan.status === 'completed') cardColor = "bg-green-50 border-green-300";
-
-                            const isCompleted = plan.status === 'completed';
-                            const displayCs = isCompleted ? (plan.actual_cs !== undefined ? plan.actual_cs : plan.planned_cs) : plan.planned_cs;
-                            const displayP = isCompleted ? (plan.actual_piece || 0) : 0;
-
-                            return (
-                              <div key={plan.id} onClick={() => canEdit && openEditDialog(plan)} className={`${cardColor} border rounded p-1.5 print:p-1 print:border-black print:bg-white text-xs leading-tight wrap-break-word relative group ${canEdit ? 'cursor-pointer hover:shadow-md transition-shadow' : ''}`}>
-                                {canEdit && <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity print:hidden text-slate-400"><Edit className="h-3 w-3" /></div>}
-                                <div className="flex items-center gap-1 text-[10px] text-blue-700 font-bold mb-0.5"><Factory className="w-3 h-3" /> {isCompleted ? '製造実績' : '製造予定'}</div>
-                                <div className="font-bold text-slate-800 print:text-black pr-3">{plan.products?.name}</div>
-                                <div className="text-slate-600 print:text-black mb-0.5">{plan.products?.variant_name}</div>
-                                <div className="font-black text-slate-900 print:text-black">
-                                  {displayCs} <span className="font-normal text-[10px]">c/s</span>
-                                  {displayP > 0 && <span className="ml-1">{displayP} <span className="font-normal text-[10px]">p</span></span>}
-                                  {!isCompleted && <span className="text-slate-600 font-normal ml-1">({plan.production_kg}kg)</span>}
-                                </div>
-                                {plan.notes && <div className="mt-1 pt-1 border-t border-slate-200 print:border-black text-[10px] text-slate-700 print:text-black italic wrap-break-word">{plan.notes}</div>}
-
-                                <div className="mt-1 flex justify-end print:hidden">
-                                  {plan.status === 'planned' && <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 rounded font-bold">計画</span>}
-                                  {plan.status === 'in_progress' && <span className="text-[10px] bg-amber-500 text-white px-1.5 rounded font-bold flex items-center gap-0.5"><Play className="h-2 w-2" /> 製造中</span>}
-                                  {plan.status === 'completed' && <span className="text-[10px] bg-green-600 text-white px-1.5 rounded font-bold flex items-center gap-0.5"><CheckCircle className="h-2 w-2" /> 完了</span>}
-                                </div>
+                            <div className="font-bold text-slate-800 text-sm">{plan.products?.name} <span className="text-slate-500 font-normal text-xs">({plan.products?.variant_name})</span></div>
+                            <div className="flex justify-between items-end mt-2 pt-1.5">
+                              <div className="text-slate-600 italic truncate max-w-[50%]">{plan.notes || ""}</div>
+                              <div className="font-black text-slate-900 text-lg">
+                                {displayCs} <span className="font-normal text-[10px] text-slate-500">c/s</span>
+                                {displayP > 0 && <span className="font-black text-slate-900 text-lg ml-1">{displayP} <span className="font-normal text-[10px] text-slate-500">p</span></span>}
                               </div>
-                            );
-                          })}
+                            </div>
+                          </div>
+                        );
+                      })}
+
+                      {!hasAnyEvent && (
+                        <div className="text-xs text-slate-400 flex h-full items-center justify-center font-medium border border-dashed rounded-lg py-4 bg-slate-50/50">
+                          予定なし
                         </div>
-                      </>
-                    )}
+                      )}
+                    </div>
                   </div>
-                );
+                )
               })}
             </div>
+
+            {/* ★追加: カレンダー下部の月別備考欄 */}
+            <div className="bg-slate-100 print:bg-white border-t border-slate-300 print:border-black p-4 flex flex-col gap-2 shrink-0">
+              <div className="text-sm font-bold text-slate-700 print:text-black flex items-center justify-between">
+                <span>{currentMonthStr}月の備考・連絡事項</span>
+                {isSavingNote && <Loader2 className="w-4 h-4 animate-spin text-blue-600 print:hidden" />}
+              </div>
+              {canEdit ? (
+                <textarea
+                  value={monthlyNote}
+                  onChange={(e) => setMonthlyNote(e.target.value)}
+                  onBlur={handleSaveMonthlyNote}
+                  placeholder="クリックして今月の特記事項を入力...（入力後に別の場所をクリックすると自動保存されます）"
+                  className="w-full bg-white print:border-none print:shadow-none p-3 border border-slate-300 rounded-md text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[60px]"
+                />
+              ) : (
+                <div className="w-full bg-white print:border-none print:shadow-none p-3 border border-slate-300 rounded-md text-sm min-h-[60px] whitespace-pre-wrap">
+                  {monthlyNote || <span className="text-slate-400">備考なし</span>}
+                </div>
+              )}
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* =======================================================================
+          通常のリスト入力画面
+          ======================================================================= */}
+      {viewMode === 'list' && (
+        <div className="bg-transparent">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+            <div className="flex items-center gap-4">
+              <h1 className="text-2xl font-bold flex items-center gap-2 text-slate-800"><Factory className="h-6 w-6 text-blue-600" /> 製造計画・Lot採番</h1>
+              {!canEdit && <Badge variant="outline" className="bg-slate-100 text-slate-500 border-slate-300 px-3 py-1 shadow-sm hidden md:flex"><Lock className="w-3 h-3 mr-1" /> 閲覧モード</Badge>}
+            </div>
+            <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+              {canEdit && (
+                <Button onClick={handleSelectStockProduction} className="bg-slate-800 hover:bg-slate-900 text-white font-bold shadow-sm h-12 md:h-10">
+                  <Plus className="h-4 w-4 mr-2" /> 在庫品として製造 (見込み生産)
+                </Button>
+              )}
+              <Button onClick={() => setViewMode('calendar')} variant="outline" className="border-blue-300 text-blue-700 hover:bg-blue-50 gap-2 font-bold shadow-sm h-12 md:h-10">
+                <CalendarDays className="h-5 w-5" /> スケジュール表を表示
+              </Button>
+            </div>
           </div>
 
-          {/* --- スマホ用 縦型カレンダー (リスト形式) --- */}
-          <div className="block md:hidden print:hidden divide-y divide-slate-200 bg-slate-50 flex-1">
-            {daysArray.filter(d => d !== null).map((day) => {
-              const dateStr = `${calendarMonth.getFullYear()}-${String(calendarMonth.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-              const dObj = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), day as number);
-              const dow = dObj.getDay();
-              const dowStr = ['日', '月', '火', '水', '木', '金', '土'][dow];
-              const dowColor = dow === 0 ? 'text-red-600' : dow === 6 ? 'text-blue-600' : 'text-slate-700';
+          <div className="flex flex-col lg:flex-row gap-6">
+            <div className="w-full lg:w-[35%]">
+              <h2 className="font-bold text-slate-700 mb-3 flex items-center gap-2"><span className="bg-blue-100 text-blue-800 rounded-full w-6 h-6 flex items-center justify-center text-xs">1</span>未計画の残数がある受注</h2>
+              <div className="space-y-3 h-[calc(100vh-200px)] overflow-y-auto pr-2 pb-10">
+                {orders.map((order) => {
+                  const displayCs = Math.floor(order.quantity / (order.products?.unit_per_cs || 24));
+                  const displayP = Math.floor((order.quantity % (order.products?.unit_per_cs || 24)) / 2);
+                  const remainCs = Math.floor(order.remainPieces / (order.products?.unit_per_cs || 24));
+                  const remainP = Math.floor((order.remainPieces % (order.products?.unit_per_cs || 24)) / 2);
 
-              const dayPlans = calendarPlans.filter(p => p.production_date === dateStr);
-              const dayOrders = calendarOrders.filter(o => o.planned_ship_date === dateStr);
-              const dayEvents = calendarEvents.filter(e => e.event_date === dateStr);
-              const hasAnyEvent = dayPlans.length > 0 || dayOrders.length > 0 || dayEvents.length > 0;
-
-              return (
-                <div key={day} className={`flex p-3 ${dow === 0 ? 'bg-red-50/30' : dow === 6 ? 'bg-blue-50/30' : 'bg-white'}`}>
-                  <div className="w-12 shrink-0 flex flex-col items-center pt-1 border-r border-slate-100 mr-3 pr-1">
-                    <span className={`text-xl font-black leading-none ${dowColor}`}>{day}</span>
-                    <span className={`text-[10px] mt-1 font-bold ${dowColor}`}>{dowStr}</span>
-                    {canEdit && (
-                      <div onClick={() => openEventDialog(undefined, dateStr)} className="mt-3 text-slate-400 hover:text-blue-500 hover:bg-slate-100 cursor-pointer p-1.5 rounded-full border shadow-sm bg-white">
-                        <PlusIcon />
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="flex-1 space-y-2.5 py-1 min-h-12">
-                    {dayEvents.map(ev => (
-                      <div key={ev.id} onClick={() => canEdit && openEventDialog(ev)} className={`bg-slate-100 border border-slate-300 rounded p-2 text-xs relative group shadow-sm ${canEdit ? 'cursor-pointer hover:bg-slate-200' : ''}`}>
-                        <div className="font-bold text-slate-800 flex items-start gap-1.5 text-sm"><Flag className="w-4 h-4 text-slate-500 mt-0.5 shrink-0" />{ev.title}</div>
-                        {ev.notes && <div className="text-[11px] text-slate-600 mt-1.5 ml-5 italic bg-white/50 p-1.5 rounded border border-slate-200">{ev.notes}</div>}
-                      </div>
-                    ))}
-
-                    {dayOrders.length > 0 && (
-                      <div onClick={() => openOrdersModal(dateStr!)} className="bg-purple-100 border border-purple-300 rounded px-3 py-2 text-sm font-bold text-purple-800 flex items-center justify-between shadow-sm cursor-pointer hover:bg-purple-200 transition-colors">
-                        <span className="flex items-center gap-1.5"><Truck className="w-4 h-4" /> 出荷</span>
-                        <span className="text-xs bg-white px-2 py-0.5 rounded-sm">{dayOrders.length} 件の予定</span>
-                      </div>
-                    )}
-
-                    {dayPlans.map(plan => {
-                      let cardColor = "bg-blue-50 border-blue-200";
-                      if (plan.status === 'in_progress') cardColor = "bg-amber-50 border-amber-300";
-                      if (plan.status === 'completed') cardColor = "bg-green-50 border-green-300";
-
-                      const isCompleted = plan.status === 'completed';
-                      const displayCs = isCompleted ? (plan.actual_cs !== undefined ? plan.actual_cs : plan.planned_cs) : plan.planned_cs;
-                      const displayP = isCompleted ? (plan.actual_piece || 0) : 0;
-
-                      return (
-                        <div key={plan.id} onClick={() => canEdit && openEditDialog(plan)} className={`${cardColor} border rounded p-2.5 text-xs shadow-sm relative group ${canEdit ? 'cursor-pointer' : ''}`}>
-                          <div className="flex justify-between items-start mb-1.5 border-b border-white/40 pb-1.5">
-                            <div className="flex items-center gap-1 text-[10px] text-blue-800 font-bold"><Factory className="w-3.5 h-3.5" /> {isCompleted ? '製造実績' : '製造予定'}</div>
-                            {plan.status === 'planned' && <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 rounded font-bold">計画</span>}
-                            {plan.status === 'in_progress' && <span className="text-[10px] bg-amber-500 text-white px-1.5 rounded font-bold flex items-center gap-0.5"><Play className="h-2.5 w-2.5" /> 製造中</span>}
-                            {plan.status === 'completed' && <span className="text-[10px] bg-green-600 text-white px-1.5 rounded font-bold flex items-center gap-0.5"><CheckCircle className="h-2.5 w-2.5" /> 完了</span>}
+                  return (
+                    <Card key={order.id} onClick={() => handleSelectOrder(order)} className={`cursor-pointer transition-all border-2 ${selectedOrder?.id === order.id ? "border-blue-500 bg-blue-50 shadow-md transform scale-[1.02]" : "border-slate-200 hover:border-blue-300"}`}>
+                      <CardHeader className="p-4 pb-2 bg-white rounded-t-lg"><div className="flex justify-between items-start"><div className="text-xs text-slate-500">{order.id}</div><Badge className="bg-slate-100 text-slate-800 border-none shadow-sm text-xs">出荷: {new Date(order.planned_ship_date || order.desired_ship_date).toLocaleDateString()}</Badge></div><CardTitle className="text-base text-slate-800 leading-tight mt-1">{order.customers?.name}</CardTitle></CardHeader>
+                      <CardContent className="p-4 pt-2 text-sm text-slate-600 bg-white rounded-b-lg">
+                        <div className="font-bold text-slate-800 mb-2">{order.products?.name} ({order.products?.variant_name})</div>
+                        <div className="flex items-center justify-between border-t pt-2">
+                          <span className="text-xs text-slate-500">全体: {displayCs} c/s {displayP > 0 && `${displayP} p`}</span>
+                          <div className="flex items-baseline gap-1">
+                            <span className="text-xs text-slate-500">未計画残数:</span>
+                            <span className="font-black text-xl text-red-600">{remainCs}</span><span className="text-xs font-normal text-slate-500">c/s</span>
+                            {remainP > 0 && <><span className="font-bold text-lg text-slate-700 ml-1">{remainP}</span><span className="text-[10px] font-normal text-slate-500">p</span></>}
                           </div>
-                          <div className="font-bold text-slate-800 text-sm">{plan.products?.name} <span className="text-slate-500 font-normal text-xs">({plan.products?.variant_name})</span></div>
-                          <div className="flex justify-between items-end mt-2 pt-1.5">
-                            <div className="text-slate-600 italic truncate max-w-[50%]">{plan.notes || ""}</div>
-                            <div className="font-black text-slate-900 text-lg">
-                              {displayCs} <span className="font-normal text-[10px] text-slate-500">c/s</span>
-                              {displayP > 0 && <span className="font-black text-slate-900 text-lg ml-1">{displayP} <span className="font-normal text-[10px] text-slate-500">p</span></span>}
+                        </div>
+                        <div className="w-full bg-slate-100 h-2 rounded-full mt-2 overflow-hidden"><div className="bg-blue-500 h-full transition-all" style={{ width: `${(order.plannedPieces / order.quantity) * 100}%` }}></div></div>
+                      </CardContent>
+                    </Card>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div className="w-full lg:w-[65%] flex flex-col gap-4">
+              <h2 className="font-bold text-slate-700 mb-1 flex items-center gap-2"><span className="bg-blue-100 text-blue-800 rounded-full w-6 h-6 flex items-center justify-center text-xs">2</span>日別の製造予定を入力</h2>
+
+              {canEdit ? (
+                <Card className="border-slate-200 shadow-sm overflow-hidden shrink-0">
+                  {selectedOrder || isStockProduction ? (
+                    <div className="p-4 md:p-6">
+                      <div className="bg-slate-100 p-4 rounded-md mb-6 flex flex-col md:flex-row md:justify-between md:items-center gap-4 border border-slate-200 shadow-inner">
+                        {isStockProduction ? (
+                          <div className="w-full">
+                            <div className="text-xs text-slate-500 font-bold mb-1 flex items-center gap-1"><PackageCheck className="w-3 h-3" /> 見込み生産 (在庫補充)</div>
+                            <select value={stockProductId} onChange={e => setStockProductId(e.target.value)} className="w-full border-slate-300 rounded p-2 text-sm font-bold bg-white focus:ring-blue-500">
+                              <option value="">製造する製品を選択してください...</option>
+                              {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.variant_name})</option>)}
+                            </select>
+                          </div>
+                        ) : (
+                          <>
+                            <div><div className="text-xs text-slate-500 mb-1">対象製品</div><div className="font-bold text-lg text-slate-800">{selectedOrder?.products?.name} ({selectedOrder?.products?.variant_name})</div></div>
+                            <div className="md:text-right border-t md:border-none pt-2 md:pt-0 mt-2 md:mt-0">
+                              <div className="text-xs text-slate-500 mb-1">この受注の残数</div>
+                              <div className="font-black text-2xl text-red-600">
+                                {Math.floor((selectedOrder?.remainPieces || 0) / (selectedOrder?.products?.unit_per_cs || 24))} <span className="text-sm font-normal text-slate-500">c/s</span>
+                                {Math.floor(((selectedOrder?.remainPieces || 0) % (selectedOrder?.products?.unit_per_cs || 24)) / 2) > 0 && <span className="ml-1 text-xl">{Math.floor(((selectedOrder?.remainPieces || 0) % (selectedOrder?.products?.unit_per_cs || 24)) / 2)} <span className="text-xs font-normal text-slate-500">p</span></span>}
+                              </div>
                             </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-
-                    {!hasAnyEvent && (
-                      <div className="text-xs text-slate-400 flex h-full items-center justify-center font-medium border border-dashed rounded-lg py-4 bg-slate-50/50">
-                        予定なし
+                          </>
+                        )}
                       </div>
-                    )}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-
-          {/* ★追加: カレンダー下部の月別備考欄 */}
-          <div className="bg-slate-100 print:bg-white border-t border-slate-300 print:border-black p-4 flex flex-col gap-2 shrink-0">
-            <div className="text-sm font-bold text-slate-700 print:text-black flex items-center justify-between">
-              <span>{currentMonthStr}月の備考・連絡事項</span>
-              {isSavingNote && <Loader2 className="w-4 h-4 animate-spin text-blue-600 print:hidden" />}
-            </div>
-            {canEdit ? (
-              <textarea
-                value={monthlyNote}
-                onChange={(e) => setMonthlyNote(e.target.value)}
-                onBlur={handleSaveMonthlyNote}
-                placeholder="クリックして今月の特記事項を入力...（入力後に別の場所をクリックすると自動保存されます）"
-                className="w-full bg-white print:border-none print:shadow-none p-3 border border-slate-300 rounded-md text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[60px]"
-              />
-            ) : (
-              <div className="w-full bg-white print:border-none print:shadow-none p-3 border border-slate-300 rounded-md text-sm min-h-[60px] whitespace-pre-wrap">
-                {monthlyNote || <span className="text-slate-400">備考なし</span>}
-              </div>
-            )}
-          </div>
-
-        </div>
-      </div>
-    );
-  }
-
-  // =======================================================================
-  // 通常のリスト入力画面
-  // =======================================================================
-  return (
-    <div className="bg-transparent">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-        <div className="flex items-center gap-4">
-          <h1 className="text-2xl font-bold flex items-center gap-2 text-slate-800"><Factory className="h-6 w-6 text-blue-600" /> 製造計画・Lot採番</h1>
-          {!canEdit && <Badge variant="outline" className="bg-slate-100 text-slate-500 border-slate-300 px-3 py-1 shadow-sm hidden md:flex"><Lock className="w-3 h-3 mr-1" /> 閲覧モード</Badge>}
-        </div>
-        <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
-          {canEdit && (
-            <Button onClick={handleSelectStockProduction} className="bg-slate-800 hover:bg-slate-900 text-white font-bold shadow-sm h-12 md:h-10">
-              <Plus className="h-4 w-4 mr-2" /> 在庫品として製造 (見込み生産)
-            </Button>
-          )}
-          <Button onClick={() => setViewMode('calendar')} variant="outline" className="border-blue-300 text-blue-700 hover:bg-blue-50 gap-2 font-bold shadow-sm h-12 md:h-10">
-            <CalendarDays className="h-5 w-5" /> スケジュール表を表示
-          </Button>
-        </div>
-      </div>
-
-      <div className="flex flex-col lg:flex-row gap-6">
-        <div className="w-full lg:w-[35%]">
-          <h2 className="font-bold text-slate-700 mb-3 flex items-center gap-2"><span className="bg-blue-100 text-blue-800 rounded-full w-6 h-6 flex items-center justify-center text-xs">1</span>未計画の残数がある受注</h2>
-          <div className="space-y-3 h-[calc(100vh-200px)] overflow-y-auto pr-2 pb-10">
-            {orders.map((order) => {
-              const displayCs = Math.floor(order.quantity / (order.products?.unit_per_cs || 24));
-              const displayP = Math.floor((order.quantity % (order.products?.unit_per_cs || 24)) / 2);
-              const remainCs = Math.floor(order.remainPieces / (order.products?.unit_per_cs || 24));
-              const remainP = Math.floor((order.remainPieces % (order.products?.unit_per_cs || 24)) / 2);
-
-              return (
-                <Card key={order.id} onClick={() => handleSelectOrder(order)} className={`cursor-pointer transition-all border-2 ${selectedOrder?.id === order.id ? "border-blue-500 bg-blue-50 shadow-md transform scale-[1.02]" : "border-slate-200 hover:border-blue-300"}`}>
-                  <CardHeader className="p-4 pb-2 bg-white rounded-t-lg"><div className="flex justify-between items-start"><div className="text-xs text-slate-500">{order.id}</div><Badge className="bg-slate-100 text-slate-800 border-none shadow-sm text-xs">出荷: {new Date(order.planned_ship_date || order.desired_ship_date).toLocaleDateString()}</Badge></div><CardTitle className="text-base text-slate-800 leading-tight mt-1">{order.customers?.name}</CardTitle></CardHeader>
-                  <CardContent className="p-4 pt-2 text-sm text-slate-600 bg-white rounded-b-lg">
-                    <div className="font-bold text-slate-800 mb-2">{order.products?.name} ({order.products?.variant_name})</div>
-                    <div className="flex items-center justify-between border-t pt-2">
-                      <span className="text-xs text-slate-500">全体: {displayCs} c/s {displayP > 0 && `${displayP} p`}</span>
-                      <div className="flex items-baseline gap-1">
-                        <span className="text-xs text-slate-500">未計画残数:</span>
-                        <span className="font-black text-xl text-red-600">{remainCs}</span><span className="text-xs font-normal text-slate-500">c/s</span>
-                        {remainP > 0 && <><span className="font-bold text-lg text-slate-700 ml-1">{remainP}</span><span className="text-[10px] font-normal text-slate-500">p</span></>}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                        <div className="space-y-4">
+                          <div><label className="text-sm font-bold mb-2 text-slate-700 flex items-center gap-1"><CalendarIcon className="h-4 w-4" /> 製造予定日</label><Input type="date" value={planDate} onChange={e => setPlanDate(e.target.value)} className="text-lg bg-white h-12 border-blue-300 shadow-sm" /></div>
+                          <div><label className="block text-sm font-bold mb-2 text-slate-700">この日の製造量 (kg)</label><div className="flex items-center gap-3"><Input type="number" min="0" value={planKg} onChange={e => setPlanKg(e.target.value === "" ? "" : Number(e.target.value))} className="text-xl font-bold bg-white h-12 text-right border-blue-300 shadow-sm" /><span className="text-lg font-bold text-slate-500">kg</span></div><div className="text-xs text-slate-500 mt-2 text-right">自動計算 👉 <span className="font-bold text-blue-700 text-sm">{calculatedCs} c/s</span></div></div>
+                        </div>
+                        <div className="flex flex-col h-full"><label className="block text-sm font-bold mb-2 text-slate-700">備考 (任意)</label><textarea value={planNotes} onChange={e => setPlanNotes(e.target.value)} className="flex-1 w-full p-3 border rounded-md text-sm border-blue-300 shadow-sm min-h-[100px] resize-none" /></div>
+                      </div>
+                      <div className="bg-blue-50/50 border border-blue-200 rounded-lg p-5 relative">
+                        <h3 className="font-bold text-blue-900 mb-3 flex items-center gap-2 text-md"><PackageCheck className="h-5 w-5" /> 発行されるLot情報</h3>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div className="bg-white p-3 rounded-md border border-blue-100 shadow-sm text-center"><div className="text-xs font-bold text-slate-500 mb-1">製造Lot番号</div><div className="text-2xl font-black text-blue-700 tracking-wider">{calculatedLot || "-"}</div></div>
+                          <div className="bg-white p-3 rounded-md border border-blue-100 shadow-sm text-center"><div className="text-xs font-bold text-slate-500 mb-1">賞味期限</div><div className="text-2xl font-black text-slate-800 tracking-wider">{calculatedExpiry ? new Date(calculatedExpiry).toLocaleDateString() : "-"}</div></div>
+                        </div>
+                      </div>
+                      <div className="mt-6 flex justify-end">
+                        <Button onClick={handleSavePlan} disabled={!planKg || !calculatedLot || (isStockProduction && !stockProductId)} className="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white h-12 px-6 font-bold shadow-sm"><ListPlus className="h-5 w-5 mr-2" /> 計画を追加する</Button>
                       </div>
                     </div>
-                    <div className="w-full bg-slate-100 h-2 rounded-full mt-2 overflow-hidden"><div className="bg-blue-500 h-full transition-all" style={{ width: `${(order.plannedPieces / order.quantity) * 100}%` }}></div></div>
-                  </CardContent>
+                  ) : (<div className="p-16 text-center text-slate-400 flex flex-col items-center bg-slate-50"><Factory className="h-16 w-16 mb-4 opacity-30 text-blue-500" /><p className="text-xl font-bold text-slate-500">リストから受注を選ぶか、見込み生産を開始してください</p></div>)}
                 </Card>
-              )
-            })}
-          </div>
-        </div>
+              ) : (
+                <Card className="border-slate-200 bg-slate-50 opacity-70">
+                  <CardContent className="p-16 text-center text-slate-500"><Lock className="w-12 h-12 mx-auto mb-4 text-slate-300" /><p className="font-bold">閲覧モードのため、新規計画の追加はできません。</p></CardContent>
+                </Card>
+              )}
 
-        <div className="w-full lg:w-[65%] flex flex-col gap-4">
-          <h2 className="font-bold text-slate-700 mb-1 flex items-center gap-2"><span className="bg-blue-100 text-blue-800 rounded-full w-6 h-6 flex items-center justify-center text-xs">2</span>日別の製造予定を入力</h2>
+              {!selectedOrder && (
+                <div className="mt-4">
+                  <h2 className="font-bold text-slate-700 mb-3 flex items-center gap-2"><CheckCircle2 className="h-5 w-5 text-green-600" /> 直近の製造計画一覧</h2>
+                  <div className="bg-white border rounded-lg shadow-sm overflow-hidden">
+                    <Table>
+                      <TableHeader className="bg-slate-50"><TableRow><TableHead>予定日</TableHead><TableHead>Lot / 製品</TableHead><TableHead className="text-right">数量(c/s)</TableHead><TableHead className="text-center w-24">状態</TableHead><TableHead className="w-20 text-center">詳細</TableHead></TableRow></TableHeader>
+                      <TableBody>
+                        {plans.map(plan => {
+                          const isCompleted = plan.status === 'completed';
+                          const displayCs = isCompleted ? (plan.actual_cs !== undefined ? plan.actual_cs : plan.planned_cs) : plan.planned_cs;
+                          const displayP = isCompleted ? (plan.actual_piece || 0) : 0;
 
-          {canEdit ? (
-            <Card className="border-slate-200 shadow-sm overflow-hidden shrink-0">
-              {selectedOrder || isStockProduction ? (
-                <div className="p-4 md:p-6">
-                  <div className="bg-slate-100 p-4 rounded-md mb-6 flex flex-col md:flex-row md:justify-between md:items-center gap-4 border border-slate-200 shadow-inner">
-                    {isStockProduction ? (
-                      <div className="w-full">
-                        <div className="text-xs text-slate-500 font-bold mb-1 flex items-center gap-1"><PackageCheck className="w-3 h-3" /> 見込み生産 (在庫補充)</div>
-                        <select value={stockProductId} onChange={e => setStockProductId(e.target.value)} className="w-full border-slate-300 rounded p-2 text-sm font-bold bg-white focus:ring-blue-500">
-                          <option value="">製造する製品を選択してください...</option>
-                          {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.variant_name})</option>)}
-                        </select>
-                      </div>
-                    ) : (
-                      <>
-                        <div><div className="text-xs text-slate-500 mb-1">対象製品</div><div className="font-bold text-lg text-slate-800">{selectedOrder?.products?.name} ({selectedOrder?.products?.variant_name})</div></div>
-                        <div className="md:text-right border-t md:border-none pt-2 md:pt-0 mt-2 md:mt-0">
-                          <div className="text-xs text-slate-500 mb-1">この受注の残数</div>
-                          <div className="font-black text-2xl text-red-600">
-                            {Math.floor((selectedOrder?.remainPieces || 0) / (selectedOrder?.products?.unit_per_cs || 24))} <span className="text-sm font-normal text-slate-500">c/s</span>
-                            {Math.floor(((selectedOrder?.remainPieces || 0) % (selectedOrder?.products?.unit_per_cs || 24)) / 2) > 0 && <span className="ml-1 text-xl">{Math.floor(((selectedOrder?.remainPieces || 0) % (selectedOrder?.products?.unit_per_cs || 24)) / 2)} <span className="text-xs font-normal text-slate-500">p</span></span>}
-                          </div>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                    <div className="space-y-4">
-                      <div><label className="text-sm font-bold mb-2 text-slate-700 flex items-center gap-1"><CalendarIcon className="h-4 w-4" /> 製造予定日</label><Input type="date" value={planDate} onChange={e => setPlanDate(e.target.value)} className="text-lg bg-white h-12 border-blue-300 shadow-sm" /></div>
-                      <div><label className="block text-sm font-bold mb-2 text-slate-700">この日の製造量 (kg)</label><div className="flex items-center gap-3"><Input type="number" min="0" value={planKg} onChange={e => setPlanKg(e.target.value === "" ? "" : Number(e.target.value))} className="text-xl font-bold bg-white h-12 text-right border-blue-300 shadow-sm" /><span className="text-lg font-bold text-slate-500">kg</span></div><div className="text-xs text-slate-500 mt-2 text-right">自動計算 👉 <span className="font-bold text-blue-700 text-sm">{calculatedCs} c/s</span></div></div>
-                    </div>
-                    <div className="flex flex-col h-full"><label className="block text-sm font-bold mb-2 text-slate-700">備考 (任意)</label><textarea value={planNotes} onChange={e => setPlanNotes(e.target.value)} className="flex-1 w-full p-3 border rounded-md text-sm border-blue-300 shadow-sm min-h-[100px] resize-none" /></div>
-                  </div>
-                  <div className="bg-blue-50/50 border border-blue-200 rounded-lg p-5 relative">
-                    <h3 className="font-bold text-blue-900 mb-3 flex items-center gap-2 text-md"><PackageCheck className="h-5 w-5" /> 発行されるLot情報</h3>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div className="bg-white p-3 rounded-md border border-blue-100 shadow-sm text-center"><div className="text-xs font-bold text-slate-500 mb-1">製造Lot番号</div><div className="text-2xl font-black text-blue-700 tracking-wider">{calculatedLot || "-"}</div></div>
-                      <div className="bg-white p-3 rounded-md border border-blue-100 shadow-sm text-center"><div className="text-xs font-bold text-slate-500 mb-1">賞味期限</div><div className="text-2xl font-black text-slate-800 tracking-wider">{calculatedExpiry ? new Date(calculatedExpiry).toLocaleDateString() : "-"}</div></div>
-                    </div>
-                  </div>
-                  <div className="mt-6 flex justify-end">
-                    <Button onClick={handleSavePlan} disabled={!planKg || !calculatedLot || (isStockProduction && !stockProductId)} className="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white h-12 px-6 font-bold shadow-sm"><ListPlus className="h-5 w-5 mr-2" /> 計画を追加する</Button>
+                          return (
+                            <TableRow key={plan.id}>
+                              <TableCell>
+                                <div className="font-bold text-slate-700">{new Date(plan.production_date).toLocaleDateString()}</div>
+                                {!plan.order_id && <Badge className="bg-slate-100 text-slate-500 border-none shadow-none text-[10px] mt-1 py-0">見込み生産</Badge>}
+                              </TableCell>
+                              <TableCell><div className="font-bold text-blue-600">{plan.lot_code}</div><div className="text-xs text-slate-600">{plan.products?.name}</div></TableCell>
+                              <TableCell className="text-right font-bold">
+                                {displayCs} c/s
+                                {displayP > 0 && <span className="ml-1">{displayP} p</span>}
+                              </TableCell>
+                              <TableCell className="text-center">
+                                {plan.status === 'planned' && <Badge className="bg-blue-100 text-blue-700 border-none shadow-sm">計画</Badge>}
+                                {plan.status === 'in_progress' && <Badge className="bg-amber-500 text-white border-none shadow-sm">製造中</Badge>}
+                                {plan.status === 'completed' && <Badge className="bg-green-600 text-white border-none shadow-sm">完了</Badge>}
+                              </TableCell>
+                              <TableCell className="text-center"><Button variant="outline" size="sm" onClick={(e) => canEdit ? openEditDialog(e, plan) : alert("閲覧モードです")} className="text-blue-600 border-blue-200 hover:bg-blue-50">確認</Button></TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
                   </div>
                 </div>
-              ) : (<div className="p-16 text-center text-slate-400 flex flex-col items-center bg-slate-50"><Factory className="h-16 w-16 mb-4 opacity-30 text-blue-500" /><p className="text-xl font-bold text-slate-500">リストから受注を選ぶか、見込み生産を開始してください</p></div>)}
-            </Card>
-          ) : (
-            <Card className="border-slate-200 bg-slate-50 opacity-70">
-              <CardContent className="p-16 text-center text-slate-500"><Lock className="w-12 h-12 mx-auto mb-4 text-slate-300" /><p className="font-bold">閲覧モードのため、新規計画の追加はできません。</p></CardContent>
-            </Card>
-          )}
-
-          {!selectedOrder && (
-            <div className="mt-4">
-              <h2 className="font-bold text-slate-700 mb-3 flex items-center gap-2"><CheckCircle2 className="h-5 w-5 text-green-600" /> 直近の製造計画一覧</h2>
-              <div className="bg-white border rounded-lg shadow-sm overflow-hidden">
-                <Table>
-                  <TableHeader className="bg-slate-50"><TableRow><TableHead>予定日</TableHead><TableHead>Lot / 製品</TableHead><TableHead className="text-right">数量(c/s)</TableHead><TableHead className="text-center w-24">状態</TableHead><TableHead className="w-20 text-center">詳細</TableHead></TableRow></TableHeader>
-                  <TableBody>
-                    {plans.map(plan => {
-                      const isCompleted = plan.status === 'completed';
-                      const displayCs = isCompleted ? (plan.actual_cs !== undefined ? plan.actual_cs : plan.planned_cs) : plan.planned_cs;
-                      const displayP = isCompleted ? (plan.actual_piece || 0) : 0;
-
-                      return (
-                        <TableRow key={plan.id}>
-                          <TableCell>
-                            <div className="font-bold text-slate-700">{new Date(plan.production_date).toLocaleDateString()}</div>
-                            {!plan.order_id && <Badge className="bg-slate-100 text-slate-500 border-none shadow-none text-[10px] mt-1 py-0">見込み生産</Badge>}
-                          </TableCell>
-                          <TableCell><div className="font-bold text-blue-600">{plan.lot_code}</div><div className="text-xs text-slate-600">{plan.products?.name}</div></TableCell>
-                          <TableCell className="text-right font-bold">
-                            {displayCs} c/s
-                            {displayP > 0 && <span className="ml-1">{displayP} p</span>}
-                          </TableCell>
-                          <TableCell className="text-center">
-                            {plan.status === 'planned' && <Badge className="bg-blue-100 text-blue-700 border-none shadow-sm">計画</Badge>}
-                            {plan.status === 'in_progress' && <Badge className="bg-amber-500 text-white border-none shadow-sm">製造中</Badge>}
-                            {plan.status === 'completed' && <Badge className="bg-green-600 text-white border-none shadow-sm">完了</Badge>}
-                          </TableCell>
-                          <TableCell className="text-center"><Button variant="outline" size="sm" onClick={() => canEdit ? openEditDialog(plan) : alert("閲覧モードです")} className="text-blue-600 border-blue-200 hover:bg-blue-50">確認</Button></TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
+              )}
             </div>
-          )}
+          </div>
         </div>
-      </div>
+      )}
 
+      {/* =======================================================================
+          各種モーダル (共通で配置し、どのモードでも開けるようにする)
+          ======================================================================= */}
       <div className="print:hidden">
         <Dialog open={eventModalOpen} onOpenChange={setEventModalOpen}>
           <DialogContent className="w-[95vw] max-w-sm bg-white p-4 md:p-6 rounded-xl">
@@ -804,7 +813,7 @@ export default function ProductionPage() {
                     )}
 
                     {editingPlan.status === 'in_progress' && (
-                      <Button onClick={openCompletionModal} disabled={isProcessing} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold h-12 shadow-sm text-base">
+                      <Button onClick={(e) => openCompletionModal(e)} disabled={isProcessing} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold h-12 shadow-sm text-base">
                         <CheckCircle className="h-5 w-5 mr-2" />製造を完了し、実績数を入力
                       </Button>
                     )}
@@ -899,7 +908,7 @@ export default function ProductionPage() {
           </DialogContent>
         </Dialog>
       </div>
-    </div>
+    </>
   );
 }
 
