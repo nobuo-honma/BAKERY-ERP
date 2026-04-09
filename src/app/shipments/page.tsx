@@ -11,13 +11,12 @@ import { Truck, Loader2, Save, Box, AlertCircle, ArrowRight, Lock, Printer, Arro
 import { useAuth } from "@/contexts/AuthContext";
 
 type Order = { id: string; order_date: string; planned_ship_date: string; desired_ship_date: string; quantity: number; status: string; product_id: string; customer_order_no?: string; customers?: { name: string }; products?: { name: string; variant_name: string; unit_per_cs: number }; };
-type ProductStock = { id: string; lot_code: string; product_id: string; total_pieces: number; expiry_date: string; };
+type ProductStock = { id: string; lot_code: string; product_id: string; total_pieces: number; expiry_date: string; products?: { name: string; variant_name: string; unit_per_cs: number }; };
 
 type Shipment = { id: string; order_id: string; ship_date: string; lot_code: string; qty_cs: number; qty_piece: number; status: string; orders?: { product_id: string; desired_ship_date: string; planned_ship_date: string; customer_order_no?: string; customers?: { name: string }; products?: { name: string; variant_name: string; unit_per_cs: number } } };
 
 type OrderGroup = { groupId: string; customerOrderNo: string; plannedShipDate: string; desiredShipDate: string; customerName: string; items: Order[]; isLate: boolean; };
 
-// ★追加: 印刷用データのグループ型
 type PrintGroup = { orderIdPrefix: string; customerName: string; customerOrderNo: string; shipDate: string; desiredShipDate: string; shipments: Shipment[]; };
 
 export default function ShipmentsPage() {
@@ -38,7 +37,6 @@ export default function ShipmentsPage() {
 
   const fetchOrders = useCallback(async () => {
     setLoading(true);
-    // 未出荷の受注
     const { data } = await supabase.from("orders").select("*, customers(name), products(name, variant_name, unit_per_cs)").in("status", ["received", "in_production"]).order("planned_ship_date", { ascending: true });
 
     if (data) {
@@ -46,7 +44,6 @@ export default function ShipmentsPage() {
       const today = new Date(); today.setHours(0, 0, 0, 0);
 
       data.forEach((o: any) => {
-        // 発注番号か、受注IDのプレフィックス（ORD-日付-乱数）でグループ化
         const parts = o.id.split('-');
         const gId = o.customer_order_no ? `${o.customer_order_no}_${o.customer_id}_${o.planned_ship_date}` : (parts.length > 3 ? parts.slice(0, 3).join('-') : o.id);
 
@@ -63,7 +60,6 @@ export default function ShipmentsPage() {
       setOrderGroups(Object.values(groups));
     }
 
-    // 出荷実績
     const { data: sData } = await supabase.from("shipments").select("*, orders(product_id, desired_ship_date, planned_ship_date, customer_order_no, customers(name), products(name, variant_name, unit_per_cs))").order("ship_date", { ascending: false }).limit(50);
     if (sData) setShipments(sData as any[]);
 
@@ -77,7 +73,7 @@ export default function ShipmentsPage() {
     const productIds = group.items.map(i => i.product_id);
     setShipDate(group.plannedShipDate || new Date().toISOString().split('T')[0]);
 
-    const { data, error } = await supabase.from("product_stocks").select("*").in("product_id", productIds).gt("total_pieces", 0).order("expiry_date", { ascending: true });
+    const { data, error } = await supabase.from("product_stocks").select("*, products(name, variant_name, unit_per_cs)").in("product_id", productIds).gt("total_pieces", 0).order("expiry_date", { ascending: true });
     if (error) {
       console.error("在庫取得エラー:", error); alert("在庫の取得に失敗しました。");
     } else if (data) {
@@ -113,12 +109,13 @@ export default function ShipmentsPage() {
           const input = shipInputs[stock.id];
           const inputCs = Number(input?.cs) || 0; const inputP = Number(input?.p) || 0;
 
-          const shipTotalPieces = (inputCs * unitPerCs) + (inputP * 2);
+          // ★修正: 純粋なパック数で計算
+          const shipTotalPacks = (inputCs * unitPerCs) + inputP;
 
-          if (shipTotalPieces > 0) {
-            if (shipTotalPieces > stock.total_pieces) { alert(`Lot[${stock.lot_code}] の出荷数が現在庫を超えています！`); setIsProcessing(false); return; }
+          if (shipTotalPacks > 0) {
+            if (shipTotalPacks > stock.total_pieces) { alert(`Lot[${stock.lot_code}] の出荷数が現在庫を超えています！`); setIsProcessing(false); return; }
 
-            const newTotalPieces = stock.total_pieces - shipTotalPieces;
+            const newTotalPieces = stock.total_pieces - shipTotalPacks;
             if (newTotalPieces <= 0) stockDeletes.push(stock.id);
             else stockUpdates.push({ id: stock.id, total_pieces: newTotalPieces });
 
@@ -126,7 +123,7 @@ export default function ShipmentsPage() {
             shipmentInserts.push({ id: `SHP-${shipDate.replace(/-/g, "")}-${random4}`, order_id: order.id, ship_date: shipDate, lot_code: stock.lot_code, qty_cs: inputCs, qty_piece: inputP, status: "shipped" });
             historyInserts.push({ product_id: stock.product_id, lot_code: stock.lot_code, before_qty: stock.total_pieces, after_qty: newTotalPieces, reason: `出荷 (${selectedGroup.customerName}様宛)` });
 
-            totalShippedForThisOrder += shipTotalPieces;
+            totalShippedForThisOrder += shipTotalPacks;
           }
         }
         if (totalShippedForThisOrder > 0 || isOrderCompleted) completedOrderIds.push(order.id);
@@ -150,16 +147,11 @@ export default function ShipmentsPage() {
     setIsProcessing(false);
   };
 
-  // =======================================================================
-  // ★変更: 出荷管理票 (1枚の紙に複数明細をまとめる)
-  // =======================================================================
   if (viewMode === 'print') {
-    // 同じ「注文書(発注番号＋出荷日)」を1つの伝票(PrintGroup)にまとめる
     const pGroups: Record<string, PrintGroup> = {};
 
     shipments.forEach(s => {
       const parts = s.order_id.split('-');
-      // 元の受注IDの枝番を除いたものをグループキーとする
       const oPrefix = parts.length > 3 ? parts.slice(0, 3).join('-') : s.order_id;
       const gKey = s.orders?.customer_order_no ? `${s.orders.customer_order_no}_${s.ship_date}` : `${oPrefix}_${s.ship_date}`;
 
@@ -177,8 +169,6 @@ export default function ShipmentsPage() {
     });
 
     const printChunks = Object.values(pGroups);
-
-    // 3件(3枚の伝票)ずつページに分割
     const chunkedPages = [];
     for (let i = 0; i < printChunks.length; i += 3) chunkedPages.push(printChunks.slice(i, i + 3));
 
@@ -200,7 +190,6 @@ export default function ShipmentsPage() {
             <div key={pageIdx} className={`w-[210mm] min-h-[297mm] bg-white p-10 print:p-0 shadow-xl print:shadow-none text-black font-sans box-border flex flex-col justify-between gap-8 ${pageIdx < chunkedPages.length - 1 ? 'page-break mb-8 print:mb-0' : ''}`}>
               {pageChunks.map((group, gIdx) => {
 
-                // 同じ製品ごとに、出荷したLot情報をまとめる
                 const productSummary: Record<string, { name: string, variant: string, totalCs: number, totalP: number, lots: Shipment[] }> = {};
                 group.shipments.forEach(s => {
                   const pId = s.orders?.product_id || "";
@@ -216,7 +205,6 @@ export default function ShipmentsPage() {
                   productSummary[pId].lots.push(s);
                 });
 
-                // 印刷用行データの生成
                 const rows = Object.values(productSummary);
 
                 return (
@@ -251,7 +239,7 @@ export default function ShipmentsPage() {
                       <tbody>
                         {rows.map((row, i) => {
                           const lot1 = row.lots[0];
-                          const lot2 = row.lots[1]; // 2Lot目まで印字可能とする
+                          const lot2 = row.lots[1];
 
                           return (
                             <tr key={i} className="h-6">
@@ -292,9 +280,6 @@ export default function ShipmentsPage() {
     );
   }
 
-  // =======================================================================
-  // 通常のリスト入力画面
-  // =======================================================================
   return (
     <div className="bg-transparent">
       <div className="flex justify-between items-center mb-6">
@@ -330,8 +315,10 @@ export default function ShipmentsPage() {
                     <div className="divide-y divide-slate-100">
                       {group.items.map((item) => {
                         const unitPerCs = item.products?.unit_per_cs || 24;
+                        // ★修正: リスト側の全体数量表示 (パック数で計算)
                         const displayCs = Math.floor(item.quantity / unitPerCs);
-                        const displayP = Math.floor((item.quantity % unitPerCs) / 2);
+                        const displayP = item.quantity % unitPerCs;
+
                         return (
                           <div key={item.id} className="px-4 py-2.5 flex justify-between items-center text-sm bg-white">
                             <div className="font-bold text-slate-700 truncate mr-2">
@@ -349,7 +336,7 @@ export default function ShipmentsPage() {
               );
             })}
             {loading && orderGroups.length === 0 && <div className="text-center py-12"><Loader2 className="animate-spin h-8 w-8 text-slate-400 mx-auto" /></div>}
-            {!loading && orderGroups.length === 0 && <div className="text-center py-12 text-slate-500 border border-dashed rounded-lg bg-white">出荷待ち hostのデータはありません。</div>}
+            {!loading && orderGroups.length === 0 && <div className="text-center py-12 text-slate-500 border border-dashed rounded-lg bg-white">出荷待ちのデータはありません。</div>}
           </div>
         </div>
 
@@ -377,12 +364,14 @@ export default function ShipmentsPage() {
                   {selectedGroup.items.map(order => {
                     const productStocks = groupedStocks[order.product_id] || [];
                     const unitPerCs = order.products?.unit_per_cs || 24;
+                    // ★修正: 注文数
                     const orderCs = Math.floor(order.quantity / unitPerCs);
-                    const orderP = Math.floor((order.quantity % unitPerCs) / 2);
+                    const orderP = order.quantity % unitPerCs;
 
-                    const totalPiecesForThisProduct = productStocks.reduce((sum, stock) => sum + ((Number(shipInputs[stock.id]?.cs) || 0) * unitPerCs) + ((Number(shipInputs[stock.id]?.p) || 0) * 2), 0);
-                    const displayCs = Math.floor(totalPiecesForThisProduct / unitPerCs);
-                    const displayP = Math.floor((totalPiecesForThisProduct % unitPerCs) / 2);
+                    // ★修正: 入力した数量の総個数(パック数)を計算
+                    const totalPacksForThisProduct = productStocks.reduce((sum, stock) => sum + ((Number(shipInputs[stock.id]?.cs) || 0) * unitPerCs) + (Number(shipInputs[stock.id]?.p) || 0), 0);
+                    const displayCs = Math.floor(totalPacksForThisProduct / unitPerCs);
+                    const displayP = totalPacksForThisProduct % unitPerCs;
 
                     return (
                       <div key={order.id} className="bg-white border rounded-lg shadow-sm overflow-hidden">
@@ -390,7 +379,7 @@ export default function ShipmentsPage() {
                           <div className="font-bold text-blue-900">{order.products?.name} <span className="text-xs text-blue-600 font-normal">({order.products?.variant_name})</span></div>
                           <div className="flex items-center gap-4">
                             <div className="text-xs font-bold text-slate-500">注文: <span className="text-sm font-black text-slate-800">{orderCs} c/s {orderP > 0 && `${orderP} p`}</span></div>
-                            <div className={`text-xs font-bold px-2 py-1 rounded ${totalPiecesForThisProduct === order.quantity ? 'bg-green-100 text-green-700' : totalPiecesForThisProduct > 0 ? 'bg-amber-100 text-amber-700' : 'bg-slate-200 text-slate-500'}`}>
+                            <div className={`text-xs font-bold px-2 py-1 rounded ${totalPacksForThisProduct === order.quantity ? 'bg-green-100 text-green-700' : totalPacksForThisProduct > 0 ? 'bg-amber-100 text-amber-700' : 'bg-slate-200 text-slate-500'}`}>
                               入力計: {displayCs} c/s {displayP > 0 && `${displayP} p`}
                             </div>
                           </div>
@@ -400,15 +389,17 @@ export default function ShipmentsPage() {
                           <TableHeader className="bg-slate-50"><TableRow><TableHead className="pl-4 w-[25%]">Lot番号</TableHead><TableHead className="w-[20%]">期限</TableHead><TableHead className="text-right bg-slate-50">現在庫</TableHead><TableHead className="text-center bg-blue-50 border-l">出荷数入力</TableHead></TableRow></TableHeader>
                           <TableBody>
                             {productStocks.map(stock => {
+                              // ★修正: DBの在庫(パック数)をケースとパックに変換して表示
                               const stockCs = Math.floor(stock.total_pieces / unitPerCs);
-                              const stockPiece = Math.floor((stock.total_pieces % unitPerCs) / 2);
+                              const stockPiece = stock.total_pieces % unitPerCs;
 
                               const inputCs = Number(shipInputs[stock.id]?.cs) || 0;
                               const inputP = Number(shipInputs[stock.id]?.p) || 0;
-                              const inputTotalPieces = (inputCs * unitPerCs) + (inputP * 2);
+                              // ★修正: 入力されたケースとパックをパック数に変換して超過判定
+                              const inputTotalPacks = (inputCs * unitPerCs) + inputP;
 
-                              const isOver = inputTotalPieces > stock.total_pieces;
-                              const isSelected = inputTotalPieces > 0;
+                              const isOver = inputTotalPacks > stock.total_pieces;
+                              const isSelected = inputTotalPacks > 0;
 
                               return (
                                 <TableRow key={stock.id} className={`${isSelected ? "bg-blue-50/30" : ""} transition-colors`}>
@@ -418,7 +409,7 @@ export default function ShipmentsPage() {
                                   <TableCell className={`border-l p-1 ${isOver ? 'bg-red-50' : 'bg-blue-50/10'}`}>
                                     <div className="flex items-center justify-center gap-1">
                                       {canEdit ? (
-                                        <><div className="flex items-end"><Input type="number" min="0" value={shipInputs[stock.id]?.cs ?? ""} onChange={e => handleInputChange(stock.id, 'cs', e.target.value)} className={`w-14 text-right font-bold h-8 px-1 bg-white ${isOver ? 'border-red-400' : 'border-blue-300'}`} /><span className="text-[10px] text-slate-500 pb-0.5 pl-0.5">c/s</span></div><div className="flex items-end"><Input type="number" min="0" value={shipInputs[stock.id]?.p ?? ""} onChange={e => handleInputChange(stock.id, 'p', e.target.value)} className={`w-12 text-right font-bold h-8 px-1 bg-white ${isOver ? 'border-red-400' : 'border-blue-300'}`} /><span className="text-[10px] text-slate-500 pb-0.5 pl-0.5">p</span></div></>
+                                        <><div className="flex items-end"><Input type="number" min="0" value={shipInputs[stock.id]?.cs ?? ""} onChange={e => handleInputChange(stock.id, 'cs', e.target.value)} className={`w-14 text-right font-bold h-8 px-1 bg-white ${isOver ? 'border-red-400' : 'border-blue-300'}`} /><span className="text-[10px] text-slate-500 pb-0.5 pl-0.5">c/s</span></div><div className="flex items-end"><Input type="number" min="0" max={unitPerCs - 1} value={shipInputs[stock.id]?.p ?? ""} onChange={e => handleInputChange(stock.id, 'p', e.target.value)} className={`w-12 text-right font-bold h-8 px-1 bg-white ${isOver ? 'border-red-400' : 'border-blue-300'}`} /><span className="text-[10px] text-slate-500 pb-0.5 pl-0.5">p</span></div></>
                                       ) : (<span className="text-xs text-slate-400">権限なし</span>)}
                                     </div>
                                     {isOver && <div className="text-[10px] text-red-600 font-bold text-center mt-1 leading-none">※在庫超過</div>}
@@ -447,8 +438,9 @@ export default function ShipmentsPage() {
                           const input = shipInputs[stockId];
                           const stock = Object.values(groupedStocks).flat().find(s => s.id === stockId);
                           if (!stock) return false;
-                          const inputTotalPieces = ((Number(input.cs) || 0) * 24) + ((Number(input.p) || 0) * 2);
-                          return inputTotalPieces > stock.total_pieces;
+                          const unitPerCs = stock.products?.unit_per_cs || 24;
+                          const inputTotalPacks = ((Number(input.cs) || 0) * unitPerCs) + (Number(input.p) || 0);
+                          return inputTotalPacks > stock.total_pieces;
                         })}
                         className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white font-bold h-12 px-8 shadow-sm"
                       >
