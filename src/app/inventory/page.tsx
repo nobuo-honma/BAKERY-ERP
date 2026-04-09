@@ -180,11 +180,17 @@ export default function InventoryPage() {
     try {
       const selectedProduct = productsList.find(p => p.id === newStockData.productId);
       const unitPerCs = selectedProduct?.unit || 24;
+<<<<<<< HEAD
       const totalPieces = (newStockData.cs * (unitPerCs * 2)) + (newStockData.p * 2);
+=======
+      // ★修正: パック数で登録
+      const totalPacks = (newStockData.cs * unitPerCs) + newStockData.p;
+>>>>>>> 7cb1146ccc922b7ea9403be2907e38a8cbb1656b
 
       const { data: existingStock } = await supabase.from('product_stocks').select('id, total_pieces').eq('lot_code', newStockData.lotCode).maybeSingle();
 
       if (existingStock) {
+<<<<<<< HEAD
         if (!confirm(`Lot番号「${newStockData.lotCode}」は既に存在します。\n現在の在庫(${Math.floor(existingStock.total_pieces / (unitPerCs * 2))}c/s)に、入力した数を追加加算しますか？`)) {
           setIsProcessing(false); return;
         }
@@ -193,6 +199,16 @@ export default function InventoryPage() {
       } else {
         await supabase.from('product_stocks').insert({ lot_code: newStockData.lotCode, product_id: newStockData.productId, total_pieces: totalPieces, expiry_date: newStockData.expiryDate });
         await supabase.from('inventory_adjustments').insert({ product_id: newStockData.productId, lot_code: newStockData.lotCode, before_qty: 0, after_qty: totalPieces, reason: `システム導入前在庫の新規登録` });
+=======
+        if (!confirm(`Lot番号「${newStockData.lotCode}」は既に存在します。\n現在の在庫(${Math.floor(existingStock.total_pieces / unitPerCs)}c/s)に、入力した数を追加加算しますか？`)) {
+          setIsProcessing(false); return;
+        }
+        await supabase.from('product_stocks').update({ total_pieces: existingStock.total_pieces + totalPacks }).eq('id', existingStock.id);
+        await supabase.from('inventory_adjustments').insert({ product_id: newStockData.productId, lot_code: newStockData.lotCode, before_qty: existingStock.total_pieces, after_qty: existingStock.total_pieces + totalPacks, reason: `既存Lotへの追加登録` });
+      } else {
+        await supabase.from('product_stocks').insert({ lot_code: newStockData.lotCode, product_id: newStockData.productId, total_pieces: totalPacks, expiry_date: newStockData.expiryDate });
+        await supabase.from('inventory_adjustments').insert({ product_id: newStockData.productId, lot_code: newStockData.lotCode, before_qty: 0, after_qty: totalPacks, reason: `システム導入前在庫の新規登録` });
+>>>>>>> 7cb1146ccc922b7ea9403be2907e38a8cbb1656b
       }
 
       alert("在庫の追加登録が完了しました！");
@@ -257,6 +273,7 @@ export default function InventoryPage() {
     <>
       <div className="hidden md:block bg-white border rounded-lg overflow-x-auto shadow-sm">
         <Table className="min-w-[1000px]">
+<<<<<<< HEAD
           <TableHeader className="bg-slate-50">
             <TableRow>
               <TableHead className="w-24 pl-4">品目ID</TableHead>
@@ -270,12 +287,20 @@ export default function InventoryPage() {
               <TableHead className="w-28 text-center pr-4">アクション</TableHead>
             </TableRow>
           </TableHeader>
+=======
+          <TableHeader className="bg-slate-50"><TableRow>
+            <TableHead className="w-24 pl-4">品目ID</TableHead><TableHead>品目名</TableHead><TableHead className="text-right w-28">現在庫</TableHead><TableHead className="text-center w-16">規格</TableHead><TableHead className="text-right w-24">規格数</TableHead><TableHead className="text-right w-24">単価(円)</TableHead><TableHead className="text-right w-28">在庫金額</TableHead><TableHead className="w-28 text-center">ステータス</TableHead><TableHead className="w-28 text-center pr-4">アクション</TableHead>
+          </TableRow></TableHeader>
+>>>>>>> 7cb1146ccc922b7ea9403be2907e38a8cbb1656b
           <TableBody>
             {itemList.map((item) => {
               const status = getStockStatus(item.current_qty, item.safety_stock);
               const isChanged = isBatchMode && batchInputs[item.id] !== undefined && Number(batchInputs[item.id]) !== item.current_qty;
+<<<<<<< HEAD
 
               // リアルタイム計算用ロジック
+=======
+>>>>>>> 7cb1146ccc922b7ea9403be2907e38a8cbb1656b
               const displayQty = isBatchMode && batchInputs[item.id] !== undefined ? Number(batchInputs[item.id]) : item.current_qty;
               const specCount = displayQty / item.unit_size;
               const totalPrice = specCount * item.unit_price;
@@ -291,6 +316,7 @@ export default function InventoryPage() {
                         {isChanged && <span className="text-xs text-amber-600 font-bold ml-1 w-6 block bg-amber-100 rounded px-1">変更</span>}
                       </div>
                     ) : item.current_qty.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+<<<<<<< HEAD
                   </TableCell>
                   <TableCell className="text-center text-slate-500 font-bold bg-slate-50">
                     {item.unit_size}<span className="text-[10px] font-normal ml-0.5">{item.unit}</span>
@@ -304,6 +330,13 @@ export default function InventoryPage() {
                   <TableCell className="text-right font-black text-blue-700 bg-blue-50/50">
                     ¥{Math.floor(totalPrice).toLocaleString()}
                   </TableCell>
+=======
+                  </TableCell>
+                  <TableCell className="text-center text-slate-500 font-bold bg-slate-50">{item.unit_size}<span className="text-[10px] font-normal ml-0.5">{item.unit}</span></TableCell>
+                  <TableCell className="text-right font-bold text-emerald-700 bg-emerald-50/50">{specCount.toLocaleString(undefined, { maximumFractionDigits: 2 })}<span className="text-[10px] font-normal text-emerald-600 ml-0.5">規格</span></TableCell>
+                  <TableCell className="text-right font-bold text-slate-600">¥{item.unit_price.toLocaleString()}</TableCell>
+                  <TableCell className="text-right font-black text-blue-700 bg-blue-50/50">¥{Math.floor(totalPrice).toLocaleString()}</TableCell>
+>>>>>>> 7cb1146ccc922b7ea9403be2907e38a8cbb1656b
                   <TableCell className="text-center"><Badge className={`px-2 py-1 shadow-sm ${status.color}`}>{status.icon} {status.label}</Badge></TableCell>
                   <TableCell className="text-center pr-4">
                     {canEdit && <Button disabled={isBatchMode} variant="outline" size="sm" onClick={() => setAdjustmentModal({ isOpen: true, type: 'item', targetId: item.id, targetName: item.name, currentQty: item.current_qty, unit: item.unit })} className="gap-1 border-blue-200 text-blue-700 hover:bg-blue-50"><ClipboardEdit className="w-3 h-3" /> 個別棚卸</Button>}
@@ -319,7 +352,10 @@ export default function InventoryPage() {
         {itemList.map((item) => {
           const status = getStockStatus(item.current_qty, item.safety_stock);
           const isChanged = isBatchMode && batchInputs[item.id] !== undefined && Number(batchInputs[item.id]) !== item.current_qty;
+<<<<<<< HEAD
 
+=======
+>>>>>>> 7cb1146ccc922b7ea9403be2907e38a8cbb1656b
           const displayQty = isBatchMode && batchInputs[item.id] !== undefined ? Number(batchInputs[item.id]) : item.current_qty;
           const specCount = displayQty / item.unit_size;
           const totalPrice = specCount * item.unit_price;
@@ -335,6 +371,7 @@ export default function InventoryPage() {
               {isBatchMode ? (
                 <div className="bg-white p-3 rounded-lg border shadow-inner flex flex-col gap-2">
                   <div className="flex justify-between items-center text-sm font-bold text-slate-600"><span>実数入力 (現在: {item.current_qty})</span>{isChanged && <span className="text-xs text-amber-700 bg-amber-100 px-2 py-0.5 rounded font-black">変更あり</span>}</div>
+<<<<<<< HEAD
                   <div className="flex items-center gap-2">
                     <Input type="number" inputMode="decimal" min="0" step="0.1" value={batchInputs[item.id] !== undefined ? batchInputs[item.id] : ""} onChange={e => setBatchInputs({ ...batchInputs, [item.id]: e.target.value === "" ? "" : Number(e.target.value) })} className={`flex-1 text-right font-black text-2xl h-14 ${isChanged ? 'border-amber-400 bg-amber-50 focus-visible:ring-amber-500' : 'border-blue-300'}`} />
                   </div>
@@ -351,6 +388,18 @@ export default function InventoryPage() {
                   <div>規格: {item.unit_size}{item.unit}</div>
                   <div>単価: ¥{item.unit_price.toLocaleString()}</div>
                 </div>
+=======
+                  <div className="flex items-center gap-2"><Input type="number" inputMode="decimal" min="0" step="0.1" value={batchInputs[item.id] !== undefined ? batchInputs[item.id] : ""} onChange={e => setBatchInputs({ ...batchInputs, [item.id]: e.target.value === "" ? "" : Number(e.target.value) })} className={`flex-1 text-right font-black text-2xl h-14 ${isChanged ? 'border-amber-400 bg-amber-50 focus-visible:ring-amber-500' : 'border-blue-300'}`} /><span className="font-bold text-slate-500 text-lg w-8">{item.unit}</span></div>
+                </div>
+              ) : (
+                <div className="flex justify-between items-end mt-2 pt-2 border-t">
+                  <div className="font-black text-3xl text-blue-900">{item.current_qty.toLocaleString(undefined, { maximumFractionDigits: 1 })} <span className="text-base font-normal text-slate-500">{item.unit}</span></div>
+                  {canEdit && <Button variant="outline" size="sm" onClick={() => setAdjustmentModal({ isOpen: true, type: 'item', targetId: item.id, targetName: item.name, currentQty: item.current_qty, unit: item.unit })} className="border-blue-300 text-blue-700 bg-blue-50 shadow-sm"><ClipboardEdit className="w-4 h-4 mr-1" /> 棚卸</Button>}
+                </div>
+              )}
+              <div className="flex justify-between items-start mt-3 pt-3 border-t border-slate-100">
+                <div className="text-[10px] text-slate-500 space-y-1 font-bold"><div>規格: {item.unit_size}{item.unit}</div><div>単価: ¥{item.unit_price.toLocaleString()}</div></div>
+>>>>>>> 7cb1146ccc922b7ea9403be2907e38a8cbb1656b
                 <div className="text-right">
                   <div className="text-xs font-bold text-emerald-700 mb-0.5">規格数: {specCount.toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>
                   <div className="text-sm font-black text-blue-700 bg-blue-50 px-2 py-0.5 rounded">総額: ¥{Math.floor(totalPrice).toLocaleString()}</div>
@@ -371,8 +420,14 @@ export default function InventoryPage() {
       ...materials.map(i => ({ id: i.id, category: '資材', name: i.name, qty: `${i.current_qty.toLocaleString()} ${i.unit}`, rawQty: i.current_qty, expiry: undefined })),
       ...productStocks.map(p => {
         const u = p.products.unit_per_cs || 24;
+<<<<<<< HEAD
         const cs = Math.floor(p.total_pieces / (u * 2));
         const pc = Math.floor((p.total_pieces % (u * 2)) / 2);
+=======
+        // ★修正: 印刷用の計算もパックベースに
+        const cs = Math.floor(p.total_pieces / u);
+        const pc = p.total_pieces % u;
+>>>>>>> 7cb1146ccc922b7ea9403be2907e38a8cbb1656b
         return {
           id: p.lot_code, category: '製品 (Lot別)',
           name: `${p.products.name} (${p.products.variant_name})`,
@@ -499,8 +554,14 @@ export default function InventoryPage() {
                   const unit_per_cs = stock.products.unit_per_cs || 24; const isExpired = new Date(stock.expiry_date) < new Date();
                   const displayTotal = isBatchMode && batchInputs[stock.id] !== undefined ? Number(batchInputs[stock.id]) : stock.total_pieces;
 
+<<<<<<< HEAD
                   const cs = Math.floor(displayTotal / (unit_per_cs * 2));
                   const piece = Math.floor((displayTotal % (unit_per_cs * 2)) / 2);
+=======
+                  // ★修正: PC版 棚卸一覧の表示計算
+                  const cs = Math.floor(displayTotal / unit_per_cs);
+                  const piece = displayTotal % unit_per_cs;
+>>>>>>> 7cb1146ccc922b7ea9403be2907e38a8cbb1656b
                   const isChanged = isBatchMode && batchInputs[stock.id] !== undefined && Number(batchInputs[stock.id]) !== stock.total_pieces;
 
                   return (
@@ -512,7 +573,12 @@ export default function InventoryPage() {
                         {isBatchMode ? (
                           <div className="flex items-center justify-end gap-1">
                             {isChanged && <span className="text-xs text-amber-600 font-bold mr-2 bg-amber-100 rounded px-1">変更</span>}
+<<<<<<< HEAD
                             <Input type="number" inputMode="numeric" min="0" value={cs} onChange={e => setBatchInputs({ ...batchInputs, [stock.id]: (Number(e.target.value === "" ? 0 : e.target.value) * (unit_per_cs * 2)) + (piece * 2) })} className={`w-20 text-right font-bold h-9 ${isChanged ? 'border-amber-400 bg-white ring-2 ring-amber-200' : 'border-blue-300'}`} />
+=======
+                            {/* ★修正: 棚卸入力(cs)をパックに変換 */}
+                            <Input type="number" inputMode="numeric" min="0" value={cs} onChange={e => setBatchInputs({ ...batchInputs, [stock.id]: (Number(e.target.value === "" ? 0 : e.target.value) * unit_per_cs) + piece })} className={`w-20 text-right font-bold h-9 ${isChanged ? 'border-amber-400 bg-white ring-2 ring-amber-200' : 'border-blue-300'}`} />
+>>>>>>> 7cb1146ccc922b7ea9403be2907e38a8cbb1656b
                             <span className="text-xs text-slate-500 font-bold">c/s</span>
                           </div>
                         ) : <span className="font-black text-2xl text-blue-900">{cs.toLocaleString()} <span className="text-sm font-normal text-slate-500">c/s</span></span>}
@@ -520,13 +586,18 @@ export default function InventoryPage() {
                       <TableCell className="text-right">
                         {isBatchMode ? (
                           <div className="flex items-center justify-end gap-1">
+<<<<<<< HEAD
                             <Input type="number" inputMode="numeric" min="0" max={unit_per_cs - 1} value={piece} onChange={e => setBatchInputs({ ...batchInputs, [stock.id]: (cs * (unit_per_cs * 2)) + (Number(e.target.value === "" ? 0 : e.target.value) * 2) })} className={`w-16 text-right font-bold h-9 ${isChanged ? 'border-amber-400 bg-white ring-2 ring-amber-200' : 'border-blue-300'}`} />
+=======
+                            {/* ★修正: 棚卸入力(p)をパックに変換。最大入力可能数は unit_per_cs - 1 パックまで */}
+                            <Input type="number" inputMode="numeric" min="0" max={unit_per_cs - 1} value={piece} onChange={e => setBatchInputs({ ...batchInputs, [stock.id]: (cs * unit_per_cs) + Number(e.target.value === "" ? 0 : e.target.value) })} className={`w-16 text-right font-bold h-9 ${isChanged ? 'border-amber-400 bg-white ring-2 ring-amber-200' : 'border-blue-300'}`} />
+>>>>>>> 7cb1146ccc922b7ea9403be2907e38a8cbb1656b
                             <span className="text-xs text-slate-500 font-bold">p</span>
                           </div>
                         ) : <span className="font-bold text-lg text-slate-600">{piece} <span className="text-xs font-normal text-slate-400">p</span></span>}
                       </TableCell>
                       <TableCell className="text-center pr-4">
-                        {canEdit && <Button disabled={isBatchMode} variant="outline" size="sm" onClick={() => setAdjustmentModal({ isOpen: true, type: 'product', targetId: stock.id, targetName: `${stock.products.name} (${stock.lot_code})`, currentQty: stock.total_pieces, unit: 'ピース(総数)', lotCode: stock.lot_code, productId: stock.product_id })} className="gap-1 border-blue-200 text-blue-700 hover:bg-blue-50"><ClipboardEdit className="w-3 h-3" /> 個別棚卸</Button>}
+                        {canEdit && <Button disabled={isBatchMode} variant="outline" size="sm" onClick={() => setAdjustmentModal({ isOpen: true, type: 'product', targetId: stock.id, targetName: `${stock.products.name} (${stock.lot_code})`, currentQty: stock.total_pieces, unit: 'パック(総数)', lotCode: stock.lot_code, productId: stock.product_id })} className="gap-1 border-blue-200 text-blue-700 hover:bg-blue-50"><ClipboardEdit className="w-3 h-3" /> 個別棚卸</Button>}
                       </TableCell>
                     </TableRow>
                   );
@@ -538,8 +609,14 @@ export default function InventoryPage() {
             {productStocks.map((stock) => {
               const unit_per_cs = stock.products.unit_per_cs || 24; const isExpired = new Date(stock.expiry_date) < new Date();
               const displayTotal = isBatchMode && batchInputs[stock.id] !== undefined ? Number(batchInputs[stock.id]) : stock.total_pieces;
+<<<<<<< HEAD
               const cs = Math.floor(displayTotal / (unit_per_cs * 2));
               const piece = Math.floor((displayTotal % (unit_per_cs * 2)) / 2);
+=======
+              // ★修正: スマホ版の表示計算
+              const cs = Math.floor(displayTotal / unit_per_cs);
+              const piece = displayTotal % unit_per_cs;
+>>>>>>> 7cb1146ccc922b7ea9403be2907e38a8cbb1656b
               const isChanged = isBatchMode && batchInputs[stock.id] !== undefined && Number(batchInputs[stock.id]) !== stock.total_pieces;
 
               return (
@@ -556,16 +633,23 @@ export default function InventoryPage() {
                     <div className="bg-white p-3 rounded-lg border shadow-inner flex flex-col gap-2">
                       <div className="flex justify-between items-center text-sm font-bold text-slate-600"><span>実数入力</span>{isChanged && <span className="text-xs text-amber-700 bg-amber-100 px-2 py-0.5 rounded font-black">変更あり</span>}</div>
                       <div className="flex items-center gap-3">
+<<<<<<< HEAD
                         <Input type="number" inputMode="numeric" min="0" value={cs} onChange={e => setBatchInputs({ ...batchInputs, [stock.id]: (Number(e.target.value === "" ? 0 : e.target.value) * (unit_per_cs * 2)) + (piece * 2) })} className={`flex-1 text-right font-black text-2xl h-14 ${isChanged ? 'border-amber-400 bg-amber-50 focus-visible:ring-amber-500' : 'border-blue-300'}`} />
                         <span className="font-bold text-slate-500 text-lg w-8">c/s</span>
                         <Input type="number" inputMode="numeric" min="0" max={unit_per_cs - 1} value={piece} onChange={e => setBatchInputs({ ...batchInputs, [stock.id]: (cs * (unit_per_cs * 2)) + (Number(e.target.value === "" ? 0 : e.target.value) * 2) })} className={`flex-1 text-right font-black text-2xl h-14 ${isChanged ? 'border-amber-400 bg-amber-50 focus-visible:ring-amber-500' : 'border-blue-300'}`} />
+=======
+                        {/* ★修正: スマホ版の棚卸入力 */}
+                        <Input type="number" inputMode="numeric" min="0" value={cs} onChange={e => setBatchInputs({ ...batchInputs, [stock.id]: (Number(e.target.value === "" ? 0 : e.target.value) * unit_per_cs) + piece })} className={`flex-1 text-right font-black text-2xl h-14 ${isChanged ? 'border-amber-400 bg-amber-50 focus-visible:ring-amber-500' : 'border-blue-300'}`} />
+                        <span className="font-bold text-slate-500 text-lg w-8">c/s</span>
+                        <Input type="number" inputMode="numeric" min="0" max={unit_per_cs - 1} value={piece} onChange={e => setBatchInputs({ ...batchInputs, [stock.id]: (cs * unit_per_cs) + Number(e.target.value === "" ? 0 : e.target.value) })} className={`flex-1 text-right font-black text-2xl h-14 ${isChanged ? 'border-amber-400 bg-amber-50 focus-visible:ring-amber-500' : 'border-blue-300'}`} />
+>>>>>>> 7cb1146ccc922b7ea9403be2907e38a8cbb1656b
                         <span className="font-bold text-slate-500 text-lg w-4">p</span>
                       </div>
                     </div>
                   ) : (
                     <div className="flex justify-between items-end mt-2 pt-2 border-t">
                       <div className="font-black text-3xl text-blue-900">{cs} <span className="text-sm font-normal text-slate-500">c/s</span> <span className="text-xl text-slate-700 ml-1">{piece}</span><span className="text-xs font-normal text-slate-400">p</span></div>
-                      {canEdit && <Button variant="outline" size="sm" onClick={() => setAdjustmentModal({ isOpen: true, type: 'product', targetId: stock.id, targetName: `${stock.products.name} (${stock.lot_code})`, currentQty: stock.total_pieces, unit: 'ピース(総数)', lotCode: stock.lot_code, productId: stock.product_id })} className="border-blue-300 text-blue-700 bg-blue-50 shadow-sm"><ClipboardEdit className="w-4 h-4 mr-1" /> 棚卸</Button>}
+                      {canEdit && <Button variant="outline" size="sm" onClick={() => setAdjustmentModal({ isOpen: true, type: 'product', targetId: stock.id, targetName: `${stock.products.name} (${stock.lot_code})`, currentQty: stock.total_pieces, unit: 'パック(総数)', lotCode: stock.lot_code, productId: stock.product_id })} className="border-blue-300 text-blue-700 bg-blue-50 shadow-sm"><ClipboardEdit className="w-4 h-4 mr-1" /> 棚卸</Button>}
                     </div>
                   )}
                 </Card>
@@ -575,6 +659,10 @@ export default function InventoryPage() {
         </TabsContent>
 
         <TabsContent value="forecast" className="mt-0">
+<<<<<<< HEAD
+=======
+          {/* ...省略なし... */}
+>>>>>>> 7cb1146ccc922b7ea9403be2907e38a8cbb1656b
           <div className="bg-white border rounded-lg shadow-sm">
             <div className="p-4 border-b bg-blue-50/30 flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div><h2 className="font-bold text-blue-900 flex items-center gap-2"><TrendingUp className="w-5 h-5 text-blue-600" />原料・資材 在庫推移予測 (30日間)</h2><p className="text-xs text-slate-600 mt-1">製造計画(未着手)と入荷予定から、将来の在庫不足を自動シミュレーションします。</p></div>
@@ -607,6 +695,10 @@ export default function InventoryPage() {
         </TabsContent>
       </Tabs>
 
+<<<<<<< HEAD
+=======
+      {/* --- 既存Lotの新規登録用モーダル --- */}
+>>>>>>> 7cb1146ccc922b7ea9403be2907e38a8cbb1656b
       <Dialog open={newStockModalOpen} onOpenChange={setNewStockModalOpen}>
         <DialogContent className="max-w-md bg-white p-6 rounded-xl">
           <DialogHeader><DialogTitle className="flex items-center gap-2 text-blue-800"><Plus className="w-5 h-5" /> 既存(過去)Lotの新規登録</DialogTitle></DialogHeader>
@@ -642,6 +734,10 @@ export default function InventoryPage() {
         </DialogContent>
       </Dialog>
 
+<<<<<<< HEAD
+=======
+      {/* --- 個別棚卸入力モーダル --- */}
+>>>>>>> 7cb1146ccc922b7ea9403be2907e38a8cbb1656b
       <Dialog open={adjustmentModal.isOpen} onOpenChange={(open) => !open && setAdjustmentModal({ ...adjustmentModal, isOpen: false })}>
         <DialogContent className="w-[95vw] max-w-md bg-white p-4 md:p-6 rounded-2xl">
           <DialogHeader><DialogTitle className="flex items-center gap-2"><ClipboardEdit className="w-5 h-5 text-blue-600" /> 実地棚卸の入力</DialogTitle></DialogHeader>

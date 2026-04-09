@@ -7,7 +7,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+<<<<<<< HEAD
 import { Badge } from "@/components/ui/badge"; // ★これを追加しました！
+=======
+>>>>>>> 7cb1146ccc922b7ea9403be2907e38a8cbb1656b
 import { Database, Edit2, Loader2, Save, Lock, Plus, FileText } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 

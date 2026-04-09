@@ -79,6 +79,7 @@ export default function OrdersPage() {
         return {
           id: item.id,
           productId: item.product_id,
+          // ★修正: quantityはパック数。パック数 ÷ unitPerCs でケース数を出す
           cs: Math.floor(item.quantity / unitPerCs),
           p: item.quantity % unitPerCs,
           selectedName: item.products?.name || ""
@@ -145,6 +146,10 @@ export default function OrdersPage() {
     const selectedProduct = products.find(p => p.id === detail.productId);
     if (!selectedProduct) return;
 
+<<<<<<< HEAD
+=======
+    // ★修正: パック数(p) × 2個 = 総個数(productionPcs)
+>>>>>>> 7cb1146ccc922b7ea9403be2907e38a8cbb1656b
     const totalPacks = (csVal * selectedProduct.unit_per_cs) + pVal;
     const productionPcs = totalPacks * 2;
     const productionKg = productionPcs / selectedProduct.unit_per_kg;
@@ -154,8 +159,12 @@ export default function OrdersPage() {
       const equivalentCs = totalPacks / selectedProduct.unit_per_cs;
       const reqQty = bom.basis_type === 'production_qty' ? productionKg * bom.usage_rate : equivalentCs * bom.usage_rate;
 
+<<<<<<< HEAD
       // ★修正: 配列から安全に取り出す
       const currentStock = bom.items.item_stocks && bom.items.item_stocks.length > 0 ? bom.items.item_stocks[0].quantity : 0;
+=======
+      const currentStock = Array.isArray(bom.items.item_stocks) ? (bom.items.item_stocks[0]?.quantity || 0) : (bom.items.item_stocks?.quantity || 0);
+>>>>>>> 7cb1146ccc922b7ea9403be2907e38a8cbb1656b
 
       if (!simResult[bom.item_id]) {
         simResult[bom.item_id] = { name: bom.items.name, unit: bom.unit, required: 0, stock: currentStock, isShort: false };
@@ -179,6 +188,10 @@ export default function OrdersPage() {
 
       const upserts = validDetails.map((detail, i) => {
         const selectedProduct = products.find(p => p.id === detail.productId);
+<<<<<<< HEAD
+=======
+        // ★修正: DBに保存するのは「パック数」
+>>>>>>> 7cb1146ccc922b7ea9403be2907e38a8cbb1656b
         const totalPacks = (Number(detail.cs) * (selectedProduct?.unit_per_cs || 24)) + Number(detail.p);
         return {
           id: detail.id || `${baseGroupId}-${i}`,
@@ -293,6 +306,10 @@ export default function OrdersPage() {
               </div>
             </div>
           </div>
+<<<<<<< HEAD
+=======
+
+>>>>>>> 7cb1146ccc922b7ea9403be2907e38a8cbb1656b
           <DialogFooter className="mt-6 border-t pt-4 flex flex-col sm:flex-row gap-4 sm:justify-between shrink-0">
             {editingGroup ? (
               <Button onClick={() => handleDeleteOrder(editingGroup)} disabled={isProcessing} variant="outline" className="w-full sm:w-auto border-red-200 text-red-600 hover:bg-red-50 font-bold"><Trash2 className="h-4 w-4 mr-2" />注文書全体をキャンセル(削除)</Button>
@@ -339,6 +356,7 @@ export default function OrdersPage() {
                 <div className="divide-y divide-slate-100">
                   {group.items.map((item) => {
                     const unitPerCs = item.products?.unit_per_cs || 24;
+                    // ★修正: リストの表示時 (quantityはパック数)
                     const displayCs = Math.floor(item.quantity / unitPerCs);
                     const displayP = item.quantity % unitPerCs;
 
