@@ -16,7 +16,6 @@ type Customer = { id: string; name: string };
 type Product = { id: string; name: string; variant_name: string; unit_per_kg: number; unit_per_cs: number };
 type BomWithStock = { id: string; product_id: string; item_id: string; usage_rate: number; unit: string; basis_type: string; items: { name: string; item_type: string; item_stocks?: [{ quantity: number }] } };
 
-// ★追加: グループ化した注文の型
 type OrderGroup = { groupId: string; customerName: string; customerId: string; customerOrderNo: string; orderDate: string; plannedShipDate: string; desiredShipDate: string; status: string; items: Order[]; };
 
 export default function OrdersPage() {
@@ -29,7 +28,6 @@ export default function OrdersPage() {
   const [isOpen, setIsOpen] = useState(false);
   const [editingGroup, setEditingGroup] = useState<OrderGroup | null>(null);
 
-  // ★変更: cs と p に空文字 ("") を許容するように型を修正（入力しやすさ改善のため）
   const [formData, setFormData] = useState<{
     date: string; plannedShipDate: string; shipDate: string; customerId: string; customerOrderNo: string;
     details: { id?: string; productId: string; cs: number | ""; p: number | ""; selectedName: string }[];
@@ -46,7 +44,6 @@ export default function OrdersPage() {
     const { data: pData } = await supabase.from("products").select("*");
 
     if (oData) {
-      // ★変更: 注文書の単位(同じ登録タイミング)でグループ化する
       const groups: Record<string, OrderGroup> = {};
       oData.forEach((o: any) => {
         const parts = o.id.split('-');
@@ -59,7 +56,6 @@ export default function OrdersPage() {
           };
         }
         groups[gId].items.push(o);
-        // より進行しているステータスをグループのステータスに優先反映
         if (o.status === 'in_production' || o.status === 'shipped') groups[gId].status = o.status;
       });
       setOrderGroups(Object.values(groups));
@@ -74,19 +70,17 @@ export default function OrdersPage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  // ★変更: 開くのは「注文書グループ」単位
   const openModal = (group?: OrderGroup) => {
     if (group) {
       setEditingGroup(group);
-
-      // グループ内の全明細をフォームにセットする
       const details = group.items.map(item => {
         const unitPerCs = item.products?.unit_per_cs || 24;
         return {
-          id: item.id, // ★既存のIDを保持（UPDATE用）
+          id: item.id,
           productId: item.product_id,
+          // ★修正: quantityはパック数。パック数 ÷ unitPerCs でケース数を出す
           cs: Math.floor(item.quantity / unitPerCs),
-          p: Math.floor((item.quantity % unitPerCs) / 2),
+          p: item.quantity % unitPerCs,
           selectedName: item.products?.name || ""
         };
       });
@@ -117,38 +111,21 @@ export default function OrdersPage() {
     });
   };
 
-  // --- ★変更: BOMと在庫を確実に取得・結合する処理 ---
   useEffect(() => {
     const productIds = formData.details.map(d => d.productId).filter(Boolean);
     if (productIds.length === 0) { setBoms([]); return; }
 
     const fetchBoms = async () => {
       setIsSimulating(true);
-      // 1. まずBOMと、品目情報(items)を取得
-      const { data: bomData } = await supabase.from("bom").select(`
-        *,
-        items ( id, name, item_type )
-      `).in("product_id", productIds);
+      const { data: bomData } = await supabase.from("bom").select(`*, items ( id, name, item_type )`).in("product_id", productIds);
 
       if (bomData && bomData.length > 0) {
-        // 2. BOMに含まれる item_id のリストを作成
         const itemIds = bomData.map((b: any) => b.item_id);
+        const { data: stockData } = await supabase.from("item_stocks").select("item_id, quantity").in("item_id", itemIds);
 
-        // 3. 該当する item_stocks (実在庫数) を確実に別クエリで取得
-        const { data: stockData } = await supabase.from("item_stocks")
-          .select("item_id, quantity")
-          .in("item_id", itemIds);
-
-        // 4. BOMデータに在庫数をマージ（合体）する
         const mergedBoms = bomData.map((b: any) => {
           const stock = stockData?.find((s: any) => s.item_id === b.item_id);
-          return {
-            ...b,
-            items: {
-              ...b.items,
-              item_stocks: stock ? [{ quantity: stock.quantity }] : []
-            }
-          };
+          return { ...b, items: { ...b.items, item_stocks: stock ? [{ quantity: stock.quantity }] : [] } };
         });
         setBoms(mergedBoms as any);
       } else {
@@ -168,15 +145,17 @@ export default function OrdersPage() {
     const selectedProduct = products.find(p => p.id === detail.productId);
     if (!selectedProduct) return;
 
-    const productionPcs = (csVal * selectedProduct.unit_per_cs) + (pVal * 2);
+    // ★修正: パック数(p) × 2個 = 総個数(productionPcs)
+    const totalPacks = (csVal * selectedProduct.unit_per_cs) + pVal;
+    const productionPcs = totalPacks * 2;
     const productionKg = productionPcs / selectedProduct.unit_per_kg;
 
     const productBoms = boms.filter(b => b.product_id === detail.productId);
     productBoms.forEach(bom => {
-      const equivalentCs = productionPcs / selectedProduct.unit_per_cs;
+      const equivalentCs = totalPacks / selectedProduct.unit_per_cs;
       const reqQty = bom.basis_type === 'production_qty' ? productionKg * bom.usage_rate : equivalentCs * bom.usage_rate;
 
-      const currentStock = bom.items.item_stocks?.[0]?.quantity || 0;
+      const currentStock = Array.isArray(bom.items.item_stocks) ? (bom.items.item_stocks[0]?.quantity || 0) : (bom.items.item_stocks?.quantity || 0);
 
       if (!simResult[bom.item_id]) {
         simResult[bom.item_id] = { name: bom.items.name, unit: bom.unit, required: 0, stock: currentStock, isShort: false };
@@ -186,34 +165,30 @@ export default function OrdersPage() {
     });
   });
 
-  // --- ★変更: グループ単位での保存処理 ---
   const handleSaveOrder = async () => {
     if (!formData.customerId || !formData.shipDate || !formData.plannedShipDate) { alert("出荷予定日や着予定日などの必須項目を入力してください。"); return; }
 
-    // ★変更: 空文字対応のため Number() で判定
     const validDetails = formData.details.filter(d => d.productId && (Number(d.cs) > 0 || Number(d.p) > 0));
     if (validDetails.length === 0) { alert("少なくとも1つの製品と数量を正しく入力してください。"); return; }
 
     setIsProcessing(true);
     try {
       const dateStr = formData.date.replace(/-/g, "");
-      // 編集時は既存のグループIDを維持し、新規時は新しいIDを生成
       const random3 = editingGroup ? editingGroup.groupId.split('-')[2] : Math.floor(Math.random() * 1000).toString().padStart(3, "0");
       const baseGroupId = `ORD-${dateStr}-${random3}`;
 
-      // Insert or Update するデータの作成
       const upserts = validDetails.map((detail, i) => {
         const selectedProduct = products.find(p => p.id === detail.productId);
-        const totalQuantity = (Number(detail.cs) * (selectedProduct?.unit_per_cs || 24)) + (Number(detail.p) * 2);
+        // ★修正: DBに保存するのは「パック数」
+        const totalPacks = (Number(detail.cs) * (selectedProduct?.unit_per_cs || 24)) + Number(detail.p);
         return {
-          id: detail.id || `${baseGroupId}-${i}`, // 既存IDがあればそれを使い、なければ新しく振る
+          id: detail.id || `${baseGroupId}-${i}`,
           order_date: formData.date, planned_ship_date: formData.plannedShipDate, desired_ship_date: formData.shipDate,
           customer_id: formData.customerId, customer_order_no: formData.customerOrderNo || null,
-          product_id: detail.productId, quantity: totalQuantity, status: "received"
+          product_id: detail.productId, quantity: totalPacks, status: "received"
         };
       });
 
-      // 編集時の「消えた行」の処理（行を削除して保存した場合）
       if (editingGroup) {
         const existingIds = editingGroup.items.map(item => item.id);
         const currentIds = upserts.map(u => u.id);
@@ -231,13 +206,11 @@ export default function OrdersPage() {
     setIsProcessing(false);
   };
 
-  // --- ★変更: グループ単位での削除処理 ---
   const handleDeleteOrder = async (group: OrderGroup) => {
     if (group.status !== 'received') { alert("製造中または出荷済みのデータが含まれているため削除できません。\n（先に製造計画や出荷を取り消してください）"); return; }
     if (!confirm("この注文書（登録されているすべての製品）を本当にキャンセル（削除）しますか？")) return;
 
     setIsProcessing(true);
-    // グループ内のすべてのIDを一括で削除
     const idsToDelete = group.items.map(item => item.id);
     const { error } = await supabase.from("orders").delete().in("id", idsToDelete);
 
@@ -252,16 +225,13 @@ export default function OrdersPage() {
           <h1 className="text-2xl font-bold flex items-center gap-2 text-slate-800"><ShoppingCart className="h-6 w-6 text-blue-600" />受注管理</h1>
           {!canEdit && <Badge variant="outline" className="bg-slate-100 text-slate-500 border-slate-300 px-3 py-1 shadow-sm"><Lock className="w-3 h-3 mr-1" /> 閲覧モード</Badge>}
         </div>
-        {/* ボタンはDialogTriggerを使わずに分離 */}
         {canEdit && <Button onClick={() => openModal()} className="bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-sm"><Plus className="h-4 w-4 mr-2" /> 新規受注登録</Button>}
       </div>
 
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
-        {/* ★変更: overflow-y-autoを外し、flex-colを指定。全体の高さを固定する */}
         <DialogContent className="max-w-[95vw] lg:max-w-6xl bg-white max-h-[95vh] flex flex-col p-6">
           <DialogHeader className="shrink-0"><DialogTitle className="text-xl flex items-center gap-2"><ShoppingCart className="h-5 w-5" /> {editingGroup ? "受注内容の編集 / キャンセル" : "新規受注の登録 (複数入力可)"}</DialogTitle></DialogHeader>
 
-          {/* ▼▼▼ ここから下だけをスクロール可能にする ▼▼▼ */}
           <div className="flex-1 overflow-y-auto pr-4 -mr-4 py-4">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <div className="space-y-4 bg-slate-50 p-6 rounded-lg border shadow-inner">
@@ -287,9 +257,8 @@ export default function OrdersPage() {
                       <div className="w-full sm:flex-1"><label className="block text-xs font-bold mb-1 text-slate-500">1. 製品名</label><select className="w-full border-slate-200 rounded p-2 text-sm bg-white" value={detail.selectedName} onChange={e => updateDetail(idx, 'selectedName', e.target.value)}><option value="">選択</option>{Array.from(new Set(products.map(p => p.name))).map(name => <option key={name} value={name}>{name}</option>)}</select></div>
                       <div className="w-full sm:flex-1"><label className="block text-xs font-bold mb-1 text-slate-500">2. 種類(味)</label><select className="w-full border-slate-200 rounded p-2 text-sm bg-white disabled:bg-slate-50" value={detail.productId} onChange={e => updateDetail(idx, 'productId', e.target.value)} disabled={!detail.selectedName}><option value="">選択</option>{products.filter(p => p.name === detail.selectedName).map(p => <option key={p.id} value={p.id}>{p.variant_name}</option>)}</select></div>
 
-                      {/* ★変更: onChangeで空文字を許容し、勝手に0になるのを防ぐ */}
                       <div className="w-full sm:w-20"><label className="block text-xs font-bold mb-1 text-slate-500">3. c/s</label><Input type="number" min="0" value={detail.cs !== undefined ? detail.cs : ""} onChange={e => updateDetail(idx, 'cs', e.target.value === "" ? "" : Number(e.target.value))} className="font-bold text-right h-9" /></div>
-                      <div className="w-full sm:w-20"><label className="block text-xs font-bold mb-1 text-slate-500">4. p</label><Input type="number" min="0" value={detail.p !== undefined ? detail.p : ""} onChange={e => updateDetail(idx, 'p', e.target.value === "" ? "" : Number(e.target.value))} className="font-bold text-right h-9" /></div>
+                      <div className="w-full sm:w-20"><label className="block text-xs font-bold mb-1 text-slate-500">4. p(パック)</label><Input type="number" min="0" value={detail.p !== undefined ? detail.p : ""} onChange={e => updateDetail(idx, 'p', e.target.value === "" ? "" : Number(e.target.value))} className="font-bold text-right h-9" /></div>
 
                       {formData.details.length > 1 && (
                         <Button variant="ghost" size="icon" onClick={() => removeDetailRow(idx)} className="h-9 w-9 text-red-500 hover:bg-red-50 absolute -right-2 -top-2 bg-white rounded-full border shadow-sm"><X className="h-4 w-4" /></Button>
@@ -325,9 +294,7 @@ export default function OrdersPage() {
               </div>
             </div>
           </div>
-          {/* ▲▲▲ ここまでをスクロール可能にする ▲▲▲ */}
 
-          {/* ★変更: フッターを固定（shrink-0）にする */}
           <DialogFooter className="mt-6 border-t pt-4 flex flex-col sm:flex-row gap-4 sm:justify-between shrink-0">
             {editingGroup ? (
               <Button onClick={() => handleDeleteOrder(editingGroup)} disabled={isProcessing} variant="outline" className="w-full sm:w-auto border-red-200 text-red-600 hover:bg-red-50 font-bold"><Trash2 className="h-4 w-4 mr-2" />注文書全体をキャンセル(削除)</Button>
@@ -340,7 +307,6 @@ export default function OrdersPage() {
         </DialogContent>
       </Dialog>
 
-      {/* --- ★変更: グループ化された注文書カード表示 --- */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {orderGroups.map((group) => {
           const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -358,7 +324,7 @@ export default function OrdersPage() {
                 <div className="flex justify-between items-start pr-12">
                   <div>
                     <div className="text-xs text-slate-500 mb-1 flex items-center gap-2">
-                       {group.groupId.slice(-6)}
+                      {group.groupId.slice(-6)}
                       {group.customerOrderNo && <Badge variant="outline" className="text-[10px] bg-white text-slate-500 py-0"><FileText className="w-3 h-3 mr-1" /> 発注: {group.customerOrderNo}</Badge>}
                     </div>
                     <CardTitle className="text-lg text-slate-800 line-clamp-1" title={group.customerName}>{group.customerName}</CardTitle>
@@ -373,11 +339,11 @@ export default function OrdersPage() {
 
               <CardContent className="p-0 bg-white rounded-b-lg">
                 <div className="divide-y divide-slate-100">
-                  {/* グループ内の全製品をリスト表示 */}
                   {group.items.map((item) => {
                     const unitPerCs = item.products?.unit_per_cs || 24;
+                    // ★修正: リストの表示時 (quantityはパック数)
                     const displayCs = Math.floor(item.quantity / unitPerCs);
-                    const displayP = Math.floor((item.quantity % unitPerCs) / 2);
+                    const displayP = item.quantity % unitPerCs;
 
                     return (
                       <div key={item.id} className="px-4 py-3 flex justify-between items-center text-sm">
