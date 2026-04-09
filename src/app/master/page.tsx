@@ -7,10 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-<<<<<<< HEAD
-import { Badge } from "@/components/ui/badge"; // ★これを追加しました！
-=======
->>>>>>> 7cb1146ccc922b7ea9403be2907e38a8cbb1656b
+import { Badge } from "@/components/ui/badge"; 
 import { Database, Edit2, Loader2, Save, Lock, Plus, FileText } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -303,9 +300,6 @@ export default function MasterPage() {
         </TabsContent>
       </Tabs>
 
-      {/* =======================================================================
-          新規登録モーダル (タブに応じて入力フォームが変わる)
-          ======================================================================= */}
       <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
         <DialogContent className="w-[95vw] max-w-md bg-white p-4 md:p-6 rounded-xl">
           <DialogHeader>
@@ -319,7 +313,6 @@ export default function MasterPage() {
           </DialogHeader>
 
           <div className="space-y-4 mt-4">
-            {/* 製品マスタ用のフォーム */}
             {currentTab === "products" && (
               <>
                 <div><label className="block text-xs font-bold text-slate-500 mb-1">製品 ID <span className="text-red-500">*</span></label><Input value={newData.id || ""} onChange={e => setNewData({ ...newData, id: e.target.value })} placeholder="例: SB" /></div>
@@ -332,7 +325,6 @@ export default function MasterPage() {
               </>
             )}
 
-            {/* 品目マスタ用のフォーム */}
             {currentTab === "items" && (
               <>
                 <div><label className="block text-xs font-bold text-slate-500 mb-1">品目 ID <span className="text-red-500">*</span></label><Input value={newData.id || ""} onChange={e => setNewData({ ...newData, id: e.target.value })} placeholder="例: ITEM-001" /></div>
@@ -355,7 +347,6 @@ export default function MasterPage() {
               </>
             )}
 
-            {/* BOM用のフォーム */}
             {currentTab === "bom" && (
               <>
                 <div><label className="block text-xs font-bold text-slate-500 mb-1">対象製品 <span className="text-red-500">*</span></label>
@@ -384,7 +375,6 @@ export default function MasterPage() {
               </>
             )}
 
-            {/* 出荷先マスタ用のフォーム */}
             {currentTab === "customers" && (
               <>
                 <div><label className="block text-xs font-bold text-slate-500 mb-1">出荷先 ID <span className="text-red-500">*</span></label><Input value={newData.id || ""} onChange={e => setNewData({ ...newData, id: e.target.value })} placeholder="例: CUST-001" /></div>
