@@ -7,17 +7,51 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Truck, Loader2, Save, Box, AlertCircle, ArrowRight, Lock, Printer, ArrowLeft, FileText } from "lucide-react";
+import { Truck, Loader2, Save, AlertCircle, ArrowRight, Lock, Printer, ArrowLeft, FileText } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 
-type Order = { id: string; order_date: string; planned_ship_date: string; desired_ship_date: string; quantity: number; status: string; product_id: string; customer_order_no?: string; customers?: { name: string }; products?: { name: string; variant_name: string; unit_per_cs: number }; };
-type ProductStock = { id: string; lot_code: string; product_id: string; total_pieces: number; expiry_date: string; products?: { name: string; variant_name: string; unit_per_cs: number }; };
+type Order = {
+  id: string; order_date: string; planned_ship_date: string; desired_ship_date: string;
+  quantity: number; status: string; product_id: string; customer_order_no?: string;
+  customers?: { name: string };
+  products?: { name: string; variant_name: string; unit_per_cs: number };
+};
+type ProductStock = {
+  id: string; lot_code: string; product_id: string; total_pieces: number; expiry_date: string;
+  products?: { name: string; variant_name: string; unit_per_cs: number };
+};
+type Shipment = {
+  id: string; order_id: string; ship_date: string; lot_code: string;
+  qty_cs: number; qty_piece: number; status: string;
+  orders?: {
+    product_id: string; desired_ship_date: string; planned_ship_date: string; customer_order_no?: string;
+    customers?: { name: string };
+    products?: { name: string; variant_name: string; unit_per_cs: number }
+  }
+};
 
-type Shipment = { id: string; order_id: string; ship_date: string; lot_code: string; qty_cs: number; qty_piece: number; status: string; orders?: { product_id: string; desired_ship_date: string; planned_ship_date: string; customer_order_no?: string; customers?: { name: string }; products?: { name: string; variant_name: string; unit_per_cs: number } } };
+type OrderGroup = {
+  groupId: string; customerOrderNo: string; plannedShipDate: string; desiredShipDate: string;
+  customerName: string; items: Order[]; isLate: boolean;
+};
+type PrintGroup = {
+  orderIdPrefix: string; customerName: string; customerOrderNo: string;
+  shipDate: string; desiredShipDate: string; shipments: Shipment[];
+};
 
-type OrderGroup = { groupId: string; customerOrderNo: string; plannedShipDate: string; desiredShipDate: string; customerName: string; items: Order[]; isLate: boolean; };
+// ============================================================
+// ユーティリティ
+// ============================================================
+function pcsToDisplay(totalPcs: number, unitPerCs: number): { cs: number; p: number } {
+  const cs = Math.floor(totalPcs / unitPerCs);
+  const remainder = totalPcs % unitPerCs;
+  const p = Math.floor(remainder / 2);
+  return { cs, p };
+}
 
-type PrintGroup = { orderIdPrefix: string; customerName: string; customerOrderNo: string; shipDate: string; desiredShipDate: string; shipments: Shipment[]; };
+function displayToPcs(cs: number, p: number, unitPerCs: number): number {
+  return (cs * unitPerCs) + (p * 2);
+}
 
 export default function ShipmentsPage() {
   const { canEdit } = useAuth();
@@ -45,7 +79,9 @@ export default function ShipmentsPage() {
 
       data.forEach((o: any) => {
         const parts = o.id.split('-');
-        const gId = o.customer_order_no ? `${o.customer_order_no}_${o.customer_id}_${o.planned_ship_date}` : (parts.length > 3 ? parts.slice(0, 3).join('-') : o.id);
+        const gId = o.customer_order_no
+          ? `${o.customer_order_no}_${o.customer_id}_${o.planned_ship_date}`
+          : (parts.length > 3 ? parts.slice(0, 3).join('-') : o.id);
 
         if (!groups[gId]) {
           groups[gId] = {
@@ -66,16 +102,22 @@ export default function ShipmentsPage() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { fetchOrders(); setShipDate(new Date().toISOString().split('T')[0]); }, [fetchOrders]);
+  useEffect(() => {
+    fetchOrders();
+    setShipDate(new Date().toISOString().split('T')[0]);
+  }, [fetchOrders]);
 
   const handleSelectGroup = async (group: OrderGroup) => {
-    setSelectedGroup(group); setShipInputs({}); setIsOrderCompleted(true);
+    setSelectedGroup(group);
+    setShipInputs({});
+    setIsOrderCompleted(true);
     const productIds = group.items.map(i => i.product_id);
     setShipDate(group.plannedShipDate || new Date().toISOString().split('T')[0]);
 
     const { data, error } = await supabase.from("product_stocks").select("*, products(name, variant_name, unit_per_cs)").in("product_id", productIds).gt("total_pieces", 0).order("expiry_date", { ascending: true });
     if (error) {
-      console.error("在庫取得エラー:", error); alert("在庫の取得に失敗しました。");
+      console.error("在庫取得エラー:", error);
+      alert("在庫の取得に失敗しました。");
     } else if (data) {
       const gStocks: Record<string, ProductStock[]> = {};
       (data as ProductStock[]).forEach(s => {
@@ -87,7 +129,10 @@ export default function ShipmentsPage() {
   };
 
   const handleInputChange = (stockId: string, field: 'cs' | 'p', value: string) => {
-    setShipInputs(prev => ({ ...prev, [stockId]: { ...prev[stockId], [field]: value === "" ? "" : Number(value) } }));
+    setShipInputs(prev => ({
+      ...prev,
+      [stockId]: { ...prev[stockId], [field]: value === "" ? "" : Number(value) }
+    }));
   };
 
   const handleSaveShipment = async () => {
@@ -97,7 +142,10 @@ export default function ShipmentsPage() {
 
     setIsProcessing(true);
     try {
-      const stockUpdates = []; const stockDeletes = []; const shipmentInserts = []; const historyInserts = [];
+      const stockUpdates = [];
+      const stockDeletes = [];
+      const shipmentInserts = [];
+      const historyInserts = [];
       const completedOrderIds = [];
 
       for (const order of selectedGroup.items) {
@@ -107,35 +155,77 @@ export default function ShipmentsPage() {
 
         for (const stock of stocksForProduct) {
           const input = shipInputs[stock.id];
-          const inputCs = Number(input?.cs) || 0; const inputP = Number(input?.p) || 0;
+          const inputCs = Number(input?.cs) || 0;
+          const inputP = Number(input?.p) || 0;
 
-          // ★修正: 純粋なパック数で計算
-          const shipTotalPacks = (inputCs * unitPerCs) + inputP;
+          const shipTotalPcs = displayToPcs(inputCs, inputP, unitPerCs);
 
-          if (shipTotalPacks > 0) {
-            if (shipTotalPacks > stock.total_pieces) { alert(`Lot[${stock.lot_code}] の出荷数が現在庫を超えています！`); setIsProcessing(false); return; }
+          if (shipTotalPcs > 0) {
+            if (shipTotalPcs > stock.total_pieces) {
+              alert(`Lot[${stock.lot_code}] の出荷数(${shipTotalPcs}個)が現在庫(${stock.total_pieces}個)を超えています！`);
+              setIsProcessing(false);
+              return;
+            }
 
-            const newTotalPieces = stock.total_pieces - shipTotalPacks;
-            if (newTotalPieces <= 0) stockDeletes.push(stock.id);
-            else stockUpdates.push({ id: stock.id, total_pieces: newTotalPieces });
+            const newTotalPcs = stock.total_pieces - shipTotalPcs;
+            if (newTotalPcs <= 0) {
+              stockDeletes.push(stock.id);
+            } else {
+              // ★修正：エラー回避のため、UPSERT時に必須カラムをすべて含めるようにしました
+              stockUpdates.push({
+                id: stock.id,
+                lot_code: stock.lot_code,
+                product_id: stock.product_id,
+                expiry_date: stock.expiry_date,
+                total_pieces: newTotalPcs
+              });
+            }
 
             const random4 = Math.floor(Math.random() * 10000).toString().padStart(4, "0");
-            shipmentInserts.push({ id: `SHP-${shipDate.replace(/-/g, "")}-${random4}`, order_id: order.id, ship_date: shipDate, lot_code: stock.lot_code, qty_cs: inputCs, qty_piece: inputP, status: "shipped" });
-            historyInserts.push({ product_id: stock.product_id, lot_code: stock.lot_code, before_qty: stock.total_pieces, after_qty: newTotalPieces, reason: `出荷 (${selectedGroup.customerName}様宛)` });
+            shipmentInserts.push({
+              id: `SHP-${shipDate.replace(/-/g, "")}-${random4}`,
+              order_id: order.id,
+              ship_date: shipDate,
+              lot_code: stock.lot_code,
+              qty_cs: inputCs,
+              qty_piece: inputP,
+              status: "shipped"
+            });
+            historyInserts.push({
+              product_id: stock.product_id,
+              lot_code: stock.lot_code,
+              before_qty: stock.total_pieces,
+              after_qty: newTotalPcs,
+              reason: `出荷 (${selectedGroup.customerName}様宛)`
+            });
 
-            totalShippedForThisOrder += shipTotalPacks;
+            totalShippedForThisOrder += shipTotalPcs;
           }
         }
         if (totalShippedForThisOrder > 0 || isOrderCompleted) completedOrderIds.push(order.id);
       }
 
-      if (stockUpdates.length > 0) await supabase.from("product_stocks").upsert(stockUpdates, { onConflict: 'id' });
-      if (stockDeletes.length > 0) await supabase.from("product_stocks").delete().in('id', stockDeletes);
-      if (shipmentInserts.length > 0) await supabase.from("shipments").insert(shipmentInserts);
-      if (historyInserts.length > 0) await supabase.from("inventory_adjustments").insert(historyInserts);
+      // ★修正：エラーが発生した際に必ず検知（throw）するように修正しました
+      if (stockUpdates.length > 0) {
+        const { error } = await supabase.from("product_stocks").upsert(stockUpdates, { onConflict: 'id' });
+        if (error) throw error;
+      }
+      if (stockDeletes.length > 0) {
+        const { error } = await supabase.from("product_stocks").delete().in('id', stockDeletes);
+        if (error) throw error;
+      }
+      if (shipmentInserts.length > 0) {
+        const { error } = await supabase.from("shipments").insert(shipmentInserts);
+        if (error) throw error;
+      }
+      if (historyInserts.length > 0) {
+        const { error } = await supabase.from("inventory_adjustments").insert(historyInserts);
+        if (error) throw error;
+      }
 
       if (isOrderCompleted && completedOrderIds.length > 0) {
-        await supabase.from("orders").update({ status: "shipped" }).in("id", completedOrderIds);
+        const { error } = await supabase.from("orders").update({ status: "shipped" }).in("id", completedOrderIds);
+        if (error) throw error;
         setSelectedGroup(null);
       } else {
         handleSelectGroup(selectedGroup);
@@ -143,7 +233,10 @@ export default function ShipmentsPage() {
 
       alert("出荷処理が完了し、在庫から正確に減算されました！");
       fetchOrders();
-    } catch (err: any) { alert("エラー: " + err.message); }
+    } catch (err: any) {
+      console.error(err);
+      alert("エラー: " + err.message);
+    }
     setIsProcessing(false);
   };
 
@@ -153,15 +246,15 @@ export default function ShipmentsPage() {
     shipments.forEach(s => {
       const parts = s.order_id.split('-');
       const oPrefix = parts.length > 3 ? parts.slice(0, 3).join('-') : s.order_id;
-      const gKey = s.orders?.customer_order_no ? `${s.orders.customer_order_no}_${s.ship_date}` : `${oPrefix}_${s.ship_date}`;
+      const gKey = s.orders?.customer_order_no
+        ? `${s.orders.customer_order_no}_${s.ship_date}`
+        : `${oPrefix}_${s.ship_date}`;
 
       if (!pGroups[gKey]) {
         pGroups[gKey] = {
-          orderIdPrefix: oPrefix,
-          customerName: s.orders?.customers?.name || "",
+          orderIdPrefix: oPrefix, customerName: s.orders?.customers?.name || "",
           customerOrderNo: s.orders?.customer_order_no || "",
-          shipDate: s.ship_date,
-          desiredShipDate: s.orders?.desired_ship_date || "",
+          shipDate: s.ship_date, desiredShipDate: s.orders?.desired_ship_date || "",
           shipments: []
         };
       }
@@ -189,22 +282,16 @@ export default function ShipmentsPage() {
           chunkedPages.map((pageChunks, pageIdx) => (
             <div key={pageIdx} className={`w-[210mm] min-h-[297mm] bg-white p-10 print:p-0 shadow-xl print:shadow-none text-black font-sans box-border flex flex-col justify-between gap-8 ${pageIdx < chunkedPages.length - 1 ? 'page-break mb-8 print:mb-0' : ''}`}>
               {pageChunks.map((group, gIdx) => {
-
                 const productSummary: Record<string, { name: string, variant: string, totalCs: number, totalP: number, lots: Shipment[] }> = {};
                 group.shipments.forEach(s => {
                   const pId = s.orders?.product_id || "";
                   if (!productSummary[pId]) {
-                    productSummary[pId] = {
-                      name: s.orders?.products?.name || "",
-                      variant: s.orders?.products?.variant_name || "",
-                      totalCs: 0, totalP: 0, lots: []
-                    };
+                    productSummary[pId] = { name: s.orders?.products?.name || "", variant: s.orders?.products?.variant_name || "", totalCs: 0, totalP: 0, lots: [] };
                   }
                   productSummary[pId].totalCs += s.qty_cs;
                   productSummary[pId].totalP += s.qty_piece;
                   productSummary[pId].lots.push(s);
                 });
-
                 const rows = Object.values(productSummary);
 
                 return (
@@ -240,20 +327,16 @@ export default function ShipmentsPage() {
                         {rows.map((row, i) => {
                           const lot1 = row.lots[0];
                           const lot2 = row.lots[1];
-
                           return (
                             <tr key={i} className="h-6">
                               <td className="border border-black text-center text-[10px] font-bold px-0.5 truncate overflow-hidden whitespace-nowrap">
                                 {i === 0 ? (group.customerOrderNo || group.orderIdPrefix.slice(-4)) : ""}
                               </td>
                               <td className="border border-black px-1 font-bold text-[11px] truncate overflow-hidden whitespace-nowrap">{row.variant || row.name}</td>
-
                               <td className="border border-black text-center font-bold text-[11px] tracking-wider truncate overflow-hidden">{lot1 ? lot1.lot_code : ""}</td>
                               <td className="border border-black text-right pr-1 font-bold leading-none text-xs">{lot1 ? <>{lot1.qty_cs}<span className="text-[9px] font-normal ml-0.5">c/s</span>{lot1.qty_piece > 0 && <span className="text-[9px] font-normal ml-0.5">{lot1.qty_piece}p</span>}</> : ""}</td>
-
                               <td className="border border-black text-center font-bold text-[11px] tracking-wider truncate overflow-hidden">{lot2 ? lot2.lot_code : ""}</td>
                               <td className="border border-black text-right pr-1 font-bold leading-none text-xs">{lot2 ? <>{lot2.qty_cs}<span className="text-[9px] font-normal ml-0.5">c/s</span>{lot2.qty_piece > 0 && <span className="text-[9px] font-normal ml-0.5">{lot2.qty_piece}p</span>}</> : ""}</td>
-
                               <td className="border border-black text-center font-black text-sm bg-slate-50 print:bg-transparent">
                                 {row.totalCs}<span className="text-[9px] font-normal ml-0.5">c/s</span>
                                 {row.totalP > 0 && <span className="ml-1">{row.totalP}<span className="text-[9px] font-normal ml-0.5">p</span></span>}
@@ -262,17 +345,17 @@ export default function ShipmentsPage() {
                           );
                         })}
                         {Array.from({ length: Math.max(0, 10 - rows.length) }).map((_, i) => (
-                          <tr key={`empty-${i}`} className="h-6">
-                            <td className="border border-black"></td><td className="border border-black"></td><td className="border border-black"></td><td className="border border-black"></td><td className="border border-black"></td><td className="border border-black"></td><td className="border border-black"></td>
-                          </tr>
+                          <tr key={`empty-${i}`} className="h-6"><td className="border border-black"></td><td className="border border-black"></td><td className="border border-black"></td><td className="border border-black"></td><td className="border border-black"></td><td className="border border-black"></td><td className="border border-black"></td></tr>
                         ))}
                         <tr><td colSpan={7} className="border border-black h-8 px-2 py-1 text-xs align-top bg-slate-50 print:bg-transparent">備考</td></tr>
                       </tbody>
                     </table>
                   </div>
-                )
+                );
               })}
-              {Array.from({ length: 3 - pageChunks.length }).map((_, idx) => (<div key={`empty-${idx}`} className="flex-1 flex flex-col border-b-2 border-dashed border-slate-400 pb-4 last:border-b-0 opacity-10"><div className="w-full h-full border-2 border-black rounded-md"></div></div>))}
+              {Array.from({ length: 3 - pageChunks.length }).map((_, idx) => (
+                <div key={`empty-${idx}`} className="flex-1 flex flex-col border-b-2 border-dashed border-slate-400 pb-4 last:border-b-0 opacity-10"><div className="w-full h-full border-2 border-black rounded-md"></div></div>
+              ))}
             </div>
           ))
         )}
@@ -287,12 +370,17 @@ export default function ShipmentsPage() {
           <h1 className="text-2xl font-bold flex items-center gap-2 text-slate-800"><Truck className="h-6 w-6 text-blue-600" /> 出荷管理 (引当・実績登録)</h1>
           {!canEdit && <Badge variant="outline" className="bg-slate-100 text-slate-500 border-slate-300 px-3 py-1 shadow-sm hidden md:flex"><Lock className="w-3 h-3 mr-1" /> 閲覧モード</Badge>}
         </div>
-        <Button onClick={() => setViewMode('print')} className="bg-slate-800 hover:bg-slate-900 text-white font-bold shadow-sm h-12 md:h-10"><FileText className="h-4 w-4 mr-2" /> 出荷実績から管理票(PDF)を作成</Button>
+        <Button onClick={() => setViewMode('print')} className="bg-slate-800 hover:bg-slate-900 text-white font-bold shadow-sm h-12 md:h-10">
+          <FileText className="h-4 w-4 mr-2" /> 出荷実績から管理票(PDF)を作成
+        </Button>
       </div>
 
       <div className="flex flex-col lg:flex-row gap-6">
+        {/* 受注グループ選択 */}
         <div className="w-full lg:w-[35%]">
-          <h2 className="font-bold text-slate-700 mb-3 flex items-center gap-2"><span className="bg-blue-100 text-blue-800 rounded-full w-6 h-6 flex items-center justify-center text-xs">1</span> 出荷予定の注文書を選択</h2>
+          <h2 className="font-bold text-slate-700 mb-3 flex items-center gap-2">
+            <span className="bg-blue-100 text-blue-800 rounded-full w-6 h-6 flex items-center justify-center text-xs">1</span> 出荷予定の注文書を選択
+          </h2>
           <div className="space-y-3 h-[calc(100vh-150px)] overflow-y-auto pr-2 pb-10">
             {orderGroups.map((group) => {
               const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -315,17 +403,16 @@ export default function ShipmentsPage() {
                     <div className="divide-y divide-slate-100">
                       {group.items.map((item) => {
                         const unitPerCs = item.products?.unit_per_cs || 24;
-                        // ★修正: リスト側の全体数量表示 (パック数で計算)
-                        const displayCs = Math.floor(item.quantity / unitPerCs);
-                        const displayP = item.quantity % unitPerCs;
-
+                        // quantity は総個数 → 表示用 cs, p
+                        const { cs, p } = pcsToDisplay(item.quantity, unitPerCs);
                         return (
                           <div key={item.id} className="px-4 py-2.5 flex justify-between items-center text-sm bg-white">
                             <div className="font-bold text-slate-700 truncate mr-2">
                               {item.products?.name} <span className="text-xs font-normal text-slate-500">({item.products?.variant_name})</span>
                             </div>
                             <div className="font-black text-lg text-blue-600 shrink-0">
-                              {displayCs} <span className="text-[10px] font-normal text-slate-500">c/s</span> {displayP > 0 && <span className="text-slate-700 ml-1">{displayP} <span className="text-[10px] font-normal text-slate-500">p</span></span>}
+                              {cs} <span className="text-[10px] font-normal text-slate-500">c/s</span>
+                              {p > 0 && <span className="text-slate-700 ml-1">{p} <span className="text-[10px] font-normal text-slate-500">p</span></span>}
                             </div>
                           </div>
                         );
@@ -340,12 +427,14 @@ export default function ShipmentsPage() {
           </div>
         </div>
 
+        {/* 引当入力 */}
         <div className="w-full lg:w-[65%] flex flex-col gap-4">
-          <h2 className="font-bold text-slate-700 mb-1 flex items-center gap-2"><span className="bg-blue-100 text-blue-800 rounded-full w-6 h-6 flex items-center justify-center text-xs">2</span> 出荷するLotと数量を入力</h2>
+          <h2 className="font-bold text-slate-700 mb-1 flex items-center gap-2">
+            <span className="bg-blue-100 text-blue-800 rounded-full w-6 h-6 flex items-center justify-center text-xs">2</span> 出荷するLotと数量を入力
+          </h2>
           <Card className="border-slate-200 shadow-sm overflow-hidden shrink-0">
             {selectedGroup ? (
               <div className="p-0 flex flex-col h-[calc(100vh-180px)]">
-
                 <div className="bg-slate-50 p-4 border-b border-slate-200 shrink-0">
                   <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-2">
                     <div>
@@ -364,14 +453,15 @@ export default function ShipmentsPage() {
                   {selectedGroup.items.map(order => {
                     const productStocks = groupedStocks[order.product_id] || [];
                     const unitPerCs = order.products?.unit_per_cs || 24;
-                    // ★修正: 注文数
-                    const orderCs = Math.floor(order.quantity / unitPerCs);
-                    const orderP = order.quantity % unitPerCs;
 
-                    // ★修正: 入力した数量の総個数(パック数)を計算
-                    const totalPacksForThisProduct = productStocks.reduce((sum, stock) => sum + ((Number(shipInputs[stock.id]?.cs) || 0) * unitPerCs) + (Number(shipInputs[stock.id]?.p) || 0), 0);
-                    const displayCs = Math.floor(totalPacksForThisProduct / unitPerCs);
-                    const displayP = totalPacksForThisProduct % unitPerCs;
+                    // 注文総個数 → cs, p
+                    const { cs: orderCs, p: orderP } = pcsToDisplay(order.quantity, unitPerCs);
+
+                    // 入力済み総個数の合計
+                    const totalInputPcs = productStocks.reduce((sum, stock) => {
+                      return sum + displayToPcs(Number(shipInputs[stock.id]?.cs) || 0, Number(shipInputs[stock.id]?.p) || 0, unitPerCs);
+                    }, 0);
+                    const { cs: inputCs, p: inputP } = pcsToDisplay(totalInputPcs, unitPerCs);
 
                     return (
                       <div key={order.id} className="bg-white border rounded-lg shadow-sm overflow-hidden">
@@ -379,37 +469,61 @@ export default function ShipmentsPage() {
                           <div className="font-bold text-blue-900">{order.products?.name} <span className="text-xs text-blue-600 font-normal">({order.products?.variant_name})</span></div>
                           <div className="flex items-center gap-4">
                             <div className="text-xs font-bold text-slate-500">注文: <span className="text-sm font-black text-slate-800">{orderCs} c/s {orderP > 0 && `${orderP} p`}</span></div>
-                            <div className={`text-xs font-bold px-2 py-1 rounded ${totalPacksForThisProduct === order.quantity ? 'bg-green-100 text-green-700' : totalPacksForThisProduct > 0 ? 'bg-amber-100 text-amber-700' : 'bg-slate-200 text-slate-500'}`}>
-                              入力計: {displayCs} c/s {displayP > 0 && `${displayP} p`}
+                            <div className={`text-xs font-bold px-2 py-1 rounded ${totalInputPcs === order.quantity ? 'bg-green-100 text-green-700' : totalInputPcs > 0 ? 'bg-amber-100 text-amber-700' : 'bg-slate-200 text-slate-500'}`}>
+                              入力計: {inputCs} c/s {inputP > 0 && `${inputP} p`}
                             </div>
                           </div>
                         </div>
 
                         <Table className="text-sm">
-                          <TableHeader className="bg-slate-50"><TableRow><TableHead className="pl-4 w-[25%]">Lot番号</TableHead><TableHead className="w-[20%]">期限</TableHead><TableHead className="text-right bg-slate-50">現在庫</TableHead><TableHead className="text-center bg-blue-50 border-l">出荷数入力</TableHead></TableRow></TableHeader>
+                          <TableHeader className="bg-slate-50">
+                            <TableRow>
+                              <TableHead className="pl-4 w-[25%]">Lot番号</TableHead>
+                              <TableHead className="w-[20%]">期限</TableHead>
+                              <TableHead className="text-right bg-slate-50">現在庫</TableHead>
+                              <TableHead className="text-center bg-blue-50 border-l">出荷数入力</TableHead>
+                            </TableRow>
+                          </TableHeader>
                           <TableBody>
                             {productStocks.map(stock => {
-                              // ★修正: DBの在庫(パック数)をケースとパックに変換して表示
-                              const stockCs = Math.floor(stock.total_pieces / unitPerCs);
-                              const stockPiece = stock.total_pieces % unitPerCs;
+                              // total_pieces は総個数 → 表示用 cs, p
+                              const { cs: stockCs, p: stockP } = pcsToDisplay(stock.total_pieces, unitPerCs);
 
-                              const inputCs = Number(shipInputs[stock.id]?.cs) || 0;
-                              const inputP = Number(shipInputs[stock.id]?.p) || 0;
-                              // ★修正: 入力されたケースとパックをパック数に変換して超過判定
-                              const inputTotalPacks = (inputCs * unitPerCs) + inputP;
+                              const inputCsVal = Number(shipInputs[stock.id]?.cs) || 0;
+                              const inputPVal = Number(shipInputs[stock.id]?.p) || 0;
+                              // 入力値を総個数に変換して超過判定
+                              const inputTotalPcs = displayToPcs(inputCsVal, inputPVal, unitPerCs);
 
-                              const isOver = inputTotalPacks > stock.total_pieces;
-                              const isSelected = inputTotalPacks > 0;
+                              const isOver = inputTotalPcs > stock.total_pieces;
+                              const isSelected = inputTotalPcs > 0;
 
                               return (
                                 <TableRow key={stock.id} className={`${isSelected ? "bg-blue-50/30" : ""} transition-colors`}>
                                   <TableCell className="font-black text-slate-700 pl-4 tracking-wider">{stock.lot_code}</TableCell>
                                   <TableCell className="text-slate-500 text-xs">{new Date(stock.expiry_date).toLocaleDateString()}</TableCell>
-                                  <TableCell className="text-right bg-slate-50/50"><span className="font-bold text-slate-700">{stockCs} <span className="text-[10px] font-normal">c/s</span></span><span className="ml-1 font-bold text-slate-500">{stockPiece} <span className="text-[9px] font-normal">p</span></span></TableCell>
+                                  <TableCell className="text-right bg-slate-50/50">
+                                    <span className="font-bold text-slate-700">{stockCs} <span className="text-[10px] font-normal">c/s</span></span>
+                                    <span className="ml-1 font-bold text-slate-500">{stockP} <span className="text-[9px] font-normal">p</span></span>
+                                  </TableCell>
                                   <TableCell className={`border-l p-1 ${isOver ? 'bg-red-50' : 'bg-blue-50/10'}`}>
                                     <div className="flex items-center justify-center gap-1">
                                       {canEdit ? (
-                                        <><div className="flex items-end"><Input type="number" min="0" value={shipInputs[stock.id]?.cs ?? ""} onChange={e => handleInputChange(stock.id, 'cs', e.target.value)} className={`w-14 text-right font-bold h-8 px-1 bg-white ${isOver ? 'border-red-400' : 'border-blue-300'}`} /><span className="text-[10px] text-slate-500 pb-0.5 pl-0.5">c/s</span></div><div className="flex items-end"><Input type="number" min="0" max={unitPerCs - 1} value={shipInputs[stock.id]?.p ?? ""} onChange={e => handleInputChange(stock.id, 'p', e.target.value)} className={`w-12 text-right font-bold h-8 px-1 bg-white ${isOver ? 'border-red-400' : 'border-blue-300'}`} /><span className="text-[10px] text-slate-500 pb-0.5 pl-0.5">p</span></div></>
+                                        <>
+                                          <div className="flex items-end">
+                                            <Input type="number" min="0" value={shipInputs[stock.id]?.cs ?? ""} onChange={e => handleInputChange(stock.id, 'cs', e.target.value)} className={`w-14 text-right font-bold h-8 px-1 bg-white ${isOver ? 'border-red-400' : 'border-blue-300'}`} />
+                                            <span className="text-[10px] text-slate-500 pb-0.5 pl-0.5">c/s</span>
+                                          </div>
+                                          <div className="flex items-end">
+                                            <Input
+                                              type="number" min="0"
+                                              max={Math.floor((unitPerCs - 1) / 2)}
+                                              value={shipInputs[stock.id]?.p ?? ""}
+                                              onChange={e => handleInputChange(stock.id, 'p', e.target.value)}
+                                              className={`w-12 text-right font-bold h-8 px-1 bg-white ${isOver ? 'border-red-400' : 'border-blue-300'}`}
+                                            />
+                                            <span className="text-[10px] text-slate-500 pb-0.5 pl-0.5">p</span>
+                                          </div>
+                                        </>
                                       ) : (<span className="text-xs text-slate-400">権限なし</span>)}
                                     </div>
                                     {isOver && <div className="text-[10px] text-red-600 font-bold text-center mt-1 leading-none">※在庫超過</div>}
@@ -417,7 +531,9 @@ export default function ShipmentsPage() {
                                 </TableRow>
                               );
                             })}
-                            {productStocks.length === 0 && <TableRow><TableCell colSpan={4} className="text-center py-4 text-xs text-slate-400 bg-slate-50">出荷可能な在庫がありません</TableCell></TableRow>}
+                            {productStocks.length === 0 && (
+                              <TableRow><TableCell colSpan={4} className="text-center py-4 text-xs text-slate-400 bg-slate-50">出荷可能な在庫がありません</TableCell></TableRow>
+                            )}
                           </TableBody>
                         </Table>
                       </div>
@@ -434,23 +550,32 @@ export default function ShipmentsPage() {
                       </label>
                       <Button
                         onClick={handleSaveShipment}
-                        disabled={isProcessing || Object.values(shipInputs).every(i => !i.cs && !i.p) || Object.keys(shipInputs).some(stockId => {
-                          const input = shipInputs[stockId];
-                          const stock = Object.values(groupedStocks).flat().find(s => s.id === stockId);
-                          if (!stock) return false;
-                          const unitPerCs = stock.products?.unit_per_cs || 24;
-                          const inputTotalPacks = ((Number(input.cs) || 0) * unitPerCs) + (Number(input.p) || 0);
-                          return inputTotalPacks > stock.total_pieces;
-                        })}
+                        disabled={isProcessing
+                          || Object.values(shipInputs).every(i => !i.cs && !i.p)
+                          || Object.keys(shipInputs).some(stockId => {
+                            const input = shipInputs[stockId];
+                            const stock = Object.values(groupedStocks).flat().find(s => s.id === stockId);
+                            if (!stock) return false;
+                            const unitPerCs = stock.products?.unit_per_cs || 24;
+                            return displayToPcs(Number(input.cs) || 0, Number(input.p) || 0, unitPerCs) > stock.total_pieces;
+                          })
+                        }
                         className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white font-bold h-12 px-8 shadow-sm"
                       >
                         {isProcessing ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <ArrowRight className="w-5 h-5 mr-2" />}一括で出荷を確定
                       </Button>
                     </div>
-                  ) : (<div className="text-slate-500 font-bold text-center"><Lock className="w-4 h-4 inline mr-1" /> 閲覧モードのため出荷処理はできません</div>)}
+                  ) : (
+                    <div className="text-slate-500 font-bold text-center"><Lock className="w-4 h-4 inline mr-1" /> 閲覧モードのため出荷処理はできません</div>
+                  )}
                 </div>
               </div>
-            ) : (<div className="p-16 text-center text-slate-400 flex flex-col items-center bg-slate-50"><Truck className="h-16 w-16 mb-4 opacity-30 text-blue-500 mx-auto" /><p className="text-xl font-bold text-slate-500">リストから注文書を選択してください</p></div>)}
+            ) : (
+              <div className="p-16 text-center text-slate-400 flex flex-col items-center bg-slate-50">
+                <Truck className="h-16 w-16 mb-4 opacity-30 text-blue-500 mx-auto" />
+                <p className="text-xl font-bold text-slate-500">リストから注文書を選択してください</p>
+              </div>
+            )}
           </Card>
         </div>
       </div>

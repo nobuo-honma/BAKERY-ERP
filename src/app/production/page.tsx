@@ -13,7 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useAuth } from "@/contexts/AuthContext";
 
 type Order = { id: string; order_date: string; desired_ship_date: string; planned_ship_date: string; quantity: number; status: string; product_id: string; customer_order_no?: string; customers?: { name: string }; products?: { name: string; variant_name: string; unit_per_kg: number; unit_per_cs: number }; plannedPieces: number; remainPieces: number; };
-type Plan = { id: string; order_id: string; product_id: string; production_date: string; production_kg: number; planned_cs: number; lot_code: string; expiry_date: string; status: string; notes?: string; products?: { name: string; variant_name: string; unit_per_cs?: number; unit_per_kg?: number }; actual_cs?: number; actual_piece?: number; };
+type Plan = { id: string; order_id: string; product_id: string; production_date: string; production_kg: number; planned_cs: number; planned_units: number; lot_code: string; expiry_date: string; status: string; notes?: string; products?: { name: string; variant_name: string; unit_per_cs?: number; unit_per_kg?: number }; actual_cs?: number; actual_piece?: number; };
 type Event = { id: string; event_date: string; title: string; notes?: string; };
 type Product = { id: string; name: string; variant_name: string; unit_per_kg: number; unit_per_cs: number; };
 
@@ -66,15 +66,15 @@ export default function ProductionPage() {
 
   const fetchData = useCallback(async (preserveSelectedId?: string) => {
     setLoading(true);
-    const { data: oData } = await supabase.from("orders").select("*, customers(name), products(name, variant_name, unit_per_kg, unit_per_cs), production_plans(planned_cs)").in("status", ["received", "in_production"]).order("planned_ship_date", { ascending: true });
+    const { data: oData } = await supabase.from("orders").select("*, customers(name), products(name, variant_name, unit_per_kg, unit_per_cs), production_plans(planned_cs, planned_units)").in("status", ["received", "in_production"]).order("planned_ship_date", { ascending: true });
     const { data: pData } = await supabase.from("production_plans").select("*, products(name, variant_name, unit_per_kg, unit_per_cs)").order("production_date", { ascending: false }).limit(30);
     const { data: prData } = await supabase.from("products").select("*");
 
     const processedOrders = (oData as any[])?.map(o => {
       const unitPerCs = o.products?.unit_per_cs || 24;
-      // ★修正: plannedPieces は パック数
-      const plannedPieces = o.production_plans ? o.production_plans.reduce((sum: number, p: any) => sum + (p.planned_cs * unitPerCs), 0) : 0;
-      const remainPieces = o.quantity - plannedPieces; // quantityもパック数
+      // ★修正: planned_units(総個数)で正確に計画済み数量を合算
+      const plannedPieces = o.production_plans ? o.production_plans.reduce((sum: number, p: any) => sum + (p.planned_units || (p.planned_cs * unitPerCs)), 0) : 0;
+      const remainPieces = o.quantity - plannedPieces; // quantity(総個数) - 計画済総個数
 
       return { ...o, plannedPieces, remainPieces };
     }).filter(o => o.remainPieces > 0) || [];
@@ -148,10 +148,9 @@ export default function ProductionPage() {
       setCalculatedExpiry(calculateExpiryDate(planDate));
       setCalculatedLot(generateLotNumber(planDate, pId, 1));
 
-      // ★修正: 個数をパックに直し、ケースを出す
-      const pcs = (planKg as number) * targetProduct.unit_per_kg; // 1kgあたりの個数
-      const packs = Math.floor(pcs / 2); // 2個で1パック
-      setCalculatedCs(Math.floor(packs / targetProduct.unit_per_cs));
+      // ★修正: 総個数からケース数を計算
+      const pcs = (planKg as number) * targetProduct.unit_per_kg;
+      setCalculatedCs(Math.floor(pcs / targetProduct.unit_per_cs));
     } else {
       setCalculatedLot(""); setCalculatedExpiry(""); setCalculatedCs(0);
     }
@@ -160,9 +159,8 @@ export default function ProductionPage() {
   const handleSelectOrder = (order: Order) => {
     setIsStockProduction(false); setStockProductId("");
     setSelectedOrder(order); setPlanDate(new Date().toISOString().split('T')[0]);
-    // ★修正: パック数から個数にして kg を出す
-    const requiredPcs = order.remainPieces * 2;
-    const requiredKg = Math.ceil(requiredPcs / order.products!.unit_per_kg);
+    // ★修正: 個数からkgを逆算
+    const requiredKg = Math.ceil(order.remainPieces / order.products!.unit_per_kg);
     setPlanKg(requiredKg); setPlanNotes("");
   };
 
@@ -175,9 +173,8 @@ export default function ProductionPage() {
   const resetInputForNextDay = (order: Order, currentDateStr: string) => {
     const nextDate = new Date(currentDateStr); nextDate.setDate(nextDate.getDate() + 1);
     setPlanDate(nextDate.toISOString().split('T')[0]);
-    // ★修正
-    const requiredPcs = order.remainPieces * 2;
-    const requiredKg = Math.ceil(requiredPcs / order.products!.unit_per_kg);
+    // ★修正: 個数からkgを逆算
+    const requiredKg = Math.ceil(order.remainPieces / order.products!.unit_per_kg);
     setPlanKg(requiredKg); setPlanNotes("");
   };
 
@@ -192,7 +189,8 @@ export default function ProductionPage() {
     const random3 = Math.floor(Math.random() * 1000).toString().padStart(3, "0");
     const newPlan = {
       id: `PLN-${dateStr}-${random3}`, order_id: isStockProduction ? null : selectedOrder?.id, product_id: pId,
-      production_date: planDate, production_kg: planKg, planned_units: (planKg as number) * targetProduct.unit_per_kg,
+      production_date: planDate, production_kg: planKg,
+      planned_units: (planKg as number) * targetProduct.unit_per_kg, // 総個数保存
       planned_cs: calculatedCs, lot_code: calculatedLot, expiry_date: calculatedExpiry, status: "planned", notes: planNotes
     };
 
@@ -226,12 +224,13 @@ export default function ProductionPage() {
   const handleUpdatePlan = async () => {
     if (!editingPlan || !editDate || !editKg) return;
     setIsProcessing(true);
-    const unit_per_kg = editingPlan.products?.unit_per_kg || 10; const unit_per_cs = editingPlan.products?.unit_per_cs || 24;
-    // ★修正: 編集時のパック数・ケース数計算
+    const unit_per_kg = editingPlan.products?.unit_per_kg || 10;
+    const unit_per_cs = editingPlan.products?.unit_per_cs || 24;
+    // ★修正: 編集時の総個数・ケース数計算
     const pcs = (editKg as number) * unit_per_kg;
-    const packs = Math.floor(pcs / 2);
-    const newCs = Math.floor(packs / unit_per_cs);
+    const newCs = Math.floor(pcs / unit_per_cs);
     const newExpiry = calculateExpiryDate(editDate); const newLot = generateLotNumber(editDate, editingPlan.product_id, 1);
+
     const updates = { production_date: editDate, production_kg: editKg, planned_cs: newCs, planned_units: pcs, lot_code: newLot, expiry_date: newExpiry, notes: editNotes };
     const { error } = await supabase.from("production_plans").update(updates).eq("id", editingPlan.id);
     if (!error) { setEditingPlan(null); if (viewMode === 'calendar') fetchCalendarPlans(); fetchData(); alert("計画を更新しました。"); } else alert("更新失敗: " + error.message);
@@ -263,20 +262,20 @@ export default function ProductionPage() {
 
       if (editingPlan.status === 'completed') {
         const unit_per_cs = editingPlan.products?.unit_per_cs || 24;
-        const actualCsVal = editingPlan.actual_cs || editingPlan.planned_cs;
-        const actualPieceVal = editingPlan.actual_piece || 0;
-        // ★修正: パック数で計算
-        const cancelPacks = (actualCsVal * unit_per_cs) + actualPieceVal;
+        const actualCsVal = editingPlan.actual_cs !== undefined ? editingPlan.actual_cs : editingPlan.planned_cs;
+        const actualPieceVal = editingPlan.actual_piece || 0; // 入力はパック数
+        // ★修正: 総個数(ピース数)でロールバック
+        const cancelPcs = (actualCsVal * unit_per_cs) + (actualPieceVal * 2);
 
         const { data: existingStock } = await supabase.from('product_stocks').select('id, total_pieces').eq('lot_code', editingPlan.lot_code).maybeSingle();
         if (existingStock) {
-          const newPacks = existingStock.total_pieces - cancelPacks;
-          if (newPacks <= 0) {
+          const newPcs = existingStock.total_pieces - cancelPcs;
+          if (newPcs <= 0) {
             await supabase.from('product_stocks').delete().eq('id', existingStock.id);
           } else {
-            await supabase.from('product_stocks').update({ total_pieces: newPacks }).eq('id', existingStock.id);
+            await supabase.from('product_stocks').update({ total_pieces: newPcs }).eq('id', existingStock.id);
           }
-          await supabase.from('inventory_adjustments').insert({ product_id: editingPlan.product_id, lot_code: editingPlan.lot_code, before_qty: existingStock.total_pieces, after_qty: newPacks, reason: `製造完了取り消しによる製品減算` });
+          await supabase.from('inventory_adjustments').insert({ product_id: editingPlan.product_id, lot_code: editingPlan.lot_code, before_qty: existingStock.total_pieces, after_qty: newPcs, reason: `製造完了取り消しによる製品減算` });
         }
       }
 
@@ -315,8 +314,10 @@ export default function ProductionPage() {
     e.stopPropagation();
     if (!editingPlan) return;
     if (editingPlan.status === 'completed') { alert("すでに完了処理されています。"); return; }
-    setActualCs(editingPlan.planned_cs);
-    setActualPiece(0);
+    const unit_per_cs = editingPlan.products?.unit_per_cs || 24;
+    const defaultPcs = editingPlan.planned_units || (editingPlan.planned_cs * unit_per_cs);
+    setActualCs(Math.floor(defaultPcs / unit_per_cs));
+    setActualPiece(Math.floor((defaultPcs % unit_per_cs) / 2));
     setCompletionModalOpen(true);
   };
 
@@ -324,31 +325,33 @@ export default function ProductionPage() {
     if (!editingPlan || actualCs === "") { alert("実績ケース数を入力してください。"); return; }
     if (editingPlan.status === 'completed') { alert("この計画はすでに完了済みです。"); return; }
     const aCs = Number(actualCs) || 0;
-    const aP = Number(actualPiece) || 0;
+    const aP = Number(actualPiece) || 0; // ユーザー入力はパック数
     if (aCs === 0 && aP === 0) { alert("実績数が0になっています。"); return; }
 
     setIsProcessing(true);
     try {
       const unit_per_cs = editingPlan.products?.unit_per_cs || 24;
-      // ★修正: パック数での計算
-      const totalActualPacks = (aCs * unit_per_cs) + aP;
+      // ★修正: 総個数(ピース)の計算
+      const totalActualPcs = (aCs * unit_per_cs) + (aP * 2);
 
       const productIdStr = editingPlan.product_id || "";
-      const keepQuantity = (productIdStr.startsWith('MA') || productIdStr.startsWith('FD')) ? 5 : 10;
-      const addPacksToStock = totalActualPacks - keepQuantity;
+      const keepQuantityPacks = (productIdStr.startsWith('MA') || productIdStr.startsWith('FD')) ? 5 : 10;
+      const keepQuantityPcs = keepQuantityPacks * 2;
 
-      if (addPacksToStock < 0) {
-        alert(`エラー: 実績数(${totalActualPacks}パック)が、キープサンプル必要数(${keepQuantity}パック)を下回っています。`);
+      const addPcsToStock = totalActualPcs - keepQuantityPcs;
+
+      if (addPcsToStock < 0) {
+        alert(`エラー: 実績数(${Math.floor(totalActualPcs / 2)}パック)が、キープサンプル必要数(${keepQuantityPacks}パック)を下回っています。`);
         setIsProcessing(false); return;
       }
 
       const { data: existingStock } = await supabase.from('product_stocks').select('id, total_pieces').eq('lot_code', editingPlan.lot_code).maybeSingle();
       if (existingStock) {
-        await supabase.from('product_stocks').update({ total_pieces: existingStock.total_pieces + addPacksToStock }).eq('id', existingStock.id);
-        await supabase.from('inventory_adjustments').insert({ product_id: editingPlan.product_id, lot_code: editingPlan.lot_code, before_qty: existingStock.total_pieces, after_qty: existingStock.total_pieces + addPacksToStock, reason: `製造完成 (サンプル引当後)` });
+        await supabase.from('product_stocks').update({ total_pieces: existingStock.total_pieces + addPcsToStock }).eq('id', existingStock.id);
+        await supabase.from('inventory_adjustments').insert({ product_id: editingPlan.product_id, lot_code: editingPlan.lot_code, before_qty: existingStock.total_pieces, after_qty: existingStock.total_pieces + addPcsToStock, reason: `製造完成 (サンプル引当後)` });
       } else {
-        await supabase.from('product_stocks').insert({ lot_code: editingPlan.lot_code, product_id: editingPlan.product_id, total_pieces: addPacksToStock, expiry_date: editingPlan.expiry_date });
-        await supabase.from('inventory_adjustments').insert({ product_id: editingPlan.product_id, lot_code: editingPlan.lot_code, before_qty: 0, after_qty: addPacksToStock, reason: `製造完成 (新規Lot / サンプル引当後)` });
+        await supabase.from('product_stocks').insert({ lot_code: editingPlan.lot_code, product_id: editingPlan.product_id, total_pieces: addPcsToStock, expiry_date: editingPlan.expiry_date });
+        await supabase.from('inventory_adjustments').insert({ product_id: editingPlan.product_id, lot_code: editingPlan.lot_code, before_qty: 0, after_qty: addPcsToStock, reason: `製造完成 (新規Lot / サンプル引当後)` });
       }
 
       const randomManageNo = `KS-${editingPlan.lot_code}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
@@ -356,7 +359,7 @@ export default function ProductionPage() {
         lot_code: editingPlan.lot_code,
         product_id: editingPlan.product_id,
         management_no: randomManageNo,
-        saved_quantity: keepQuantity,
+        saved_quantity: keepQuantityPacks,
         used_quantity: 0,
         production_date: editingPlan.production_date,
         expiry_date: editingPlan.expiry_date
@@ -378,7 +381,7 @@ export default function ProductionPage() {
       setEditingPlan(null);
       if (viewMode === 'calendar') fetchCalendarPlans();
       fetchData();
-      alert(`製造完了！\nキープサンプルを ${keepQuantity}パック 自動登録し、\n残りの実績を製品在庫に追加しました。`);
+      alert(`製造完了！\nキープサンプルを ${keepQuantityPacks}パック 自動登録し、\n残りの実績を製品在庫に追加しました。`);
 
     } catch (err: any) {
       console.error(err);
@@ -490,9 +493,12 @@ export default function ProductionPage() {
                               if (plan.status === 'in_progress') cardColor = "bg-amber-50 border-amber-300";
                               if (plan.status === 'completed') cardColor = "bg-green-50 border-green-300";
 
+                              const unitPerCs = plan.products?.unit_per_cs || 24;
                               const isCompleted = plan.status === 'completed';
-                              const displayCs = isCompleted ? (plan.actual_cs !== undefined ? plan.actual_cs : plan.planned_cs) : plan.planned_cs;
-                              const displayP = isCompleted ? (plan.actual_piece || 0) : 0;
+                              // ★修正: 総個数からc/sとpを再計算して表示
+                              const totalPcs = isCompleted ? ((plan.actual_cs !== undefined ? plan.actual_cs : plan.planned_cs) * unitPerCs + (plan.actual_piece || 0) * 2) : (plan.planned_units || (plan.planned_cs * unitPerCs));
+                              const displayCs = Math.floor(totalPcs / unitPerCs);
+                              const displayP = Math.floor((totalPcs % unitPerCs) / 2);
 
                               return (
                                 <div key={plan.id} onClick={(e) => canEdit && openEditDialog(e, plan)} className={`${cardColor} border rounded p-1.5 print:p-1 print:border-black print:bg-white text-xs leading-tight wrap-break-word relative group ${canEdit ? 'cursor-pointer hover:shadow-md transition-shadow' : ''}`}>
@@ -569,9 +575,12 @@ export default function ProductionPage() {
                         if (plan.status === 'in_progress') cardColor = "bg-amber-50 border-amber-300";
                         if (plan.status === 'completed') cardColor = "bg-green-50 border-green-300";
 
+                        const unitPerCs = plan.products?.unit_per_cs || 24;
                         const isCompleted = plan.status === 'completed';
-                        const displayCs = isCompleted ? (plan.actual_cs !== undefined ? plan.actual_cs : plan.planned_cs) : plan.planned_cs;
-                        const displayP = isCompleted ? (plan.actual_piece || 0) : 0;
+                        // ★修正
+                        const totalPcs = isCompleted ? ((plan.actual_cs !== undefined ? plan.actual_cs : plan.planned_cs) * unitPerCs + (plan.actual_piece || 0) * 2) : (plan.planned_units || (plan.planned_cs * unitPerCs));
+                        const displayCs = Math.floor(totalPcs / unitPerCs);
+                        const displayP = Math.floor((totalPcs % unitPerCs) / 2);
 
                         return (
                           <div key={plan.id} onClick={(e) => canEdit && openEditDialog(e, plan)} className={`${cardColor} border rounded p-2.5 text-xs shadow-sm relative group ${canEdit ? 'cursor-pointer' : ''}`}>
@@ -653,9 +662,11 @@ export default function ProductionPage() {
               <div className="space-y-3 h-[calc(100vh-200px)] overflow-y-auto pr-2 pb-10">
                 {orders.map((order) => {
                   const unitPerCs = order.products?.unit_per_cs || 24;
-                  // ★修正: パック数からの計算
+                  // ★修正: ピース数からの計算
                   const displayCs = Math.floor(order.remainPieces / unitPerCs);
-                  const displayP = order.remainPieces % unitPerCs;
+                  const displayP = Math.floor((order.remainPieces % unitPerCs) / 2);
+                  const totalCs = Math.floor(order.quantity / unitPerCs);
+                  const totalP = Math.floor((order.quantity % unitPerCs) / 2);
 
                   return (
                     <Card key={order.id} onClick={() => handleSelectOrder(order)} className={`cursor-pointer transition-all border-2 ${selectedOrder?.id === order.id ? "border-blue-500 bg-blue-50 shadow-md transform scale-[1.02]" : "border-slate-200 hover:border-blue-300"}`}>
@@ -663,7 +674,7 @@ export default function ProductionPage() {
                       <CardContent className="p-4 pt-2 text-sm text-slate-600 bg-white rounded-b-lg">
                         <div className="font-bold text-slate-800 mb-2">{order.products?.name} ({order.products?.variant_name})</div>
                         <div className="flex items-center justify-between border-t pt-2">
-                          <span className="text-xs text-slate-500">全体: {Math.floor(order.quantity / unitPerCs)} c/s {order.quantity % unitPerCs > 0 && `${order.quantity % unitPerCs} p`}</span>
+                          <span className="text-xs text-slate-500">全体: {totalCs} c/s {totalP > 0 && `${totalP} p`}</span>
                           <div className="flex items-baseline gap-1">
                             <span className="text-xs text-slate-500">未計画残数:</span>
                             <span className="font-black text-xl text-red-600">{displayCs}</span><span className="text-xs font-normal text-slate-500">c/s</span>
@@ -702,7 +713,7 @@ export default function ProductionPage() {
                               <div className="font-black text-2xl text-red-600">
                                 {/* ★修正 */}
                                 {Math.floor((selectedOrder?.remainPieces || 0) / (selectedOrder?.products?.unit_per_cs || 24))} <span className="text-sm font-normal text-slate-500">c/s</span>
-                                {(selectedOrder?.remainPieces || 0) % (selectedOrder?.products?.unit_per_cs || 24) > 0 && <span className="ml-1 text-xl">{(selectedOrder?.remainPieces || 0) % (selectedOrder?.products?.unit_per_cs || 24)} <span className="text-xs font-normal text-slate-500">p</span></span>}
+                                {Math.floor(((selectedOrder?.remainPieces || 0) % (selectedOrder?.products?.unit_per_cs || 24)) / 2) > 0 && <span className="ml-1 text-xl">{Math.floor(((selectedOrder?.remainPieces || 0) % (selectedOrder?.products?.unit_per_cs || 24)) / 2)} <span className="text-xs font-normal text-slate-500">p</span></span>}
                               </div>
                             </div>
                           </>
@@ -742,9 +753,12 @@ export default function ProductionPage() {
                       <TableHeader className="bg-slate-50"><TableRow><TableHead>予定日</TableHead><TableHead>Lot / 製品</TableHead><TableHead className="text-right">数量(c/s)</TableHead><TableHead className="text-center w-24">状態</TableHead><TableHead className="w-20 text-center">詳細</TableHead></TableRow></TableHeader>
                       <TableBody>
                         {plans.map(plan => {
+                          const unitPerCs = plan.products?.unit_per_cs || 24;
                           const isCompleted = plan.status === 'completed';
-                          const displayCs = isCompleted ? (plan.actual_cs !== undefined ? plan.actual_cs : plan.planned_cs) : plan.planned_cs;
-                          const displayP = isCompleted ? (plan.actual_piece || 0) : 0;
+                          // ★修正
+                          const totalPcs = isCompleted ? ((plan.actual_cs !== undefined ? plan.actual_cs : plan.planned_cs) * unitPerCs + (plan.actual_piece || 0) * 2) : (plan.planned_units || (plan.planned_cs * unitPerCs));
+                          const displayCs = Math.floor(totalPcs / unitPerCs);
+                          const displayP = Math.floor((totalPcs % unitPerCs) / 2);
 
                           return (
                             <TableRow key={plan.id}>
@@ -813,7 +827,7 @@ export default function ProductionPage() {
                   <div><label className="block text-xs font-bold text-slate-500 mb-1">製造予定日</label><Input type="date" value={editDate} onChange={e => setEditDate(e.target.value)} disabled={editingPlan.status !== 'planned' || !canEdit} className="h-10 md:h-9" /></div>
                   <div><label className="block text-xs font-bold text-slate-500 mb-1">製造量 (kg)</label><Input type="number" value={editKg} onChange={e => setEditKg(e.target.value === "" ? "" : Number(e.target.value))} disabled={editingPlan.status !== 'planned' || !canEdit} className="h-10 md:h-9 text-right font-bold text-lg" /></div>
                 </div>
-                <div className="text-xs text-right text-slate-500">予定ケース数: <span className="font-bold">{editingPlan.planned_cs} c/s</span></div>
+                <div className="text-xs text-right text-slate-500">予定ケース数: <span className="font-bold">{Math.floor((editingPlan.planned_units || (editingPlan.planned_cs * (editingPlan.products?.unit_per_cs || 24))) / (editingPlan.products?.unit_per_cs || 24))} c/s</span></div>
 
                 <div><label className="block text-xs font-bold text-slate-500 mb-1">備考</label><Input value={editNotes} onChange={e => setEditNotes(e.target.value)} disabled={editingPlan.status !== 'planned' || !canEdit} className="h-10 md:h-9" placeholder="備考を入力..." /></div>
 
@@ -850,7 +864,10 @@ export default function ProductionPage() {
             <div className="space-y-4 mt-4">
               <div className="bg-slate-50 p-4 rounded-lg text-center border">
                 <div className="text-xs text-slate-500 mb-1">予定ケース数</div>
-                <div className="text-2xl font-black text-slate-400 line-through">{editingPlan?.planned_cs} <span className="text-sm font-normal">c/s</span></div>
+                <div className="text-2xl font-black text-slate-400 line-through">
+                  {Math.floor((editingPlan?.planned_units || (editingPlan?.planned_cs! * (editingPlan?.products?.unit_per_cs || 24))) / (editingPlan?.products?.unit_per_cs || 24))}
+                  <span className="text-sm font-normal ml-1">c/s</span>
+                </div>
               </div>
 
               <div className="text-center">
@@ -859,18 +876,19 @@ export default function ProductionPage() {
                   <Input type="number" inputMode="numeric" min="0" autoFocus value={actualCs} onChange={e => setActualCs(e.target.value === "" ? "" : Number(e.target.value))} className="w-24 h-14 text-3xl font-black text-right border-blue-400 focus-visible:ring-blue-500 shadow-sm" />
                   <span className="font-bold text-slate-500">c/s</span>
                   {/* ★修正: 完了時の入力可能パック数 */}
-                  <Input type="number" inputMode="numeric" min="0" max={editingPlan?.products?.unit_per_cs ? editingPlan.products.unit_per_cs - 1 : 23} value={actualPiece} onChange={e => setActualPiece(e.target.value === "" ? "" : Number(e.target.value))} className="w-16 h-14 text-2xl font-bold text-right border-blue-400 focus-visible:ring-blue-500 shadow-sm ml-2" />
+                  <Input type="number" inputMode="numeric" min="0" max={editingPlan?.products?.unit_per_cs ? (editingPlan.products.unit_per_cs / 2) - 1 : 11} value={actualPiece} onChange={e => setActualPiece(e.target.value === "" ? "" : Number(e.target.value))} className="w-16 h-14 text-2xl font-bold text-right border-blue-400 focus-visible:ring-blue-500 shadow-sm ml-2" />
                   <span className="font-bold text-slate-500">p</span>
                 </div>
               </div>
 
               {actualCs !== "" && editingPlan && (
-                <div className={`text-center font-bold text-sm mt-4 ${Number(actualCs) === editingPlan.planned_cs && (actualPiece === "" || Number(actualPiece) === 0) ? 'text-green-600' : 'text-amber-600'}`}>
+                <div className={`text-center font-bold text-sm mt-4 ${((Number(actualCs) * (editingPlan.products?.unit_per_cs || 24)) + (Number(actualPiece) * 2)) - (editingPlan.planned_units || (editingPlan.planned_cs * (editingPlan.products?.unit_per_cs || 24))) === 0 ? 'text-green-600' : 'text-amber-600'
+                  }`}>
                   予定との誤差: {
-                    ((Number(actualCs) * (editingPlan.products?.unit_per_cs || 24)) + Number(actualPiece)) - (editingPlan.planned_cs * (editingPlan.products?.unit_per_cs || 24)) > 0 ? "+" : ""
+                    ((Number(actualCs) * (editingPlan.products?.unit_per_cs || 24)) + (Number(actualPiece) * 2)) - (editingPlan.planned_units || (editingPlan.planned_cs * (editingPlan.products?.unit_per_cs || 24))) > 0 ? "+" : ""
                   }
-                  {/* ★修正: パック数での誤差表示 */}
-                  {((Number(actualCs) * (editingPlan.products?.unit_per_cs || 24)) + Number(actualPiece)) - (editingPlan.planned_cs * (editingPlan.products?.unit_per_cs || 24))} パック
+                  {/* ★修正: 誤差をパック数で表示 */}
+                  {Math.floor((((Number(actualCs) * (editingPlan.products?.unit_per_cs || 24)) + (Number(actualPiece) * 2)) - (editingPlan.planned_units || (editingPlan.planned_cs * (editingPlan.products?.unit_per_cs || 24)))) / 2)} パック
                 </div>
               )}
             </div>
@@ -895,9 +913,9 @@ export default function ProductionPage() {
               {calendarOrders.filter(o => o.planned_ship_date === ordersModalDate).map(ord => {
                 const isShipped = ord.status === 'shipped';
                 const unitPerCs = ord.products?.unit_per_cs || 24;
-                // ★修正
+                // ★修正: ピース数からの計算
                 const displayCs = Math.floor(ord.quantity / unitPerCs);
-                const displayP = ord.quantity % unitPerCs;
+                const displayP = Math.floor((ord.quantity % unitPerCs) / 2);
 
                 return (
                   <div key={ord.id} className={`p-4 rounded-lg border ${isShipped ? 'bg-slate-50 border-slate-200 opacity-70' : 'bg-purple-50 border-purple-200'}`}>
