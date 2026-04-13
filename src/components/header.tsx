@@ -2,7 +2,7 @@
 
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetTrigger } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
-import { Menu, Home, ShoppingCart, Factory, Package, ArrowDownToLine, Truck, Database, BookOpen, FileText, Sun, Moon, Beaker, Key, LogOut, LogIn, ShieldCheck, ShieldAlert } from "lucide-react";
+import { Menu, Home, ShoppingCart, Factory, Package, ArrowDownToLine, Truck, Database, BookOpen, FileText, Sun, Moon, Beaker, Key, LogOut, LogIn, ShieldCheck, ShieldAlert, Wrench, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -33,7 +33,11 @@ export default function Header() {
     { title: "入荷管理", href: "/arrivals", icon: ArrowDownToLine },
     { title: "出荷管理", href: "/shipments", icon: Truck },
     { title: "マスタ管理", href: "/master", icon: Database },
-    { title: "HACCP資料", href: "/haccp", icon: FileText },
+
+    // ▼ ここから下のリンクを整理して1つにまとめました ▼
+    { title: "HACCP・衛生管理", href: "/haccp", icon: ShieldCheck },
+    // ▲ ここまで ▲
+
     { title: "マニュアル", href: "/manual", icon: BookOpen },
   ];
 
