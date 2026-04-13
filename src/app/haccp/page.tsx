@@ -9,7 +9,8 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { FileText, Plus, ExternalLink, Edit, Trash2, Loader2, Save, Lock, Search, ShieldCheck, ClipboardCheck, Building2, Wrench, Sparkles, ShieldAlert, ArrowRight, Trash } from "lucide-react";
+// ▼ 修正: Eye アイコンを追加しました
+import { FileText, Plus, ExternalLink, Edit, Trash2, Loader2, Save, Lock, Search, ShieldCheck, ClipboardCheck, Building2, Wrench, Sparkles, ShieldAlert, ArrowRight, Trash, Eye } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import Link from "next/link";
 
@@ -211,6 +212,22 @@ export default function HaccpPortalPage() {
                                 <CardContent>
                                     <p className="text-sm text-slate-600 leading-relaxed mb-4">廃棄物容器の清掃・消毒、集積場の分別管理や定期回収の状況などを毎日記録します。</p>
                                     <div className="text-xs font-bold text-orange-600 flex items-center justify-end">記録する / PDF出力 <ArrowRight className="w-4 h-4 ml-1 transition-transform group-hover:translate-x-1" /></div>
+                                </CardContent>
+                            </Card>
+                        </Link>
+
+                        <Link href="/sensory-tests" className="block group">
+                            <Card className="h-full border-2 border-slate-200 hover:border-pink-400 hover:bg-pink-50/30 transition-all shadow-sm group-hover:shadow-md cursor-pointer">
+                                <CardHeader className="pb-2">
+                                    <div className="flex justify-between items-start">
+                                        <div className="bg-pink-100 p-2.5 rounded-lg text-pink-700 group-hover:scale-110 transition-transform"><Eye className="w-6 h-6" /></div>
+                                        <Badge className="bg-slate-100 text-slate-500 shadow-none border-none text-[10px]">YO-30</Badge>
+                                    </div>
+                                    <CardTitle className="text-xl font-bold text-slate-800 mt-4">官能検査実施表</CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                    <p className="text-sm text-slate-600 leading-relaxed mb-4">製造されたLotに対して、小箱・アルミ・パンの状態を「視覚・嗅覚・触覚・味覚」から検査し記録します。</p>
+                                    <div className="text-xs font-bold text-pink-600 flex items-center justify-end">記録する / PDF出力 <ArrowRight className="w-4 h-4 ml-1 transition-transform group-hover:translate-x-1" /></div>
                                 </CardContent>
                             </Card>
                         </Link>
