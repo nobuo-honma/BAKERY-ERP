@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 // ▼ 修正: PackageOpen をインポートリストに追加しました ▼
-import { FileText, Plus, ExternalLink, Edit, Trash2, Loader2, Save, Lock, Search, ShieldCheck, ClipboardCheck, Building2, Wrench, Sparkles, ShieldAlert, ArrowRight, Trash, Eye, PackageOpen } from "lucide-react";
+import { FileText, Plus, ExternalLink, Edit, Trash2, Loader2, Save, Lock, Search, ShieldCheck, ClipboardCheck, Building2, Wrench, Sparkles, ShieldAlert, ArrowRight, Trash, Eye, PackageOpen, Box } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import Link from "next/link";
 
@@ -262,6 +262,22 @@ export default function HaccpPortalPage() {
                                 <CardContent>
                                     <p className="text-sm text-slate-600 leading-relaxed mb-4">すべてのHACCP記録に対する「追加・変更・削除」の履歴を自動で追跡・保存しています。変更前後のデータを比較できます。</p>
                                     <div className="text-xs font-bold text-red-600 flex items-center justify-end">履歴を確認する <ArrowRight className="w-4 h-4 ml-1 transition-transform group-hover:translate-x-1" /></div>
+                                </CardContent>
+                            </Card>
+                        </Link>
+
+                        <Link href="/ecopack-checks" className="block group">
+                            <Card className="h-full border-2 border-slate-200 hover:border-teal-400 hover:bg-teal-50/30 transition-all shadow-sm group-hover:shadow-md cursor-pointer">
+                                <CardHeader className="pb-2">
+                                    <div className="flex justify-between items-start">
+                                        <div className="bg-teal-100 p-2.5 rounded-lg text-teal-700 group-hover:scale-110 transition-transform"><Box className="w-6 h-6" /></div>
+                                        <Badge className="bg-slate-100 text-slate-500 shadow-none border-none text-[10px]">YO-4</Badge>
+                                    </div>
+                                    <CardTitle className="text-xl font-bold text-slate-800 mt-4">エコパック製品チェック表</CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                    <p className="text-sm text-slate-600 leading-relaxed mb-4">製品のシール状態や酸素濃度など、製造ごとの品質保証と適合判定を記録します。</p>
+                                    <div className="text-xs font-bold text-teal-600 flex items-center justify-end">記録する / PDF出力 <ArrowRight className="w-4 h-4 ml-1 transition-transform group-hover:translate-x-1" /></div>
                                 </CardContent>
                             </Card>
                         </Link>
