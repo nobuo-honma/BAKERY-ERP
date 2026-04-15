@@ -5,7 +5,7 @@ import {
   BookOpen, Printer, Menu as MenuIcon, Settings, Info,
   ChevronDown, AlertCircle, CheckCircle2, FileText,
   AlertTriangle, HelpCircle, ChevronRight, Truck, Calendar, Factory, Package, ArrowRight,
-  ArrowDownToLine, ShoppingCart, Edit
+  ArrowDownToLine, ShoppingCart, Edit, ShieldCheck
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -25,6 +25,7 @@ const USER_TOC = [
   { id: "inventory", title: "第5章　在庫予測・棚卸" },
   { id: "shipment", title: "第6章　出荷管理" },
   { id: "calendar", title: "第7章　スケジュール表・備考" },
+  { id: "haccp", title: "第8章　HACCP・衛生管理記録" },
 ];
 
 const TECH_TOC = [
@@ -557,6 +558,37 @@ export default function ManualPage() {
                   <Step n={3} title="A4サイズで白黒印刷する">
                     <p>右上の「印刷」ボタンを押すと、メニュー等が消え、A4横サイズに綺麗に収まるモノクロレイアウトで印刷できます。現場の掲示板用に出力してください。</p>
                   </Step>
+                </section>
+
+                <div className="page-break" />
+
+                {/* ── HACCP・衛生管理 ── */}
+                <section>
+                  <ChapterTitle id="haccp" num="第8章" title="HACCP・衛生管理記録" bread={["操作マニュアル", "第8章　HACCP・衛生管理記録"]} />
+                  <p className="text-slate-700 mb-6">日々の清掃記録や、防除・駆除の作業記録、そして製品の検査結果などをスマホやタブレットから簡単に入力し、PDFとして一括出力できる機能群です。</p>
+
+                  <SectionHead icon={ShieldCheck}>各帳票の入力とPDF出力</SectionHead>
+                  <Step n={1} title="ポータルから目的の帳票を選ぶ">
+                    <p>メニューの「HACCP・衛生管理」を開くと、ポータル画面が表示されます。入力したい帳票（清掃チェック表など）のパネルをクリックします。</p>
+                  </Step>
+                  <Step n={2} title="スマホで簡単入力">
+                    <p>「日次チェック」タブから日付を選び、〇・× などのボタンをタップするだけで記録が完了します。一部の記録（害虫防除など）では、スマホのカメラで証拠写真を撮影し、そのままアップロードすることも可能です。</p>
+                  </Step>
+                  <Step n={3} title="月間一覧からPDFを出力する">
+                    <p>「月間一覧」タブを開くと、その月に入力されたデータがマトリックス表（一覧表）として表示されます。「PDF帳票を出力」ボタンを押すと、A4サイズの監査用フォーマットで印刷またはPDF保存ができます。</p>
+                  </Step>
+
+                  <SectionHead icon={AlertCircle}>監査ログ（改竄防止機能）について</SectionHead>
+                  <div className="bg-red-50 border border-red-200 rounded-xl p-5 shadow-sm mt-2">
+                    <p className="text-sm text-slate-700 leading-relaxed mb-4">
+                      HACCPの信頼性を担保するため、システムに入力された衛生管理記録は<strong>「いつ・誰が・どのデータを・どのように書き換えたか」</strong>がデータベースの裏側で強制的に追跡（トレース）されています。
+                    </p>
+                    <ul className="list-disc pl-5 space-y-2 text-sm text-red-800 font-medium">
+                      <li>過去のデータをこっそり修正したり削除したりした場合でも、全て履歴として残ります。</li>
+                      <li>この監査ログは、システム利用者からは絶対に削除・改竄できない仕組みになっています。</li>
+                      <li>保健所等の監査時にデータの信頼性を証明する強力なエビデンスとなります。</li>
+                    </ul>
+                  </div>
                 </section>
 
               </main>
