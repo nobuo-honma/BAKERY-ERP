@@ -8,16 +8,17 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ShoppingCart, Plus, Calculator, Loader2, Save, Lock, Edit, Trash2, X, FileText } from "lucide-react";
+import { ShoppingCart, Plus, Calculator, Loader2, Save, Lock, Edit, Trash2, X, FileText, Printer, ArrowLeft } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 
 type Order = {
   id: string; order_date: string; planned_ship_date: string; desired_ship_date: string;
   quantity: number; status: string; product_id: string; customer_order_no?: string;
-  customers?: { name: string };
-  products?: { name: string; variant_name: string; unit_per_kg: number; unit_per_cs: number }
+  unit_price?: number; remarks?: string;
+  customers?: { name: string; address?: string };
+  products?: { name: string; variant_name: string; unit_per_cs: number };
 };
-type Customer = { id: string; name: string };
+type Customer = { id: string; name: string; address?: string };
 type Product = { id: string; name: string; variant_name: string; unit_per_kg: number; unit_per_cs: number };
 type BomWithStock = {
   id: string; product_id: string; item_id: string; usage_rate: number; unit: string; basis_type: string;
@@ -25,7 +26,7 @@ type BomWithStock = {
 };
 
 type OrderGroup = {
-  groupId: string; customerName: string; customerId: string; customerOrderNo: string;
+  groupId: string; customerName: string; customerAddress: string; customerId: string; customerOrderNo: string;
   orderDate: string; plannedShipDate: string; desiredShipDate: string; status: string; items: Order[];
 };
 
@@ -43,7 +44,6 @@ function pcsToDisplay(totalPcs: number, unitPerCs: number): { cs: number; p: num
   return { cs, p };
 }
 
-// cs + p → 総個数
 function displayToPcs(cs: number, p: number, unitPerCs: number): number {
   return (cs * unitPerCs) + (p * 2);
 }
@@ -58,10 +58,13 @@ export default function OrdersPage() {
   const [isOpen, setIsOpen] = useState(false);
   const [editingGroup, setEditingGroup] = useState<OrderGroup | null>(null);
 
+  // 印刷ビュー用
+  const [printGroup, setPrintGroup] = useState<OrderGroup | null>(null);
+
   const [formData, setFormData] = useState<{
     date: string; plannedShipDate: string; shipDate: string; customerId: string; customerOrderNo: string;
-    details: { id?: string; productId: string; cs: number | ""; p: number | ""; selectedName: string }[];
-  }>({ date: "", plannedShipDate: "", shipDate: "", customerId: "", customerOrderNo: "", details: [{ productId: "", cs: 0, p: 0, selectedName: "" }] });
+    details: { id?: string; productId: string; cs: number | ""; p: number | ""; unitPrice: number | ""; remarks: string; selectedName: string }[];
+  }>({ date: "", plannedShipDate: "", shipDate: "", customerId: "", customerOrderNo: "", details: [{ productId: "", cs: 0, p: 0, unitPrice: "", remarks: "", selectedName: "" }] });
 
   const [boms, setBoms] = useState<BomWithStock[]>([]);
   const [isSimulating, setIsSimulating] = useState(false);
@@ -69,8 +72,9 @@ export default function OrdersPage() {
 
   const fetchData = useCallback(async () => {
     setLoading(true);
-    const { data: oData } = await supabase.from("orders").select("*, customers(name), products(name, variant_name, unit_per_kg, unit_per_cs)").order("order_date", { ascending: false });
-    const { data: cData } = await supabase.from("customers").select("id, name");
+    // ★修正: customers(name, address) と住所も取得するように変更
+    const { data: oData } = await supabase.from("orders").select("*, customers(name, address), products(name, variant_name, unit_per_kg, unit_per_cs)").order("order_date", { ascending: false });
+    const { data: cData } = await supabase.from("customers").select("id, name, address");
     const { data: pData } = await supabase.from("products").select("*");
 
     if (oData) {
@@ -80,7 +84,10 @@ export default function OrdersPage() {
         const gId = parts.length > 3 ? parts.slice(0, 3).join('-') : o.id;
         if (!groups[gId]) {
           groups[gId] = {
-            groupId: gId, customerName: o.customers?.name, customerId: o.customer_id,
+            groupId: gId,
+            customerName: o.customers?.name || "",
+            customerAddress: o.customers?.address || "", // ★追加
+            customerId: o.customer_id,
             customerOrderNo: o.customer_order_no || "", orderDate: o.order_date,
             plannedShipDate: o.planned_ship_date, desiredShipDate: o.desired_ship_date,
             status: o.status, items: []
@@ -106,13 +113,14 @@ export default function OrdersPage() {
       setEditingGroup(group);
       const details = group.items.map(item => {
         const unitPerCs = item.products?.unit_per_cs || 24;
-        // quantity は総個数 → cs, p に変換
         const { cs, p } = pcsToDisplay(item.quantity, unitPerCs);
         return {
           id: item.id,
-          productId: item.product_id, // ★ここを修正しました★
+          productId: item.product_id,
           cs,
           p,
+          unitPrice: (item.unit_price ?? "") as number | "",
+          remarks: item.remarks || "",
           selectedName: item.products?.name || ""
         };
       });
@@ -128,10 +136,10 @@ export default function OrdersPage() {
   const resetForm = () => {
     const today = new Date().toISOString().split('T')[0];
     setEditingGroup(null);
-    setFormData({ date: today, plannedShipDate: "", shipDate: "", customerId: "", customerOrderNo: "", details: [{ productId: "", cs: 0, p: 0, selectedName: "" }] });
+    setFormData({ date: today, plannedShipDate: "", shipDate: "", customerId: "", customerOrderNo: "", details: [{ productId: "", cs: 0, p: 0, unitPrice: "", remarks: "", selectedName: "" }] });
   };
 
-  const addDetailRow = () => setFormData(prev => ({ ...prev, details: [...prev.details, { productId: "", cs: 0, p: 0, selectedName: "" }] }));
+  const addDetailRow = () => setFormData(prev => ({ ...prev, details: [...prev.details, { productId: "", cs: 0, p: 0, unitPrice: "", remarks: "", selectedName: "" }] }));
   const removeDetailRow = (index: number) => setFormData(prev => ({ ...prev, details: prev.details.filter((_, i) => i !== index) }));
   const updateDetail = (index: number, field: string, value: any) => {
     setFormData(prev => {
@@ -142,7 +150,6 @@ export default function OrdersPage() {
     });
   };
 
-  // BOMシミュレーション
   useEffect(() => {
     const productIds = formData.details.map(d => d.productId).filter(Boolean);
     if (productIds.length === 0) { setBoms([]); return; }
@@ -168,10 +175,6 @@ export default function OrdersPage() {
     fetchBoms();
   }, [formData.details]);
 
-  // ============================================================
-  // シミュレーション計算
-  // cs, p → 総個数 → kg → BOM消費量
-  // ============================================================
   const simResult: Record<string, { name: string, unit: string, required: number, stock: number, isShort: boolean }> = {};
   formData.details.forEach(detail => {
     const csVal = Number(detail.cs) || 0;
@@ -181,14 +184,11 @@ export default function OrdersPage() {
     const selectedProduct = products.find(p => p.id === detail.productId);
     if (!selectedProduct) return;
 
-    // 総個数 = (cs × unit_per_cs) + (p × 2)
     const totalPcs = displayToPcs(csVal, pVal, selectedProduct.unit_per_cs);
-    // 製造kg = 総個数 ÷ unit_per_kg
     const productionKg = totalPcs / selectedProduct.unit_per_kg;
 
     const productBoms = boms.filter(b => b.product_id === detail.productId);
     productBoms.forEach(bom => {
-      // c/s 基準の場合: cs数 = Math.floor(totalPcs / unit_per_cs)
       const csCount = Math.floor(totalPcs / selectedProduct.unit_per_cs);
       const reqQty = bom.basis_type === 'production_qty'
         ? productionKg * bom.usage_rate
@@ -228,7 +228,6 @@ export default function OrdersPage() {
 
       const upserts = validDetails.map((detail, i) => {
         const selectedProduct = products.find(p => p.id === detail.productId);
-        // 総個数で保存
         const totalPcs = displayToPcs(Number(detail.cs) || 0, Number(detail.p) || 0, selectedProduct?.unit_per_cs || 24);
         return {
           id: detail.id || `${baseGroupId}-${i}`,
@@ -238,7 +237,9 @@ export default function OrdersPage() {
           customer_id: formData.customerId,
           customer_order_no: formData.customerOrderNo || null,
           product_id: detail.productId,
-          quantity: totalPcs, // 総個数
+          quantity: totalPcs,
+          unit_price: Number(detail.unitPrice) || 0,
+          remarks: detail.remarks || null,
           status: "received"
         };
       });
@@ -276,6 +277,158 @@ export default function OrdersPage() {
     setIsProcessing(false);
   };
 
+  // =======================================================================
+  // 受注書 (PDF帳票) ビュー
+  // =======================================================================
+  if (printGroup) {
+    const dObj = new Date(printGroup.orderDate);
+    const orderDateStr = `${dObj.getFullYear()}年 ${dObj.getMonth() + 1}月 ${dObj.getDate()}日`;
+
+    // 印刷用に、最低8行分の枠を用意する（元の帳票のレイアウトに近づけるため）
+    const displayItems = [...printGroup.items];
+    while (displayItems.length < 8) {
+      displayItems.push({ id: `empty-${displayItems.length}` } as any);
+    }
+
+    return (
+      <div className="bg-slate-200 min-h-screen py-8 print:p-0 print:bg-white flex flex-col items-center">
+        <style dangerouslySetInnerHTML={{
+          __html: `
+          @media print {
+              header, nav { display: none !important; }
+              main { padding: 0 !important; margin: 0 !important; max-width: 100% !important; background: white !important; }
+              @page { size: A4 landscape; margin: 10mm 15mm; }
+              body { background-color: white !important; color: black !important; }
+              .print-hide { display: none !important; }
+          }
+      `}} />
+
+        <div className="w-[297mm] print:w-full flex justify-between mb-4 print-hide">
+          <Button variant="outline" onClick={() => setPrintGroup(null)} className="bg-white text-slate-700 font-bold border-slate-300">
+            <ArrowLeft className="h-4 w-4 mr-2" /> 戻る
+          </Button>
+          <Button onClick={() => window.print()} className="bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-lg">
+            <Printer className="h-5 w-5 mr-2" /> 印刷する (PDFに保存)
+          </Button>
+        </div>
+
+        <div className="w-[297mm] h-[210mm] bg-white pt-8 pb-4 px-12 print:p-0 shadow-xl print:shadow-none text-black font-sans box-border flex flex-col overflow-hidden">
+
+          <div className="flex justify-between items-start mb-2 border-b-[3px] border-black pb-1 shrink-0">
+            <div className="font-medium text-lg tracking-widest pt-2">
+              社会福祉法人小樽高島福祉会　ワークセンター・やまびこ　御中
+            </div>
+            <table className="border-collapse border border-black text-sm">
+              <tbody>
+                <tr>
+                  <th className="border border-black px-2 py-0.5 bg-gray-50 text-left font-medium w-16">発注No.</th>
+                  <td className="border border-black px-2 py-0.5 font-bold w-48 truncate">{printGroup.customerOrderNo || "　"}</td>
+                </tr>
+              </tbody>
+            </table>
+            <table className="border-collapse border border-black text-sm">
+              <tbody>
+                <tr>
+                  <th className="border border-black px-2 py-0.5 bg-gray-50 text-left font-medium w-16">受注日</th>
+                  <td className="border border-black px-2 py-0.5 font-bold w-32">{orderDateStr}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex justify-between items-end mb-1 shrink-0">
+            <div className="text-sm font-medium space-y-1">
+              <div>TEL 0134-21-0011　　FAX 0134-21-0022</div>
+              <div>下記の通り、発注致します</div>
+            </div>
+          </div>
+
+          <table className="border-collapse border-2 border-black w-full text-sm mb-3 shrink-0">
+            <tbody>
+              <tr>
+                <td className="border border-black text-center w-12 py-1.5 font-medium leading-tight">納<br />入<br />先</td>
+                {/* ★修正: 住所を1行で表示し、はみ出しを防ぐ（改行禁止） */}
+                <td className="border border-black px-4 font-bold tracking-widest whitespace-nowrap overflow-hidden text-ellipsis">
+                  <span className="text-xl mr-4">{printGroup.customerName}</span>
+                  {printGroup.customerAddress && <span className="text-sm font-normal text-slate-600">{printGroup.customerAddress}</span>}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          <table className="w-full border-collapse border-2 border-black text-sm flex-1 table-fixed">
+            <thead>
+              <tr className="bg-gray-50 h-8">
+                <th className="border border-black font-medium w-[5%] leading-tight text-xs">受注<br />No.</th>
+                <th className="border border-black font-medium w-[24%]">品目</th>
+                <th className="border border-black font-medium w-[24%]">品目テキスト (味・種類)</th>
+                <th className="border border-black font-medium w-[8%]">数量</th>
+                <th className="border border-black font-medium w-[6%]">単位</th>
+                <th className="border border-black font-medium w-[15%]">金額</th>
+                <th className="border border-black font-medium w-[18%]">納入期限</th>
+              </tr>
+            </thead>
+            <tbody>
+              {displayItems.map((item, idx) => {
+                if (item.id.startsWith('empty')) {
+                  return (
+                    <tr key={idx} className="h-10 border-b border-black">
+                      <td className="border-r border-black"></td><td className="border-r border-black"></td><td className="border-r border-black"></td><td className="border-r border-black"></td><td className="border-r border-black"></td><td className="border-r border-black"></td><td className="border-r border-black"></td>
+                    </tr>
+                  );
+                }
+
+                const unitPerCs = item.products?.unit_per_cs || 24;
+                const { cs, p } = pcsToDisplay(item.quantity, unitPerCs);
+
+                let totalAmount = 0;
+                let unitStr = "";
+                let qtyStr = "";
+                if (cs > 0) {
+                  totalAmount = cs * (item.unit_price || 0);
+                  unitStr = "c/s";
+                  qtyStr = cs.toString();
+                } else if (p > 0) {
+                  totalAmount = p * (item.unit_price || 0);
+                  unitStr = "p";
+                  qtyStr = p.toString();
+                }
+
+                const dDate = new Date(item.desired_ship_date);
+                const deadlineStr = `${dDate.getFullYear()}/${dDate.getMonth() + 1}/${dDate.getDate()}`;
+
+                return (
+                  <tr key={item.id} className="border-b border-black h-10 relative group">
+                    <td className="border-r border-black text-center text-xs text-slate-500">{idx + 1}</td>
+                    {/* ★修正: 製品名を改行せず1行で表示し、はみ出る場合は「...」にする */}
+                    <td className="border-r border-black px-2 font-bold text-base whitespace-nowrap overflow-hidden text-ellipsis">{item.products?.name}</td>
+                    <td className="border-r border-black px-2 font-bold text-sm text-slate-600 whitespace-nowrap overflow-hidden text-ellipsis">{item.products?.variant_name}</td>
+
+                    <td className="border-r border-black text-center font-black text-lg">{qtyStr}</td>
+                    <td className="border-r border-black text-center font-bold text-slate-600">{unitStr}</td>
+                    <td className="border-r border-black text-right pr-4 font-bold tracking-wider">
+                      {totalAmount > 0 ? `¥ ${totalAmount.toLocaleString()}` : ""}
+                    </td>
+                    <td className="border-r border-black text-center font-bold tracking-widest text-lg">{deadlineStr}</td>
+
+                    {/* 摘要(備考): 元の紙の通り、行の左下に小さく配置。ここも改行禁止で省略 */}
+                    <div className="absolute bottom-0 left-10 w-[80%] text-[10px] text-slate-500 flex h-4 items-center overflow-hidden">
+                      <div className="border-r border-t border-black px-1 bg-gray-50 h-full w-8 text-center text-black flex items-center justify-center">摘要</div>
+                      <div className="px-2 border-t border-black flex-1 border-dashed h-full whitespace-nowrap overflow-hidden text-ellipsis flex items-center">{item.remarks}</div>
+                    </div>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  // =======================================================================
+  // 通常画面 (リスト・入力)
+  // =======================================================================
   return (
     <div className="bg-transparent">
       <div className="flex justify-between items-center mb-6">
@@ -301,31 +454,43 @@ export default function OrdersPage() {
                   <div><label className="block text-xs font-bold mb-1 text-slate-700">受注日</label><Input type="date" value={formData.date} onChange={e => setFormData({ ...formData, date: e.target.value })} className="bg-white text-sm" /></div>
                   <div><label className="block text-xs font-bold mb-1 text-slate-700">発注番号 (任意)</label><Input value={formData.customerOrderNo} onChange={e => setFormData({ ...formData, customerOrderNo: e.target.value })} className="bg-white border-blue-300 text-sm" placeholder="FAX・注番" /></div>
                   <div>
-                    <label className="block text-xs font-bold mb-1 text-slate-700">出荷先名 <span className="text-red-500">*</span></label>
-                    <Input list="customers-list" placeholder="検索..." value={formData.customerId} onChange={e => setFormData({ ...formData, customerId: e.target.value })} className="bg-white border-blue-300 text-sm" />
+                    <label className="block text-xs font-bold mb-1 text-slate-700">出荷先名 (納入先) <span className="text-red-500">*</span></label>
+                    <Input list="customers-list" placeholder="検索..." value={formData.customerId} onChange={e => setFormData({ ...formData, customerId: e.target.value })} className="bg-white border-blue-300 text-sm font-bold" />
                     <datalist id="customers-list">{customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</datalist>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4 bg-white p-3 rounded border border-blue-200">
                   <div><label className="block text-xs font-bold mb-1 text-blue-800">工場からの出荷予定日 <span className="text-red-500">*</span></label><Input type="date" value={formData.plannedShipDate} onChange={e => setFormData({ ...formData, plannedShipDate: e.target.value })} className="bg-white border-blue-400 font-bold" /></div>
-                  <div><label className="block text-xs font-bold mb-1 text-slate-700">納品先への着予定日(納期) <span className="text-red-500">*</span></label><Input type="date" value={formData.shipDate} onChange={e => setFormData({ ...formData, shipDate: e.target.value })} className="bg-white border-slate-300" /></div>
+                  <div><label className="block text-xs font-bold mb-1 text-slate-700">納入期限 (着予定日) <span className="text-red-500">*</span></label><Input type="date" value={formData.shipDate} onChange={e => setFormData({ ...formData, shipDate: e.target.value })} className="bg-white border-slate-300 font-bold" /></div>
                 </div>
 
                 <div className="bg-blue-50/50 p-4 -mx-2 rounded-md border border-blue-100 space-y-3">
                   <label className="block text-sm font-bold text-blue-900 mb-2">注文製品と数量 (複数可) <span className="text-red-500">*</span></label>
                   {formData.details.map((detail, idx) => (
-                    <div key={idx} className="flex flex-col sm:flex-row items-end gap-2 bg-white p-2 rounded border shadow-sm relative">
-                      <div className="w-full sm:flex-1"><label className="block text-xs font-bold mb-1 text-slate-500">1. 製品名</label><select className="w-full border-slate-200 rounded p-2 text-sm bg-white" value={detail.selectedName} onChange={e => updateDetail(idx, 'selectedName', e.target.value)}><option value="">選択</option>{Array.from(new Set(products.map(p => p.name))).map(name => <option key={name} value={name}>{name}</option>)}</select></div>
-                      <div className="w-full sm:flex-1"><label className="block text-xs font-bold mb-1 text-slate-500">2. 種類(味)</label><select className="w-full border-slate-200 rounded p-2 text-sm bg-white disabled:bg-slate-50" value={detail.productId} onChange={e => updateDetail(idx, 'productId', e.target.value)} disabled={!detail.selectedName}><option value="">選択</option>{products.filter(p => p.name === detail.selectedName).map(p => <option key={p.id} value={p.id}>{p.variant_name}</option>)}</select></div>
-                      <div className="w-full sm:w-20"><label className="block text-xs font-bold mb-1 text-slate-500">3. c/s</label><Input type="number" min="0" value={detail.cs !== undefined ? detail.cs : ""} onChange={e => updateDetail(idx, 'cs', e.target.value === "" ? "" : Number(e.target.value))} className="font-bold text-right h-9" /></div>
-                      <div className="w-full sm:w-20"><label className="block text-xs font-bold mb-1 text-slate-500">4. p(パック)</label><Input type="number" min="0" value={detail.p !== undefined ? detail.p : ""} onChange={e => updateDetail(idx, 'p', e.target.value === "" ? "" : Number(e.target.value))} className="font-bold text-right h-9" /></div>
+                    <div key={idx} className="flex flex-col gap-2 bg-white p-3 rounded border shadow-sm relative">
+                      <div className="flex flex-col sm:flex-row items-end gap-2">
+                        <div className="w-full sm:flex-1"><label className="block text-[10px] font-bold mb-1 text-slate-500">1. 品目</label><select className="w-full border-slate-200 rounded p-2 text-sm bg-white font-bold" value={detail.selectedName} onChange={e => updateDetail(idx, 'selectedName', e.target.value)}><option value="">選択</option>{Array.from(new Set(products.map(p => p.name))).map(name => <option key={name} value={name}>{name}</option>)}</select></div>
+                        <div className="w-full sm:flex-1"><label className="block text-[10px] font-bold mb-1 text-slate-500">2. テキスト(味)</label><select className="w-full border-slate-200 rounded p-2 text-sm bg-white disabled:bg-slate-50" value={detail.productId} onChange={e => updateDetail(idx, 'productId', e.target.value)} disabled={!detail.selectedName}><option value="">選択</option>{products.filter(p => p.name === detail.selectedName).map(p => <option key={p.id} value={p.id}>{p.variant_name}</option>)}</select></div>
+                        <div className="w-full sm:w-20"><label className="block text-[10px] font-bold mb-1 text-slate-500">3. c/s</label><Input type="number" min="0" value={detail.cs !== undefined ? detail.cs : ""} onChange={e => updateDetail(idx, 'cs', e.target.value === "" ? "" : Number(e.target.value))} className="font-bold text-right h-9" /></div>
+                        <div className="w-full sm:w-20"><label className="block text-[10px] font-bold mb-1 text-slate-500">4. p(パック)</label><Input type="number" min="0" value={detail.p !== undefined ? detail.p : ""} onChange={e => updateDetail(idx, 'p', e.target.value === "" ? "" : Number(e.target.value))} className="font-bold text-right h-9" /></div>
+                      </div>
+                      <div className="flex flex-col sm:flex-row items-center gap-2 mt-1 pt-2 border-t border-slate-100 border-dashed">
+                        <div className="w-full sm:w-1/3 flex items-center gap-1">
+                          <label className="text-[10px] font-bold text-slate-500 shrink-0">単価 ¥</label>
+                          <Input type="number" min="0" value={detail.unitPrice !== undefined ? detail.unitPrice : ""} onChange={e => updateDetail(idx, 'unitPrice', e.target.value === "" ? "" : Number(e.target.value))} className="h-8 text-sm text-right font-bold" placeholder="任意" />
+                        </div>
+                        <div className="w-full sm:flex-1 flex items-center gap-1">
+                          <label className="text-[10px] font-bold text-slate-500 shrink-0">摘要</label>
+                          <Input value={detail.remarks} onChange={e => updateDetail(idx, 'remarks', e.target.value)} className="h-8 text-xs text-slate-600" placeholder="備考・指示など..." />
+                        </div>
+                      </div>
                       {formData.details.length > 1 && (
                         <Button variant="ghost" size="icon" onClick={() => removeDetailRow(idx)} className="h-9 w-9 text-red-500 hover:bg-red-50 absolute -right-2 -top-2 bg-white rounded-full border shadow-sm"><X className="h-4 w-4" /></Button>
                       )}
                     </div>
                   ))}
-                  <Button variant="outline" size="sm" onClick={addDetailRow} className="w-full mt-2 border-blue-300 text-blue-700 bg-white hover:bg-blue-50"><Plus className="w-4 h-4 mr-1" /> 製品を追加する</Button>
+                  <Button variant="outline" size="sm" onClick={addDetailRow} className="w-full mt-2 border-blue-300 text-blue-700 bg-white hover:bg-blue-50 font-bold"><Plus className="w-4 h-4 mr-1" /> 品目を追加する</Button>
                 </div>
               </div>
 
@@ -396,14 +561,13 @@ export default function OrdersPage() {
 
           return (
             <Card key={group.groupId} className="hover:shadow-md transition-all border-slate-200 relative group">
-              {canEdit && (
-                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity z-10 flex gap-1 bg-white/80 p-1 rounded-md shadow-sm backdrop-blur-sm">
-                  <Button variant="ghost" size="icon" onClick={() => openModal(group)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" title="編集・キャンセル"><Edit className="h-4 w-4" /></Button>
-                </div>
-              )}
+              <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity z-10 flex gap-1 bg-white/80 p-1 rounded-md shadow-sm backdrop-blur-sm">
+                <Button variant="outline" size="icon" onClick={() => setPrintGroup(group)} className="h-8 w-8 text-indigo-600 border-indigo-200 hover:bg-indigo-50" title="受注書を印刷"><Printer className="h-4 w-4" /></Button>
+                {canEdit && <Button variant="ghost" size="icon" onClick={() => openModal(group)} className="h-8 w-8 text-blue-600 hover:bg-blue-50" title="編集・キャンセル"><Edit className="h-4 w-4" /></Button>}
+              </div>
 
               <CardHeader className="pb-2 bg-slate-50 border-b rounded-t-lg">
-                <div className="flex justify-between items-start pr-12">
+                <div className="flex justify-between items-start pr-20">
                   <div>
                     <div className="text-xs text-slate-500 mb-1 flex items-center gap-2">
                       {group.groupId.slice(-6)}
@@ -423,16 +587,16 @@ export default function OrdersPage() {
                 <div className="divide-y divide-slate-100">
                   {group.items.map((item) => {
                     const unitPerCs = item.products?.unit_per_cs || 24;
-                    // quantity は総個数 → 表示用 cs, p に変換
                     const { cs, p } = pcsToDisplay(item.quantity, unitPerCs);
 
                     return (
-                      <div key={item.id} className="px-4 py-3 flex justify-between items-center text-sm">
+                      <div key={item.id} className="px-4 py-3 flex justify-between items-center text-sm relative">
                         <div className="font-bold text-slate-700 truncate mr-2">
                           {item.products?.name} <span className="text-xs font-normal text-slate-500">({item.products?.variant_name})</span>
+                          {item.remarks && <span className="block text-[10px] text-slate-400 mt-0.5 truncate max-w-[200px]">摘要: {item.remarks}</span>}
                         </div>
                         <div className="font-black text-lg text-blue-600 shrink-0">
-                          {cs} <span className="text-[10px] font-normal text-slate-500">c/s</span>
+                          {cs > 0 && <>{cs} <span className="text-[10px] font-normal text-slate-500">c/s</span></>}
                           {p > 0 && <span className="text-slate-700 ml-1">{p} <span className="text-[10px] font-normal text-slate-500">p</span></span>}
                         </div>
                       </div>
@@ -441,7 +605,7 @@ export default function OrdersPage() {
                 </div>
                 <div className="px-4 py-3 border-t bg-slate-50 rounded-b-lg text-xs text-slate-500 space-y-1">
                   <div className="flex justify-between"><span>出荷予定:</span><span className={`font-bold ${isLate ? 'text-red-600' : 'text-blue-800'}`}>{new Date(group.plannedShipDate).toLocaleDateString()} {isLate && '(遅延!)'}</span></div>
-                  <div className="flex justify-between"><span>着予定(納期):</span><span className="font-bold text-slate-700">{new Date(group.desiredShipDate).toLocaleDateString()}</span></div>
+                  <div className="flex justify-between"><span>納入期限(着):</span><span className="font-bold text-slate-700">{new Date(group.desiredShipDate).toLocaleDateString()}</span></div>
                 </div>
               </CardContent>
             </Card>
