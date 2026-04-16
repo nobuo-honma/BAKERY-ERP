@@ -72,9 +72,8 @@ export default function ProductionPage() {
 
     const processedOrders = (oData as any[])?.map(o => {
       const unitPerCs = o.products?.unit_per_cs || 24;
-      // ★修正: planned_units(総個数)で正確に計画済み数量を合算
       const plannedPieces = o.production_plans ? o.production_plans.reduce((sum: number, p: any) => sum + (p.planned_units || (p.planned_cs * unitPerCs)), 0) : 0;
-      const remainPieces = o.quantity - plannedPieces; // quantity(総個数) - 計画済総個数
+      const remainPieces = o.quantity - plannedPieces;
 
       return { ...o, plannedPieces, remainPieces };
     }).filter(o => o.remainPieces > 0) || [];
@@ -148,7 +147,6 @@ export default function ProductionPage() {
       setCalculatedExpiry(calculateExpiryDate(planDate));
       setCalculatedLot(generateLotNumber(planDate, pId, 1));
 
-      // ★修正: 総個数からケース数を計算
       const pcs = (planKg as number) * targetProduct.unit_per_kg;
       setCalculatedCs(Math.floor(pcs / targetProduct.unit_per_cs));
     } else {
@@ -159,7 +157,6 @@ export default function ProductionPage() {
   const handleSelectOrder = (order: Order) => {
     setIsStockProduction(false); setStockProductId("");
     setSelectedOrder(order); setPlanDate(new Date().toISOString().split('T')[0]);
-    // ★修正: 個数からkgを逆算
     const requiredKg = Math.ceil(order.remainPieces / order.products!.unit_per_kg);
     setPlanKg(requiredKg); setPlanNotes("");
   };
@@ -173,7 +170,6 @@ export default function ProductionPage() {
   const resetInputForNextDay = (order: Order, currentDateStr: string) => {
     const nextDate = new Date(currentDateStr); nextDate.setDate(nextDate.getDate() + 1);
     setPlanDate(nextDate.toISOString().split('T')[0]);
-    // ★修正: 個数からkgを逆算
     const requiredKg = Math.ceil(order.remainPieces / order.products!.unit_per_kg);
     setPlanKg(requiredKg); setPlanNotes("");
   };
@@ -190,7 +186,7 @@ export default function ProductionPage() {
     const newPlan = {
       id: `PLN-${dateStr}-${random3}`, order_id: isStockProduction ? null : selectedOrder?.id, product_id: pId,
       production_date: planDate, production_kg: planKg,
-      planned_units: (planKg as number) * targetProduct.unit_per_kg, // 総個数保存
+      planned_units: (planKg as number) * targetProduct.unit_per_kg,
       planned_cs: calculatedCs, lot_code: calculatedLot, expiry_date: calculatedExpiry, status: "planned", notes: planNotes
     };
 
@@ -226,7 +222,6 @@ export default function ProductionPage() {
     setIsProcessing(true);
     const unit_per_kg = editingPlan.products?.unit_per_kg || 10;
     const unit_per_cs = editingPlan.products?.unit_per_cs || 24;
-    // ★修正: 編集時の総個数・ケース数計算
     const pcs = (editKg as number) * unit_per_kg;
     const newCs = Math.floor(pcs / unit_per_cs);
     const newExpiry = calculateExpiryDate(editDate); const newLot = generateLotNumber(editDate, editingPlan.product_id, 1);
@@ -263,8 +258,7 @@ export default function ProductionPage() {
       if (editingPlan.status === 'completed') {
         const unit_per_cs = editingPlan.products?.unit_per_cs || 24;
         const actualCsVal = editingPlan.actual_cs !== undefined ? editingPlan.actual_cs : editingPlan.planned_cs;
-        const actualPieceVal = editingPlan.actual_piece || 0; // 入力はパック数
-        // ★修正: 総個数(ピース数)でロールバック
+        const actualPieceVal = editingPlan.actual_piece || 0;
         const cancelPcs = (actualCsVal * unit_per_cs) + (actualPieceVal * 2);
 
         const { data: existingStock } = await supabase.from('product_stocks').select('id, total_pieces').eq('lot_code', editingPlan.lot_code).maybeSingle();
@@ -325,13 +319,12 @@ export default function ProductionPage() {
     if (!editingPlan || actualCs === "") { alert("実績ケース数を入力してください。"); return; }
     if (editingPlan.status === 'completed') { alert("この計画はすでに完了済みです。"); return; }
     const aCs = Number(actualCs) || 0;
-    const aP = Number(actualPiece) || 0; // ユーザー入力はパック数
+    const aP = Number(actualPiece) || 0;
     if (aCs === 0 && aP === 0) { alert("実績数が0になっています。"); return; }
 
     setIsProcessing(true);
     try {
       const unit_per_cs = editingPlan.products?.unit_per_cs || 24;
-      // ★修正: 総個数(ピース)の計算
       const totalActualPcs = (aCs * unit_per_cs) + (aP * 2);
 
       const productIdStr = editingPlan.product_id || "";
@@ -495,7 +488,6 @@ export default function ProductionPage() {
 
                               const unitPerCs = plan.products?.unit_per_cs || 24;
                               const isCompleted = plan.status === 'completed';
-                              // ★修正: 総個数からc/sとpを再計算して表示
                               const totalPcs = isCompleted ? ((plan.actual_cs !== undefined ? plan.actual_cs : plan.planned_cs) * unitPerCs + (plan.actual_piece || 0) * 2) : (plan.planned_units || (plan.planned_cs * unitPerCs));
                               const displayCs = Math.floor(totalPcs / unitPerCs);
                               const displayP = Math.floor((totalPcs % unitPerCs) / 2);
@@ -508,7 +500,8 @@ export default function ProductionPage() {
                                   <div className="text-slate-600 print:text-black mb-0.5">{plan.products?.variant_name}</div>
                                   <div className="font-black text-slate-900 print:text-black">
                                     {displayCs} <span className="font-normal text-[10px]">c/s</span>
-                                    {displayP > 0 && <span className="ml-1">{displayP} <span className="font-normal text-[10px]">p</span></span>}
+                                    {/* ★修正: 完了時（実績）のみ p数を表示。予定時は c/s と kg のみ */}
+                                    {isCompleted && displayP > 0 && <span className="ml-1">{displayP} <span className="font-normal text-[10px]">p</span></span>}
                                     {!isCompleted && <span className="text-slate-600 font-normal ml-1">({plan.production_kg}kg)</span>}
                                   </div>
                                   {plan.notes && <div className="mt-1 pt-1 border-t border-slate-200 print:border-black text-[10px] text-slate-700 print:text-black italic wrap-break-word">{plan.notes}</div>}
@@ -577,7 +570,6 @@ export default function ProductionPage() {
 
                         const unitPerCs = plan.products?.unit_per_cs || 24;
                         const isCompleted = plan.status === 'completed';
-                        // ★修正
                         const totalPcs = isCompleted ? ((plan.actual_cs !== undefined ? plan.actual_cs : plan.planned_cs) * unitPerCs + (plan.actual_piece || 0) * 2) : (plan.planned_units || (plan.planned_cs * unitPerCs));
                         const displayCs = Math.floor(totalPcs / unitPerCs);
                         const displayP = Math.floor((totalPcs % unitPerCs) / 2);
@@ -595,7 +587,8 @@ export default function ProductionPage() {
                               <div className="text-slate-600 italic truncate max-w-[50%]">{plan.notes || ""}</div>
                               <div className="font-black text-slate-900 text-lg">
                                 {displayCs} <span className="font-normal text-[10px] text-slate-500">c/s</span>
-                                {displayP > 0 && <span className="font-black text-slate-900 text-lg ml-1">{displayP} <span className="font-normal text-[10px] text-slate-500">p</span></span>}
+                                {/* ★修正: 完了時のみ p数を表示 */}
+                                {isCompleted && displayP > 0 && <span className="font-black text-slate-900 text-lg ml-1">{displayP} <span className="font-normal text-[10px] text-slate-500">p</span></span>}
                               </div>
                             </div>
                           </div>
@@ -662,7 +655,6 @@ export default function ProductionPage() {
               <div className="space-y-3 h-[calc(100vh-200px)] overflow-y-auto pr-2 pb-10">
                 {orders.map((order) => {
                   const unitPerCs = order.products?.unit_per_cs || 24;
-                  // ★修正: ピース数からの計算
                   const displayCs = Math.floor(order.remainPieces / unitPerCs);
                   const displayP = Math.floor((order.remainPieces % unitPerCs) / 2);
                   const totalCs = Math.floor(order.quantity / unitPerCs);
@@ -711,7 +703,6 @@ export default function ProductionPage() {
                             <div className="md:text-right border-t md:border-none pt-2 md:pt-0 mt-2 md:mt-0">
                               <div className="text-xs text-slate-500 mb-1">この受注の残数</div>
                               <div className="font-black text-2xl text-red-600">
-                                {/* ★修正 */}
                                 {Math.floor((selectedOrder?.remainPieces || 0) / (selectedOrder?.products?.unit_per_cs || 24))} <span className="text-sm font-normal text-slate-500">c/s</span>
                                 {Math.floor(((selectedOrder?.remainPieces || 0) % (selectedOrder?.products?.unit_per_cs || 24)) / 2) > 0 && <span className="ml-1 text-xl">{Math.floor(((selectedOrder?.remainPieces || 0) % (selectedOrder?.products?.unit_per_cs || 24)) / 2)} <span className="text-xs font-normal text-slate-500">p</span></span>}
                               </div>
@@ -755,7 +746,6 @@ export default function ProductionPage() {
                         {plans.map(plan => {
                           const unitPerCs = plan.products?.unit_per_cs || 24;
                           const isCompleted = plan.status === 'completed';
-                          // ★修正
                           const totalPcs = isCompleted ? ((plan.actual_cs !== undefined ? plan.actual_cs : plan.planned_cs) * unitPerCs + (plan.actual_piece || 0) * 2) : (plan.planned_units || (plan.planned_cs * unitPerCs));
                           const displayCs = Math.floor(totalPcs / unitPerCs);
                           const displayP = Math.floor((totalPcs % unitPerCs) / 2);
@@ -769,7 +759,8 @@ export default function ProductionPage() {
                               <TableCell><div className="font-bold text-blue-600">{plan.lot_code}</div><div className="text-xs text-slate-600">{plan.products?.name}</div></TableCell>
                               <TableCell className="text-right font-bold">
                                 {displayCs} c/s
-                                {displayP > 0 && <span className="ml-1">{displayP} p</span>}
+                                {/* ★修正: 完了時のみ p数を表示 */}
+                                {isCompleted && displayP > 0 && <span className="ml-1">{displayP} p</span>}
                               </TableCell>
                               <TableCell className="text-center">
                                 {plan.status === 'planned' && <Badge className="bg-blue-100 text-blue-700 border-none shadow-sm">計画</Badge>}
@@ -887,7 +878,6 @@ export default function ProductionPage() {
                   予定との誤差: {
                     ((Number(actualCs) * (editingPlan.products?.unit_per_cs || 24)) + (Number(actualPiece) * 2)) - (editingPlan.planned_units || (editingPlan.planned_cs * (editingPlan.products?.unit_per_cs || 24))) > 0 ? "+" : ""
                   }
-                  {/* ★修正: 誤差をパック数で表示 */}
                   {Math.floor((((Number(actualCs) * (editingPlan.products?.unit_per_cs || 24)) + (Number(actualPiece) * 2)) - (editingPlan.planned_units || (editingPlan.planned_cs * (editingPlan.products?.unit_per_cs || 24)))) / 2)} パック
                 </div>
               )}
@@ -913,7 +903,6 @@ export default function ProductionPage() {
               {calendarOrders.filter(o => o.planned_ship_date === ordersModalDate).map(ord => {
                 const isShipped = ord.status === 'shipped';
                 const unitPerCs = ord.products?.unit_per_cs || 24;
-                // ★修正: ピース数からの計算
                 const displayCs = Math.floor(ord.quantity / unitPerCs);
                 const displayP = Math.floor((ord.quantity % unitPerCs) / 2);
 
