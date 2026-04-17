@@ -39,12 +39,15 @@ export default function ProductionPage() {
   const [planKg, setPlanKg] = useState<number | "">("");
   const [planNotes, setPlanNotes] = useState("");
   const [calculatedLot, setCalculatedLot] = useState("");
+  // ★追加: ユーザーが手動でLot番号を編集したかどうかのフラグ
+  const [isLotEdited, setIsLotEdited] = useState(false);
   const [calculatedExpiry, setCalculatedExpiry] = useState("");
   const [calculatedCs, setCalculatedCs] = useState(0);
 
   const [editingPlan, setEditingPlan] = useState<Plan | null>(null);
   const [editDate, setEditDate] = useState("");
   const [editKg, setEditKg] = useState<number | "">("");
+  const [editLot, setEditLot] = useState(""); // ★追加: 編集用Lot番号
   const [editNotes, setEditNotes] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
 
@@ -145,33 +148,37 @@ export default function ProductionPage() {
 
     if (pId && targetProduct && planDate && planKg) {
       setCalculatedExpiry(calculateExpiryDate(planDate));
-      setCalculatedLot(generateLotNumber(planDate, pId, 1));
-
       const pcs = (planKg as number) * targetProduct.unit_per_kg;
       setCalculatedCs(Math.floor(pcs / targetProduct.unit_per_cs));
+
+      // ★手動で編集されていない場合のみLot番号を自動計算
+      if (!isLotEdited) {
+        setCalculatedLot(generateLotNumber(planDate, pId, 1));
+      }
     } else {
-      setCalculatedLot(""); setCalculatedExpiry(""); setCalculatedCs(0);
+      if (!isLotEdited) setCalculatedLot("");
+      setCalculatedExpiry(""); setCalculatedCs(0);
     }
-  }, [selectedOrder, planDate, planKg, isStockProduction, stockProductId, products]);
+  }, [selectedOrder, planDate, planKg, isStockProduction, stockProductId, products, isLotEdited]);
 
   const handleSelectOrder = (order: Order) => {
     setIsStockProduction(false); setStockProductId("");
     setSelectedOrder(order); setPlanDate(new Date().toISOString().split('T')[0]);
     const requiredKg = Math.ceil(order.remainPieces / order.products!.unit_per_kg);
-    setPlanKg(requiredKg); setPlanNotes("");
+    setPlanKg(requiredKg); setPlanNotes(""); setIsLotEdited(false); // ★リセット
   };
 
   const handleSelectStockProduction = () => {
     setSelectedOrder(null); setIsStockProduction(true);
     setPlanDate(new Date().toISOString().split('T')[0]);
-    setPlanKg(""); setPlanNotes(""); setStockProductId("");
+    setPlanKg(""); setPlanNotes(""); setStockProductId(""); setIsLotEdited(false); // ★リセット
   };
 
   const resetInputForNextDay = (order: Order, currentDateStr: string) => {
     const nextDate = new Date(currentDateStr); nextDate.setDate(nextDate.getDate() + 1);
     setPlanDate(nextDate.toISOString().split('T')[0]);
     const requiredKg = Math.ceil(order.remainPieces / order.products!.unit_per_kg);
-    setPlanKg(requiredKg); setPlanNotes("");
+    setPlanKg(requiredKg); setPlanNotes(""); setIsLotEdited(false); // ★リセット
   };
 
   const handleSavePlan = async () => {
@@ -198,7 +205,7 @@ export default function ProductionPage() {
       } else {
         alert(isStockProduction ? "在庫品としての製造計画を登録しました！" : "計画を登録しました！");
         fetchData();
-        if (isStockProduction) { setPlanKg(""); setPlanNotes(""); }
+        if (isStockProduction) { setPlanKg(""); setPlanNotes(""); setIsLotEdited(false); }
       }
     } else alert("エラー: " + error.message);
     setIsProcessing(false);
@@ -209,6 +216,7 @@ export default function ProductionPage() {
     setEditingPlan(plan);
     setEditDate(plan.production_date);
     setEditKg(plan.production_kg);
+    setEditLot(plan.lot_code); // ★編集用Lotをセット
     setEditNotes(plan.notes || "");
   };
 
@@ -218,17 +226,29 @@ export default function ProductionPage() {
   };
 
   const handleUpdatePlan = async () => {
-    if (!editingPlan || !editDate || !editKg) return;
+    if (!editingPlan || !editDate || !editKg || !editLot) {
+      alert("必須項目が入力されていません。");
+      return;
+    }
     setIsProcessing(true);
     const unit_per_kg = editingPlan.products?.unit_per_kg || 10;
     const unit_per_cs = editingPlan.products?.unit_per_cs || 24;
     const pcs = (editKg as number) * unit_per_kg;
     const newCs = Math.floor(pcs / unit_per_cs);
-    const newExpiry = calculateExpiryDate(editDate); const newLot = generateLotNumber(editDate, editingPlan.product_id, 1);
+    const newExpiry = calculateExpiryDate(editDate);
 
-    const updates = { production_date: editDate, production_kg: editKg, planned_cs: newCs, planned_units: pcs, lot_code: newLot, expiry_date: newExpiry, notes: editNotes };
+    // ★修正: 新規自動計算Lotではなく、編集用Lot(editLot)を保存する
+    const updates = { production_date: editDate, production_kg: editKg, planned_cs: newCs, planned_units: pcs, lot_code: editLot, expiry_date: newExpiry, notes: editNotes };
     const { error } = await supabase.from("production_plans").update(updates).eq("id", editingPlan.id);
-    if (!error) { setEditingPlan(null); if (viewMode === 'calendar') fetchCalendarPlans(); fetchData(); alert("計画を更新しました。"); } else alert("更新失敗: " + error.message);
+
+    if (!error) {
+      setEditingPlan(null);
+      if (viewMode === 'calendar') fetchCalendarPlans();
+      fetchData();
+      alert("計画を更新しました。");
+    } else {
+      alert("更新失敗: " + error.message);
+    }
     setIsProcessing(false);
   };
 
@@ -500,7 +520,6 @@ export default function ProductionPage() {
                                   <div className="text-slate-600 print:text-black mb-0.5">{plan.products?.variant_name}</div>
                                   <div className="font-black text-slate-900 print:text-black">
                                     {displayCs} <span className="font-normal text-[10px]">c/s</span>
-                                    {/* ★修正: 完了時（実績）のみ p数を表示。予定時は c/s と kg のみ */}
                                     {isCompleted && displayP > 0 && <span className="ml-1">{displayP} <span className="font-normal text-[10px]">p</span></span>}
                                     {!isCompleted && <span className="text-slate-600 font-normal ml-1">({plan.production_kg}kg)</span>}
                                   </div>
@@ -587,7 +606,6 @@ export default function ProductionPage() {
                               <div className="text-slate-600 italic truncate max-w-[50%]">{plan.notes || ""}</div>
                               <div className="font-black text-slate-900 text-lg">
                                 {displayCs} <span className="font-normal text-[10px] text-slate-500">c/s</span>
-                                {/* ★修正: 完了時のみ p数を表示 */}
                                 {isCompleted && displayP > 0 && <span className="font-black text-slate-900 text-lg ml-1">{displayP} <span className="font-normal text-[10px] text-slate-500">p</span></span>}
                               </div>
                             </div>
@@ -720,7 +738,19 @@ export default function ProductionPage() {
                       <div className="bg-blue-50/50 border border-blue-200 rounded-lg p-5 relative">
                         <h3 className="font-bold text-blue-900 mb-3 flex items-center gap-2 text-md"><PackageCheck className="h-5 w-5" /> 発行されるLot情報</h3>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                          <div className="bg-white p-3 rounded-md border border-blue-100 shadow-sm text-center"><div className="text-xs font-bold text-slate-500 mb-1">製造Lot番号</div><div className="text-2xl font-black text-blue-700 tracking-wider">{calculatedLot || "-"}</div></div>
+                          <div className="bg-white p-3 rounded-md border border-blue-100 shadow-sm text-center">
+                            <div className="text-xs font-bold text-slate-500 mb-1">製造Lot番号</div>
+                            {/* ★修正: Lot番号を手動編集できるようにInput化 */}
+                            <Input
+                              value={calculatedLot}
+                              onChange={(e) => {
+                                setCalculatedLot(e.target.value);
+                                setIsLotEdited(true); // 手入力されたフラグを立てる
+                              }}
+                              className="text-xl font-black text-blue-700 tracking-wider text-center border-blue-200 h-10"
+                              placeholder="自動計算"
+                            />
+                          </div>
                           <div className="bg-white p-3 rounded-md border border-blue-100 shadow-sm text-center"><div className="text-xs font-bold text-slate-500 mb-1">賞味期限</div><div className="text-2xl font-black text-slate-800 tracking-wider">{calculatedExpiry ? new Date(calculatedExpiry).toLocaleDateString() : "-"}</div></div>
                         </div>
                       </div>
@@ -809,7 +839,16 @@ export default function ProductionPage() {
             {editingPlan && (
               <div className="space-y-4 mt-2">
                 <div className="bg-slate-50 p-3 rounded-lg border text-sm">
-                  <div className="text-slate-500 text-xs mb-1">Lot番号: <span className="font-bold text-slate-800">{editingPlan.lot_code}</span></div>
+                  {/* ★修正: 編集用のLot番号入力枠を追加 */}
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="text-slate-500 text-xs font-bold shrink-0">Lot番号:</div>
+                    <Input
+                      value={editLot}
+                      onChange={e => setEditLot(e.target.value)}
+                      disabled={editingPlan.status !== 'planned' || !canEdit}
+                      className="h-8 font-black text-blue-800 bg-white border-blue-200"
+                    />
+                  </div>
                   <div className="font-bold text-lg text-blue-900 leading-tight">{editingPlan.products?.name}</div>
                   <div className="text-slate-600 mt-1">{editingPlan.products?.variant_name}</div>
                 </div>
@@ -878,6 +917,7 @@ export default function ProductionPage() {
                   予定との誤差: {
                     ((Number(actualCs) * (editingPlan.products?.unit_per_cs || 24)) + (Number(actualPiece) * 2)) - (editingPlan.planned_units || (editingPlan.planned_cs * (editingPlan.products?.unit_per_cs || 24))) > 0 ? "+" : ""
                   }
+                  {/* ★修正: 誤差をパック数で表示 */}
                   {Math.floor((((Number(actualCs) * (editingPlan.products?.unit_per_cs || 24)) + (Number(actualPiece) * 2)) - (editingPlan.planned_units || (editingPlan.planned_cs * (editingPlan.products?.unit_per_cs || 24)))) / 2)} パック
                 </div>
               )}
