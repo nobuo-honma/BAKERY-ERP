@@ -82,7 +82,7 @@ export default function EcopackChecksPage() {
             const lots = data.map((d: any) => ({
                 lot_code: d.lot_code,
                 product_name: `${d.products?.name} (${d.products?.variant_name})`,
-                planned_units: d.planned_units || (d.planned_cs * (d.products?.unit_per_cs || 24)),
+                planned_units: d.planned_units || (d.planned_cs * (d.products?.unit_per_cs || 24) * 2), // ピース数換算
                 unit_per_cs: d.products?.unit_per_cs || 24
             }));
             setAvailableLots(lots);
@@ -170,7 +170,6 @@ export default function EcopackChecksPage() {
     // A4 縦サイズ
     // =======================================================================
 
-    // ★修正: 対象月のデータを絞り込み、日付の「若い順（昇順）」に並び替える
     const printRecords = testRecords
         .filter(r => {
             const d = new Date(r.check_date);
@@ -302,7 +301,8 @@ export default function EcopackChecksPage() {
                                     return <><span className="text-slate-400">良</span> <span className="text-slate-400">不</span></>;
                                 };
 
-                                const rowCs = Math.floor(row.planned_qty / 24);
+                                // ★修正: 個数を2で割ってパック数にし、さらにunit_per_csで割ってケース数を出す
+                                const rowCs = Math.floor((row.planned_qty / 2) / 24);
 
                                 return (
                                     <tr key={row.id} className="h-[7mm]">
@@ -406,7 +406,8 @@ export default function EcopackChecksPage() {
                                                 <TableCell className="font-black text-teal-700 tracking-widest">{rec.lot_code}</TableCell>
                                                 <TableCell className="font-bold text-slate-800">{rec.product_name}</TableCell>
                                                 <TableCell className="text-right pr-4 text-xs font-bold text-slate-600">
-                                                    {Math.floor(rec.planned_qty / 24)} c/s <span className="font-normal">({rec.planned_qty} 個)</span>
+                                                    {/* ★修正: ピース数を2で割ってから24で割る */}
+                                                    {Math.floor((rec.planned_qty / 2) / 24)} c/s <span className="font-normal">({rec.planned_qty} 個)</span>
                                                 </TableCell>
                                                 <TableCell className="text-center">
                                                     <div className="flex justify-center gap-2">
@@ -457,9 +458,10 @@ export default function EcopackChecksPage() {
                                         <Input type="number" min="0" value={plannedQty} onChange={e => setPlannedQty(e.target.value === "" ? "" : Number(e.target.value))} className="h-10 text-lg font-bold text-right" />
                                         <span className="font-bold text-slate-500">個</span>
                                     </div>
+                                    {/* ▼ 修正: ピース数を2で割ってパックにし、さらにunit_per_csで割ってケース数を出す */}
                                     {plannedQty !== "" && (
                                         <p className="text-xs text-right text-slate-500 font-bold mt-1">
-                                            ≒ {Math.floor(Number(plannedQty) / unitPerCs)} c/s
+                                            ≒ {Math.floor((Number(plannedQty) / 2) / unitPerCs)} c/s
                                         </p>
                                     )}
                                 </div>
