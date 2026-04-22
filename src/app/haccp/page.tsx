@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 // ▼ 修正: PackageOpen をインポートリストに追加しました ▼
-import { FileText, Plus, ExternalLink, Edit, Trash2, Loader2, Save, Lock, Search, ShieldCheck, ClipboardCheck, Building2, Wrench, Sparkles, ShieldAlert, ArrowRight, Trash, Eye, PackageOpen, Box } from "lucide-react";
+import { FileText, Plus, ExternalLink, Edit, Trash2, Loader2, Save, Lock, Search, ShieldCheck, ClipboardCheck, Building2, Wrench, Sparkles, ShieldAlert, ArrowRight, Trash, Eye, PackageOpen, Box, LineChart } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import Link from "next/link";
 
@@ -278,6 +278,22 @@ export default function HaccpPortalPage() {
                                 <CardContent>
                                     <p className="text-sm text-slate-600 leading-relaxed mb-4">製品のシール状態や酸素濃度など、製造ごとの品質保証と適合判定を記録します。</p>
                                     <div className="text-xs font-bold text-teal-600 flex items-center justify-end">記録する / PDF出力 <ArrowRight className="w-4 h-4 ml-1 transition-transform group-hover:translate-x-1" /></div>
+                                </CardContent>
+                            </Card>
+                        </Link>
+
+                        <Link href="/fuji-steamy" className="block group">
+                            <Card className="h-full border-2 border-slate-200 hover:border-indigo-400 hover:bg-indigo-50/30 transition-all shadow-sm group-hover:shadow-md cursor-pointer">
+                                <CardHeader className="pb-2">
+                                    <div className="flex justify-between items-start">
+                                        <div className="bg-indigo-100 p-2.5 rounded-lg text-indigo-700 group-hover:scale-110 transition-transform"><LineChart className="w-6 h-6" /></div>
+                                        <Badge className="bg-slate-100 text-slate-500 shadow-none border-none text-[10px]">自動解析</Badge>
+                                    </div>
+                                    <CardTitle className="text-xl font-bold text-slate-800 mt-4">加熱調理記録 (フジスチーミー)</CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                    <p className="text-sm text-slate-600 leading-relaxed mb-4">装置から出力されたCSVログをドラッグ＆ドロップするだけで、80℃到達時間や最高温度を自動抽出し、記録表を生成します。</p>
+                                    <div className="text-xs font-bold text-indigo-600 flex items-center justify-end">解析する / PDF出力 <ArrowRight className="w-4 h-4 ml-1 transition-transform group-hover:translate-x-1" /></div>
                                 </CardContent>
                             </Card>
                         </Link>
