@@ -10,6 +10,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CheckCircle2, XCircle, MinusCircle, Save, Loader2, CalendarDays, Printer, ArrowLeft, Sparkles, Lock } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+// ★共通ヘッダー部品をインポート
+import HaccpPrintHeader from "@/components/HaccpPrintHeader";
 
 // YO-21 の項目定義 (全8項目)
 const AREA_CLEANING_ITEMS = [
@@ -103,16 +105,14 @@ export default function AreaCleaningChecksPage() {
 
     // =======================================================================
     // 印刷（PDF帳票）ビュー
-    // 元の紙レイアウトに合わせて「上段1〜16日」「下段17〜月末」の2段組で出力
     // =======================================================================
     if (viewMode === 'print') {
+        // ★ 変数 y と m をここで定義しているので、このブロック内なら使えます
         const y = calendarMonth.getFullYear();
         const m = calendarMonth.getMonth() + 1;
         const daysInMonth = new Date(y, m, 0).getDate();
 
-        // 1日〜16日
         const daysTop = Array.from({ length: 16 }, (_, i) => i + 1);
-        // 17日〜月末
         const daysBottom = Array.from({ length: daysInMonth - 16 }, (_, i) => i + 17);
 
         return (
@@ -139,38 +139,17 @@ export default function AreaCleaningChecksPage() {
 
                 <div className="w-[297mm] h-[210mm] bg-white pt-8 pb-4 px-12 print:p-0 shadow-xl print:shadow-none text-black font-sans box-border flex flex-col justify-start gap-8">
 
-                    <div className="flex justify-between items-end mb-2">
-                        <div className="flex items-end gap-6">
-                            <h1 className="text-3xl font-bold tracking-widest">清掃チェック表</h1>
-                            <div className="text-xl font-bold mb-1">令和 {y - 2018} <span className="font-normal text-base">年</span> {m} <span className="font-normal text-base">月</span></div>
-                        </div>
-                        <table className="border-collapse border border-black text-center text-xs">
-                            <tbody>
-                                <tr>
-                                    <th className="border border-black px-2 py-0.5 font-medium w-16 bg-gray-100">文章No.</th>
-                                    <td className="border border-black px-2 py-0.5 w-24 bg-gray-100">YO-21</td>
-                                    <th className="border border-black px-4 py-0.5 font-medium w-24">担当</th>
-                                    <th className="border border-black px-4 py-0.5 font-medium w-24">施設長</th>
-                                </tr>
-                                <tr>
-                                    <th className="border border-black px-2 py-0.5 font-medium bg-gray-100">制定日</th>
-                                    <td className="border border-black px-2 py-0.5 bg-gray-100">2021/4/1</td>
-                                    <td className="border border-black" rowSpan={3}></td>
-                                    <td className="border border-black" rowSpan={3}></td>
-                                </tr>
-                                <tr>
-                                    <th className="border border-black px-2 py-0.5 font-medium bg-gray-100">改定日</th>
-                                    <td className="border border-black px-2 py-0.5 bg-gray-100"></td>
-                                </tr>
-                                <tr>
-                                    <td className="border border-black px-2 py-1 bg-gray-100" colSpan={2}>ワークセンター・やまびこ</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
+                    {/* ★共通ヘッダーを使用 */}
+                    <HaccpPrintHeader
+                        title="清掃チェック表"
+                        subtitle={<>令和 {y - 2018} <span className="font-normal text-sm">年</span> {m} <span className="font-normal text-sm">月</span></>}
+                        docNo="YO-21"
+                        establishedDate="2021/4/1"
+                        revisedDate=""
+                    />
 
                     {/* 上段テーブル (1日〜16日) */}
-                    <table className="w-full border-collapse border-2 border-black text-[12px] table-fixed mb-4">
+                    <table className="w-full border-collapse border-2 border-black text-[12px] table-fixed mb-4 mt-2">
                         <thead>
                             <tr className="bg-gray-100">
                                 <th className="border border-black py-1 w-[8%] font-bold">項目</th>
@@ -192,7 +171,6 @@ export default function AreaCleaningChecksPage() {
                                     })}
                                 </tr>
                             ))}
-                            {/* サイン欄 */}
                             <tr className="h-8">
                                 <td className="border border-black text-center">確認</td>
                                 <td className="border border-black px-2 text-xs">確認者は印を押す。</td>
@@ -211,7 +189,6 @@ export default function AreaCleaningChecksPage() {
                             <tr className="bg-gray-100">
                                 <th className="border border-black py-1 w-[8%] font-bold">項目</th>
                                 <th className="border border-black py-1 w-[22%] font-bold">清掃方法</th>
-                                {/* 日付枠は16枠分確保してレイアウトを揃える */}
                                 {Array.from({ length: 16 }, (_, i) => i + 17).map(day => (
                                     <th key={day} className={`border border-black py-1 font-bold w-[4.3%] ${day > daysInMonth ? 'bg-gray-200' : ''}`}>
                                         {day <= daysInMonth ? `${day}日` : ''}
@@ -234,7 +211,6 @@ export default function AreaCleaningChecksPage() {
                                     })}
                                 </tr>
                             ))}
-                            {/* サイン欄 */}
                             <tr className="h-8">
                                 <td className="border border-black text-center">確認</td>
                                 <td className="border border-black px-2 text-xs">確認者は印を押す。</td>
@@ -253,7 +229,7 @@ export default function AreaCleaningChecksPage() {
     }
 
     // =======================================================================
-    // 通常画面
+    // 通常画面 (日次入力 / 月次一覧)
     // =======================================================================
     return (
         <div className="bg-transparent">

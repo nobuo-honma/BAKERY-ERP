@@ -11,6 +11,7 @@ import { Loader2, Save, Printer, ArrowLeft, UploadCloud, Settings, Trash2, LineC
 import { useAuth } from "@/contexts/AuthContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import HaccpPrintHeader from "@/components/HaccpPrintHeader";
 
 type ParsedData = {
     fileName: string;
@@ -275,10 +276,12 @@ export default function FujiSteamyPage() {
                 </div>
 
                 <div className="w-[297mm] min-h-[210mm] bg-white pt-8 pb-10 px-12 print:p-0 shadow-xl print:shadow-none text-black font-sans box-border flex flex-col">
-                    <div className="flex justify-between items-end mb-4">
-                        <h1 className="text-2xl font-bold tracking-widest">加熱調理記録 (フジスチーミー運転記録)</h1>
-                        <div className="text-lg font-bold">{y}年 {m}月度</div>
-                    </div>
+                    <HaccpPrintHeader
+                        title="高温高圧減菌機運転記録"
+                        docNo="YO-5"
+                        establishedDate="2021/4/1"
+                        revisedDate="2025/4/1"
+                    />
 
                     <table className="w-full border-collapse border-2 border-black text-sm flex-1">
                         <thead className="bg-gray-100">

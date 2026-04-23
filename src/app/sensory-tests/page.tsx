@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Save, Loader2, CalendarDays, Printer, ArrowLeft, Eye, Lock, Edit, Trash2, Plus } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import HaccpPrintHeader from "@/components/HaccpPrintHeader";
 
 // YO-30 の項目定義
 // 各セクションのチェック項目と、その選択肢（options）を定義
@@ -276,42 +277,13 @@ export default function SensoryTestsPage() {
 
                 <div className="w-[210mm] min-h-[297mm] bg-white pt-8 pb-10 px-10 print:p-0 shadow-xl print:shadow-none text-black font-sans box-border flex flex-col">
 
-                    <div className="flex justify-between items-start mb-6">
-                        <h1 className="text-2xl font-bold tracking-widest mt-4 shrink-0">災害備蓄用パン官能検査実施表</h1>
-                        <table className="border-collapse border border-black text-center text-xs flex-1 max-w-[50%] ml-4">
-                            <tbody>
-                                <tr>
-                                    <th className="border border-black px-2 py-1 font-medium w-16 bg-gray-100 whitespace-nowrap">文章No.</th>
-                                    <td className="border border-black px-2 py-1 w-20 whitespace-nowrap">YO-30</td>
-                                    <th className="border border-black px-4 py-1 font-medium w-[33%] whitespace-nowrap">施設長</th>
-                                    <th className="border border-black px-4 py-1 font-medium w-[33%] whitespace-nowrap">担当者</th>
-                                    <th className="border border-black px-4 py-1 font-medium w-[33%] whitespace-nowrap">副担当者</th>
-                                </tr>
-                                <tr>
-                                    <th className="border border-black px-2 py-1 font-medium bg-gray-100 whitespace-nowrap">制定日</th>
-                                    <td className="border border-black px-2 py-1 whitespace-nowrap">2021/4/1</td>
-                                    <td className="border border-black relative" rowSpan={3}>
-                                        <div className="absolute inset-0 flex items-center justify-center text-gray-300 text-sm font-medium print:text-black/30">印</div>
-                                    </td>
-                                    <td className="border border-black relative" rowSpan={3}>
-                                        <div className="absolute inset-0 flex items-center justify-center text-gray-300 text-sm font-medium print:text-black/30">印</div>
-                                        <div className="text-[10px] relative z-10 font-bold mt-8">{rec.checker_name}</div>
-                                    </td>
-                                    <td className="border border-black relative" rowSpan={3}>
-                                        <div className="absolute inset-0 flex items-center justify-center text-gray-300 text-sm font-medium print:text-black/30">印</div>
-                                        <div className="text-[10px] relative z-10 font-bold mt-8">{rec.sub_checker_name}</div>
-                                    </td>
-                                </tr>
-                                <tr>
-                                    <th className="border border-black px-2 py-1 font-medium bg-gray-100 whitespace-nowrap">改定日</th>
-                                    <td className="border border-black px-2 py-1 whitespace-nowrap">2023/4/1</td>
-                                </tr>
-                                <tr>
-                                    <td className="border border-black px-2 py-1.5 whitespace-nowrap" colSpan={2}>ワークセンター・やまびこ</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
+                    <HaccpPrintHeader
+                        title="災害備蓄用パン官能検査実施表"
+                        docNo="YO-30"
+                        establishedDate="2021/4/1"
+                        revisedDate="2023/4/1"
+                        hasSubChecker={true}
+                    />
 
                     <div className="mb-4 space-y-3 font-medium text-sm">
                         <div className="flex items-end">

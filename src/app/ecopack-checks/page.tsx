@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { CheckCircle2, XCircle, MinusCircle, Save, Loader2, CalendarDays, Printer, ArrowLeft, Eye, Lock, Edit, Trash2, Plus, Box } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import HaccpPrintHeader from "@/components/HaccpPrintHeader";
 
 // YO-4 のチェック内容定義
 const CHECK_ITEMS = [
@@ -214,39 +215,13 @@ export default function EcopackChecksPage() {
 
                 <div className="w-[210mm] min-h-[297mm] bg-white pt-8 pb-10 px-10 print:p-0 shadow-xl print:shadow-none text-black font-sans box-border flex flex-col">
 
-                    <div className="flex justify-between items-start mb-2">
-                        <div className="flex flex-col justify-end">
-                            <h1 className="text-2xl font-bold tracking-widest mt-4">エコパック製品チェック表</h1>
-                            <div className="text-xs font-bold mt-2">{y}年{m}月度</div>
-                        </div>
-                        <table className="border-collapse border border-black text-center text-xs w-[45%] mt-4">
-                            <tbody>
-                                <tr>
-                                    <th className="border border-black px-1 py-1 font-medium w-[25%] bg-gray-100">文書№</th>
-                                    <td className="border border-black px-1 py-1 w-[25%]">YO-4</td>
-                                    <th className="border border-black px-2 py-1 font-medium w-[25%]">施 設 長</th>
-                                    <th className="border border-black px-2 py-1 font-medium w-[25%]">担 当 者</th>
-                                </tr>
-                                <tr>
-                                    <th className="border border-black px-1 py-1 font-medium bg-gray-100">制定日</th>
-                                    <td className="border border-black px-1 py-1">2019/10/1</td>
-                                    <td className="border border-black relative" rowSpan={3}>
-                                        <div className="absolute inset-0 flex items-center justify-center text-gray-300 text-sm font-medium print:text-black/30">印</div>
-                                    </td>
-                                    <td className="border border-black relative" rowSpan={3}>
-                                        <div className="absolute inset-0 flex items-center justify-center text-gray-300 text-sm font-medium print:text-black/30">印</div>
-                                    </td>
-                                </tr>
-                                <tr>
-                                    <th className="border border-black px-1 py-1 font-medium bg-gray-100">改定日</th>
-                                    <td className="border border-black px-1 py-1">2021/2/1</td>
-                                </tr>
-                                <tr>
-                                    <td className="border border-black px-1 py-1.5 bg-gray-100 text-[10px]" colSpan={2}>ワークセンターやまびこ</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
+                    <HaccpPrintHeader
+                        title="エコパック製品チェック表"
+                        subtitle={<>{y}年{m}月度</>}
+                        docNo="YO-4"
+                        establishedDate="2019/10/1"
+                        revisedDate="2021/2/1"
+                    />
 
                     <table className="w-full border-collapse border-2 border-black text-[10px] flex-1 table-fixed">
                         <thead>

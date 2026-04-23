@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CheckCircle2, XCircle, MinusCircle, Save, Loader2, CalendarDays, Printer, ArrowLeft, ClipboardCheck, Lock } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import HaccpPrintHeader from "@/components/HaccpPrintHeader";
 
 // 元のPDF帳票（YO-22）に合わせた点検項目の定義
 const CLEANING_ITEMS = [
@@ -164,36 +165,13 @@ export default function CleaningChecksPage() {
                 </div>
 
                 <div className="w-[297mm] h-[210mm] bg-white pt-8 pb-4 px-10 print:p-0 shadow-xl print:shadow-none text-black font-sans box-border flex flex-col">
-                    <div className="flex justify-between items-start mb-6">
-                        <div>
-                            <h1 className="text-3xl font-bold tracking-widest mb-4">清掃・点検チェック表</h1>
-                            <div className="text-xl font-bold">{y} <span className="text-base font-normal">年</span> {m} <span className="text-base font-normal">月</span></div>
-                        </div>
-                        <div className="text-xs text-right">※平日の日付のみ表示</div>
-                        <table className="border-collapse border border-black text-center text-xs">
-                            <tbody>
-                                <tr>
-                                    <th className="border border-black px-4 py-1 font-medium bg-gray-100">文章No.</th>
-                                    <td className="border border-black px-4 py-1">YO-22</td>
-                                    <th className="border border-black px-6 py-1 font-medium bg-gray-100 w-24">施設長</th>
-                                    <th className="border border-black px-6 py-1 font-medium bg-gray-100 w-24">担当者</th>
-                                </tr>
-                                <tr>
-                                    <th className="border border-black px-4 py-1 font-medium bg-gray-100">制定日</th>
-                                    <td className="border border-black px-4 py-1">2021/4/1</td>
-                                    <td className="border border-black" rowSpan={3}></td>
-                                    <td className="border border-black" rowSpan={3}></td>
-                                </tr>
-                                <tr>
-                                    <th className="border border-black px-4 py-1 font-medium bg-gray-100">改定日</th>
-                                    <td className="border border-black px-4 py-1">2023/4/1</td>
-                                </tr>
-                                <tr>
-                                    <td className="border border-black px-4 py-2" colSpan={2}>ワークセンター・やまびこ</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
+                    <HaccpPrintHeader
+                        title="清掃・点検チェック表"
+                        subtitle={<>{y} <span className="text-base font-normal">年</span> {m} <span className="text-base font-normal">月</span></>}
+                        docNo="YO-22"
+                        establishedDate="2021/4/1"
+                        revisedDate="2023/4/1"
+                    />
 
                     <table className="w-full border-collapse border-2 border-black text-[11px] flex-1 table-fixed">
                         <thead>
@@ -339,8 +317,8 @@ export default function CleaningChecksPage() {
                                                                 onClick={() => toggleResult(item.id)}
                                                                 disabled={!canEdit}
                                                                 className={`w-full sm:w-32 h-14 rounded-xl flex items-center justify-center gap-2 font-black text-lg transition-all shadow-sm border-2 ${isOk ? 'bg-emerald-500 border-emerald-600 text-white' :
-                                                                        isNg ? 'bg-red-500 border-red-600 text-white' :
-                                                                            'bg-slate-100 border-slate-300 text-slate-400 hover:bg-slate-200'
+                                                                    isNg ? 'bg-red-500 border-red-600 text-white' :
+                                                                        'bg-slate-100 border-slate-300 text-slate-400 hover:bg-slate-200'
                                                                     }`}
                                                             >
                                                                 {isOk && <><CheckCircle2 className="w-5 h-5" /> 良</>}

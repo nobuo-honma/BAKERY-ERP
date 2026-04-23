@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CheckCircle2, XCircle, Save, Loader2, CalendarDays, Printer, ArrowLeft, PackageOpen, Lock, ChevronDown, ChevronUp } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import HaccpPrintHeader from "@/components/HaccpPrintHeader";
 
 // YO-14 の項目定義 (全28項目)
 const MATERIAL_ITEMS = [
@@ -153,37 +154,12 @@ export default function MaterialReceivingPage() {
 
                 <div className="w-[210mm] min-h-[297mm] bg-white pt-8 pb-6 px-10 print:p-0 shadow-xl print:shadow-none text-black font-sans box-border flex flex-col">
 
-                    <div className="flex justify-between items-start mb-6">
-                        <h1 className="text-3xl font-bold tracking-widest mt-6">原材料受入台帳</h1>
-                        <table className="border-collapse border border-black text-center text-[11px] max-w-[50%]">
-                            <tbody>
-                                <tr>
-                                    <th className="border border-black px-2 py-1 font-medium w-16 bg-gray-100">文章No.</th>
-                                    <td className="border border-black px-2 py-1 w-20">YO-14</td>
-                                    <th className="border border-black px-4 py-1 font-medium w-[40%]">施設長</th>
-                                    <th className="border border-black px-4 py-1 font-medium w-[40%]">担当者</th>
-                                </tr>
-                                <tr>
-                                    <th className="border border-black px-2 py-1 font-medium bg-gray-100">制定日</th>
-                                    <td className="border border-black px-2 py-1">2021/4/1</td>
-                                    <td className="border border-black relative" rowSpan={3}>
-                                        <div className="absolute inset-0 flex items-center justify-center text-gray-300 text-sm font-medium print:text-black/30">印</div>
-                                    </td>
-                                    <td className="border border-black relative" rowSpan={3}>
-                                        <div className="absolute inset-0 flex items-center justify-center text-gray-300 text-sm font-medium print:text-black/30">印</div>
-                                        <div className="text-[10px] relative z-10 font-bold mt-8">{rec.checker_name}</div>
-                                    </td>
-                                </tr>
-                                <tr>
-                                    <th className="border border-black px-2 py-1 font-medium bg-gray-100">改定日</th>
-                                    <td className="border border-black px-2 py-1">2023/5/1</td>
-                                </tr>
-                                <tr>
-                                    <td className="border border-black px-2 py-1.5" colSpan={2}>ワークセンター・やまびこ</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
+                    <HaccpPrintHeader
+                        title="原材料受入台帳"
+                        docNo="YO-14"
+                        establishedDate="2021/4/1"
+                        revisedDate="2023/5/1"
+                    />
 
                     <div className="mb-2 text-base font-bold flex gap-4">
                         <div>入荷日：</div>

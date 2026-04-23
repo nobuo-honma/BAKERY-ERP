@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CheckCircle2, XCircle, MinusCircle, Save, Loader2, CalendarDays, Printer, ArrowLeft, Trash, Lock } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import HaccpPrintHeader from "@/components/HaccpPrintHeader";
 
 // YO-41 の項目定義 (全7項目)
 const WASTE_ITEMS = [
@@ -142,34 +143,13 @@ export default function WasteChecksPage() {
 
                 <div className="w-[297mm] h-[210mm] bg-white pt-8 pb-4 px-12 print:p-0 shadow-xl print:shadow-none text-black font-sans box-border flex flex-col justify-start gap-8">
 
-                    <div className="flex justify-between items-end mb-2">
-                        <div className="flex items-end gap-6">
-                            <h1 className="text-3xl font-bold tracking-widest">廃棄物チェック表</h1>
-                            <div className="text-xl font-bold mb-1">令和 {y - 2018} <span className="font-normal text-base">年</span> {m} <span className="font-normal text-base">月</span></div>
-                        </div>
-                        <table className="border-collapse border border-black text-center text-xs">
-                            <tbody>
-                                <tr>
-                                    <th className="border border-black px-2 py-0.5 font-medium bg-gray-100">ワークセンター・やまびこ</th>
-                                    <th className="border border-black px-4 py-0.5 font-medium bg-gray-100 w-24">施設長</th>
-                                    <th className="border border-black px-4 py-0.5 font-medium bg-gray-100 w-24">担当者</th>
-                                </tr>
-                                <tr>
-                                    <td className="border border-black p-0">
-                                        <table className="w-full border-collapse">
-                                            <tbody>
-                                                <tr><th className="border-b border-r border-black px-2 py-0.5 font-medium bg-gray-100 w-16">文章No.</th><td className="border-b border-black px-2 py-0.5">YO-41</td></tr>
-                                                <tr><th className="border-b border-r border-black px-2 py-0.5 font-medium bg-gray-100">制定日</th><td className="border-b border-black px-2 py-0.5">2021/4/1</td></tr>
-                                                <tr><th className="border-r border-black px-2 py-0.5 font-medium bg-gray-100">改定日</th><td className=""></td></tr>
-                                            </tbody>
-                                        </table>
-                                    </td>
-                                    <td className="border border-black"></td>
-                                    <td className="border border-black"></td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
+                    <HaccpPrintHeader
+                        title="廃棄物チェック表"
+                        subtitle={<>令和 {y - 2018} <span className="font-normal text-base">年</span> {m} <span className="font-normal text-base">月</span></>}
+                        docNo="YO-41"
+                        establishedDate="2021/4/1"
+                        revisedDate=""
+                    />
 
                     {/* 上段テーブル (1日〜16日) */}
                     <table className="w-full border-collapse border-2 border-black text-[12px] table-fixed mb-4">
