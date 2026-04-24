@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Loader2, Save, Printer, ArrowLeft, UploadCloud, Settings, Trash2, LineChart, FileSpreadsheet, Lock } from "lucide-react";
+import { Loader2, Save, Printer, ArrowLeft, UploadCloud, Settings, Trash2, LineChart, FileSpreadsheet, Lock, Edit2, Check, X, AlertTriangle } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
@@ -36,6 +36,33 @@ const DEFAULT_CONFIG: Config = {
     chamberTempCol: "DM00148",
 };
 
+// ★追加: 操作者のリスト
+const CHECKER_NAMES = [
+    "本間",
+    "田村",
+    "柏木",
+    "水野",
+    "小島",
+    "羽田",
+    "竹村"
+];
+
+const formatTimeHHmm = (timeStr: string) => {
+    if (!timeStr || timeStr === "-") return "-";
+    const t = timeStr.includes(" ") ? timeStr.split(" ")[1] : timeStr;
+    const parts = t.split(":");
+    if (parts.length >= 2) {
+        return `${parts[0]}:${parts[1]}`;
+    }
+    return t;
+};
+
+const getFiscalYear = (date: Date) => {
+    const y = date.getFullYear();
+    const m = date.getMonth() + 1;
+    return m >= 4 ? y : y - 1;
+};
+
 export default function FujiSteamyPage() {
     const { canEdit } = useAuth();
     const [loading, setLoading] = useState(false);
@@ -52,7 +79,13 @@ export default function FujiSteamyPage() {
     // マスタ情報・一覧用State
     const [products, setProducts] = useState<Product[]>([]);
     const [records, setRecords] = useState<any[]>([]);
-    const [printMonth, setPrintMonth] = useState(new Date());
+    const [displayMonth, setDisplayMonth] = useState(new Date());
+
+    // 既存データのインライン編集用State
+    const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
+    const [editValues, setEditValues] = useState<{ productName: string; quantity: number | ""; discardQty: number | ""; checkerName: string }>({
+        productName: "", quantity: "", discardQty: "", checkerName: ""
+    });
 
     useEffect(() => {
         fetchRecords();
@@ -63,17 +96,14 @@ export default function FujiSteamyPage() {
     const fetchRecords = async () => {
         setLoading(true);
         const [logsRes, productsRes] = await Promise.all([
-            // ★修正: リスト一覧も「日付が若い順 (昇順)」で取得する
             supabase.from('fuji_steamy_logs')
                 .select('*')
                 .order('work_date', { ascending: true })
-                .order('start_time', { ascending: true })
-                .limit(50),
+                .order('start_time', { ascending: true }),
             supabase.from('products').select('id, name, variant_name').order('id', { ascending: true })
         ]);
 
         if (logsRes.data) {
-            // ★追加: 「ならし運転」を一覧から除外するフィルター
             const filteredRecords = logsRes.data.filter((r: any) => r.product_name !== 'ならし運転');
             setRecords(filteredRecords);
         }
@@ -209,7 +239,24 @@ export default function FujiSteamyPage() {
         if (parsedList.length === 0) return;
         setIsSaving(true);
 
-        const inserts = parsedList.map(item => ({
+        let finalDataToSave = [...parsedList];
+        const hasNarashi = finalDataToSave.some(item => item.productName === "ならし運転");
+
+        if (hasNarashi) {
+            const doDelete = confirm("「ならし運転」のデータが含まれています。\n保存前に「ならし運転」のデータを自動的に削除しますか？");
+            if (doDelete) {
+                finalDataToSave = finalDataToSave.filter(item => item.productName !== "ならし運転");
+
+                if (finalDataToSave.length === 0) {
+                    alert("保存するデータがなくなりました。");
+                    setParsedList([]);
+                    setIsSaving(false);
+                    return;
+                }
+            }
+        }
+
+        const inserts = finalDataToSave.map(item => ({
             work_date: item.workDate,
             batch_name: item.fileName,
             product_name: item.productName || null,
@@ -242,91 +289,201 @@ export default function FujiSteamyPage() {
         fetchRecords();
     };
 
-    // ================= 印刷ビュー =================
-    // ★追加: 印刷時にも「ならし運転」を除外する
-    const printTargetRecords = records.filter(r => {
+    const handleDeleteAllNarashi = async () => {
+        if (!confirm("【警告】\nデータベースに保存されているすべての「ならし運転」の記録を削除します。\nよろしいですか？")) return;
+
+        setIsSaving(true);
+        const { error } = await supabase
+            .from('fuji_steamy_logs')
+            .delete()
+            .eq('product_name', 'ならし運転');
+
+        setIsSaving(false);
+
+        if (error) {
+            alert("削除エラー: " + error.message);
+        } else {
+            alert("既存の「ならし運転」のデータをすべて削除しました。");
+            fetchRecords();
+        }
+    };
+
+    // ================= 既存データのインライン編集ロジック =================
+    const startEditing = (record: any) => {
+        setEditingRecordId(record.id);
+        setEditValues({
+            productName: record.product_name || "",
+            quantity: record.quantity || "",
+            discardQty: record.discard_qty !== null ? record.discard_qty : "",
+            checkerName: record.checker_name || ""
+        });
+    };
+
+    const cancelEditing = () => {
+        setEditingRecordId(null);
+    };
+
+    const handleEditValueChange = (field: keyof typeof editValues, value: any) => {
+        setEditValues(prev => {
+            const updated = { ...prev, [field]: value };
+            if (field === 'quantity') {
+                const qty = Number(value);
+                if (!isNaN(qty) && qty > 0) {
+                    updated.discardQty = Math.ceil(qty / 640);
+                } else {
+                    updated.discardQty = "";
+                }
+            }
+            return updated;
+        });
+    };
+
+    const saveEditedRecord = async (id: string) => {
+        setIsSaving(true);
+        const updates = {
+            product_name: editValues.productName || null,
+            quantity: Number(editValues.quantity) || null,
+            discard_qty: Number(editValues.discardQty) || null,
+            checker_name: editValues.checkerName || null,
+        };
+
+        const { error } = await supabase.from('fuji_steamy_logs').update(updates).eq('id', id);
+        if (error) {
+            alert("更新エラー: " + error.message);
+        } else {
+            setEditingRecordId(null);
+            fetchRecords();
+        }
+        setIsSaving(false);
+    };
+
+    // ================= 一覧・印刷用の共通フィルタリング =================
+    const targetRecords = records.filter(r => {
         const d = new Date(r.work_date);
-        return d.getFullYear() === printMonth.getFullYear() && d.getMonth() === printMonth.getMonth() && r.product_name !== 'ならし運転';
+        return d.getFullYear() === displayMonth.getFullYear() && d.getMonth() === displayMonth.getMonth();
     }).sort((a, b) => new Date(a.work_date).getTime() - new Date(b.work_date).getTime() || a.start_time.localeCompare(b.start_time));
 
+    // ================= 印刷ビュー =================
     if (viewMode === 'print') {
-        const y = printMonth.getFullYear();
-        const m = String(printMonth.getMonth() + 1).padStart(2, '0');
+        const y = displayMonth.getFullYear();
+        const m = String(displayMonth.getMonth() + 1).padStart(2, '0');
+        const fiscalYear = getFiscalYear(displayMonth);
+        const MAX_ROWS = 30;
+
+        const chunkedRecords = [];
+        if (targetRecords.length === 0) {
+            chunkedRecords.push([]);
+        } else {
+            for (let i = 0; i < targetRecords.length; i += MAX_ROWS) {
+                chunkedRecords.push(targetRecords.slice(i, i + MAX_ROWS));
+            }
+        }
 
         return (
             <div className="bg-slate-200 min-h-screen py-8 print:p-0 print:bg-white flex flex-col items-center">
                 <style dangerouslySetInnerHTML={{
                     __html: `
-                    @media print {
-                        header, nav { display: none !important; }
-                        main { padding: 0 !important; margin: 0 !important; max-width: 100% !important; background: white !important; }
-                        @page { size: A4 landscape; margin: 15mm; }
-                        body { background-color: white !important; color: black !important; }
-                        .print-hide { display: none !important; }
-                    }
-                `}} />
+                @media print {
+                    header, nav { display: none !important; }
+                    main { padding: 0 !important; margin: 0 !important; max-width: 100% !important; background: white !important; }
+                    @page { size: A4 portrait; margin: 12mm; }
+                    body { background-color: white !important; color: black !important; }
+                    .print-hide { display: none !important; }
+                    .page-break { page-break-after: always; }
+                }
+            `}} />
 
-                <div className="w-[297mm] print:w-full flex justify-between mb-4 print-hide">
-                    <Button variant="outline" onClick={() => setViewMode('list')} className="bg-white text-slate-700 font-bold border-slate-300"><ArrowLeft className="h-4 w-4 mr-2" /> 戻る</Button>
+                <div className="w-[210mm] print:w-full flex justify-between mb-4 print-hide">
+                    <Button variant="outline" onClick={() => setViewMode('list')} className="bg-white text-slate-700 font-bold border-slate-300">
+                        <ArrowLeft className="h-4 w-4 mr-2" /> 戻る
+                    </Button>
                     <div className="flex gap-2 items-center bg-white px-2 py-1 rounded border shadow-sm">
                         <span className="text-sm font-bold text-slate-600 ml-2">出力対象月:</span>
-                        <Input type="month" value={`${y}-${m}`} onChange={(e) => { if (e.target.value) setPrintMonth(new Date(e.target.value + "-01")); }} className="w-40 border-none shadow-none h-8 font-bold" />
+                        <Input
+                            type="month"
+                            value={`${y}-${m}`}
+                            onChange={(e) => { if (e.target.value) setDisplayMonth(new Date(e.target.value + "-01")); }}
+                            className="w-40 border-none shadow-none h-8 font-bold"
+                        />
                     </div>
-                    <Button onClick={() => window.print()} className="bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-lg"><Printer className="h-5 w-5 mr-2" /> 印刷する</Button>
+                    <Button onClick={() => window.print()} className="bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-lg">
+                        <Printer className="h-5 w-5 mr-2" /> 印刷する
+                    </Button>
                 </div>
 
-                <div className="w-[297mm] min-h-[210mm] bg-white pt-8 pb-10 px-12 print:p-0 shadow-xl print:shadow-none text-black font-sans box-border flex flex-col">
-                    <HaccpPrintHeader
-                        title="高温高圧減菌機運転記録"
-                        docNo="YO-5"
-                        establishedDate="2021/4/1"
-                        revisedDate="2025/4/1"
-                    />
+                {chunkedRecords.map((chunk, pageIdx) => (
+                    <div key={pageIdx} className={`w-[210mm] min-h-[297mm] bg-white pt-8 pb-10 px-10 print:p-0 shadow-xl print:shadow-none text-black font-sans box-border flex flex-col ${pageIdx < chunkedRecords.length - 1 ? 'page-break mb-8 print:mb-0' : ''}`}>
 
-                    <table className="w-full border-collapse border-2 border-black text-sm flex-1">
-                        <thead className="bg-gray-100">
-                            <tr>
-                                <th className="border border-black py-2 w-[10%]">日付</th>
-                                <th className="border border-black py-2 w-[22%]">製造種類</th>
-                                <th className="border border-black py-2 w-[8%]">数量</th>
-                                <th className="border border-black py-2 w-[14%]">開始時間</th>
-                                <th className="border border-black py-2 w-[14%] leading-tight text-red-700">中心温度80℃<br />到達時間</th>
-                                <th className="border border-black py-2 w-[14%]">終了時間</th>
-                                <th className="border border-black py-2 w-[10%]">操作者</th>
-                                <th className="border border-black py-2 w-[8%]">廃棄数</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {printTargetRecords.map((r, i) => {
-                                const sTime = r.start_time.split(' ')[1] || r.start_time;
-                                const eTime = r.end_time ? (r.end_time.split(' ')[1] || r.end_time) : "";
-                                const r80Time = r.reach_80_time !== "-" ? (r.reach_80_time.split(' ')[1] || r.reach_80_time) : "";
-                                const dObj = new Date(r.work_date);
-                                const dateStr = `${dObj.getMonth() + 1}/${dObj.getDate()}`;
+                        <div className="flex justify-between items-start">
+                            <div className="flex-1">
+                                <HaccpPrintHeader
+                                    title="高温高圧減菌機運転記録"
+                                    docNo="YO-5"
+                                    establishedDate="2021/4/1"
+                                    revisedDate="2025/4/1"
+                                />
+                                <div className="text-left mb-4 mt-2 border-b-2 border-black inline-block w-fit">
+                                    <span className="text-lg font-bold">
+                                        {fiscalYear}年度 <span className="text-base font-normal ml-2">({y}年{m}月度)</span>
+                                    </span>
+                                </div>
+                            </div>
 
-                                return (
-                                    <tr key={r.id} className="h-10 text-center">
-                                        <td className="border border-black font-bold text-sm px-1">{dateStr}</td>
-                                        <td className="border border-black font-bold text-center px-2 truncate text-sm">{r.product_name || "　"}</td>
-                                        <td className="border border-black text-sm">{r.quantity ? `${r.quantity}` : "　"}</td>
-                                        <td className="border border-black text-sm">{sTime}</td>
-                                        <td className="border border-black text-sm font-bold text-red-600">{r80Time}</td>
-                                        <td className="border border-black text-sm">{eTime}</td>
-                                        <td className="border border-black text-xs px-0.5 truncate">{r.checker_name || ""}</td>
-                                        <td className="border border-black text-sm">{r.discard_qty !== null ? `${r.discard_qty}` : ""}</td>
-                                    </tr>
-                                );
-                            })}
-                            {Array.from({ length: Math.max(0, 25 - printTargetRecords.length) }).map((_, idx) => (
-                                <tr key={`empty-${idx}`} className="h-10 border-b border-black">
-                                    <td className="border-r border-black"></td><td className="border-r border-black"></td><td className="border-r border-black"></td><td className="border-r border-black"></td><td className="border-r border-black"></td><td className="border-r border-black"></td><td className="border-r border-black"></td><td className="border-r border-black"></td>
+                            {chunkedRecords.length > 1 && (
+                                <div className="text-xs font-bold text-slate-500 mt-2 shrink-0">
+                                    {pageIdx + 1} / {chunkedRecords.length} ページ
+                                </div>
+                            )}
+                        </div>
+
+                        <table className="w-full border-collapse border-2 border-black text-xs flex-1 table-fixed">
+                            <thead className="bg-gray-100">
+                                <tr className="h-10">
+                                    <th className="border border-black w-[10%]">日付</th>
+                                    <th className="border border-black w-[25%]">製造種類</th>
+                                    <th className="border border-black w-[9%]">数量</th>
+                                    <th className="border border-black w-[11%] leading-tight">開始時間</th>
+                                    <th className="border border-black w-[13%] leading-tight text-red-700">80℃到達<br />時間</th>
+                                    <th className="border border-black w-[11%] leading-tight">終了時間</th>
+                                    <th className="border border-black w-[13%]">操作者</th>
+                                    <th className="border border-black w-[8%]">廃棄数</th>
                                 </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody>
+                                {chunk.map((r) => {
+                                    const sTime = formatTimeHHmm(r.start_time);
+                                    const eTime = formatTimeHHmm(r.end_time);
+                                    const r80Time = r.reach_80_time !== "-" ? formatTimeHHmm(r.reach_80_time) : "未達";
+                                    const dObj = new Date(r.work_date);
+                                    const dateStr = `${dObj.getMonth() + 1}/${dObj.getDate()}`;
 
-                    <div className="mt-4 text-xs text-slate-600">※ この記録はフジスチーミーの出力ログ（CSV）からシステムによって自動解析・生成されたものです。（改竄防止機能作動中）</div>
-                </div>
+                                    return (
+                                        <tr key={r.id} className="h-8 text-center border-b border-black">
+                                            <td className="border-r border-black font-bold px-1">{dateStr}</td>
+                                            <td className="border-r border-black font-bold text-left px-2 truncate">{r.product_name || "　"}</td>
+                                            <td className="border-r border-black">{r.quantity || "　"}</td>
+                                            <td className="border-r border-black">{sTime}</td>
+                                            <td className="border-r border-black font-bold text-red-600">{r80Time}</td>
+                                            <td className="border-r border-black">{eTime}</td>
+                                            <td className="border-r border-black text-[10px] truncate px-0.5">{r.checker_name || ""}</td>
+                                            <td className="border-r border-black">{r.discard_qty !== null ? `${r.discard_qty}` : ""}</td>
+                                        </tr>
+                                    );
+                                })}
+
+                                {Array.from({ length: Math.max(0, MAX_ROWS - chunk.length) }).map((_, idx) => (
+                                    <tr key={`empty-${idx}`} className="h-8 border-b border-black">
+                                        <td className="border-r border-black"></td><td className="border-r border-black"></td><td className="border-r border-black"></td><td className="border-r border-black"></td><td className="border-r border-black"></td><td className="border-r border-black"></td><td className="border-r border-black"></td><td className="border-r border-black"></td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+
+                        <div className="mt-4 text-[10px] text-slate-500 italic">
+                            ※ この記録はフジスチーミーの出力ログ（CSV）からシステムによって自動解析・生成されたものです。（改竄防止機能作動中）
+                        </div>
+                    </div>
+                ))}
             </div>
         );
     }
@@ -358,7 +515,20 @@ export default function FujiSteamyPage() {
                         <Card className="shadow-sm border-slate-200 lg:col-span-1">
                             <CardHeader className="bg-indigo-50/50 border-b pb-4"><CardTitle className="text-base text-indigo-900 flex items-center gap-2"><UploadCloud className="h-5 w-5" /> CSVファイルの投入</CardTitle></CardHeader>
                             <CardContent className="pt-6 space-y-4">
-                                <div><label className="block text-sm font-bold mb-1 text-slate-700">担当者(操作者) 一括設定</label><Input value={checkerName} onChange={(e) => setCheckerName(e.target.value)} className="h-10 bg-white" placeholder="名前..." /></div>
+                                {/* ★修正: 担当者のプルダウン化 */}
+                                <div>
+                                    <label className="block text-sm font-bold mb-1 text-slate-700">担当者(操作者) 一括設定</label>
+                                    <select
+                                        value={checkerName}
+                                        onChange={(e) => setCheckerName(e.target.value)}
+                                        className="w-full h-10 border-slate-200 rounded px-3 text-sm bg-white focus:ring-indigo-500 font-bold shadow-sm"
+                                    >
+                                        <option value="">選択してください...</option>
+                                        {CHECKER_NAMES.map(name => (
+                                            <option key={name} value={name}>{name}</option>
+                                        ))}
+                                    </select>
+                                </div>
 
                                 <div className="pt-4">
                                     <label className="block text-sm font-bold mb-2 text-slate-700">CSVファイル (複数選択可)</label>
@@ -395,7 +565,7 @@ export default function FujiSteamyPage() {
                                                     <TableHead className="w-[12%]">ファイル名</TableHead>
                                                     <TableHead className="w-[14%] text-center">開始 - 終了</TableHead>
                                                     <TableHead className="w-[10%] text-center text-red-600">80℃到達</TableHead>
-                                                    <TableHead className="w-[20%]">製造種類 (製品ID)</TableHead>
+                                                    <TableHead className="w-[20%]">製造種類 (味)</TableHead>
                                                     <TableHead className="w-[10%]">数量</TableHead>
                                                     <TableHead className="w-[10%]">廃棄数(自動)</TableHead>
                                                     <TableHead className="w-[8%] text-center">操作</TableHead>
@@ -403,9 +573,10 @@ export default function FujiSteamyPage() {
                                             </TableHeader>
                                             <TableBody>
                                                 {parsedList.map((item, idx) => {
-                                                    const sTime = item.startTime.split(' ')[1] || item.startTime;
-                                                    const eTime = item.endTime ? (item.endTime.split(' ')[1] || item.endTime) : "-";
-                                                    const r80Time = item.reach80Time !== "-" ? (item.reach80Time.split(' ')[1] || item.reach80Time) : "-";
+                                                    const sTime = formatTimeHHmm(item.startTime);
+                                                    const eTime = formatTimeHHmm(item.endTime);
+                                                    const r80Time = item.reach80Time !== "-" ? formatTimeHHmm(item.reach80Time) : "-";
+
                                                     return (
                                                         <TableRow key={idx} className="hover:bg-slate-50">
                                                             <TableCell className="p-2">
@@ -427,8 +598,8 @@ export default function FujiSteamyPage() {
                                                                     <option value="">製品IDを選択...</option>
                                                                     <option value="ならし運転">ならし運転</option>
                                                                     {products.map(p => (
-                                                                        <option key={p.id} value={p.id}>
-                                                                            {p.id} ({p.name})
+                                                                        <option key={p.id} value={p.variant_name}>
+                                                                            {p.name} ({p.variant_name})
                                                                         </option>
                                                                     ))}
                                                                 </select>
@@ -452,36 +623,73 @@ export default function FujiSteamyPage() {
                 {/* --- 一覧タブ --- */}
                 <TabsContent value="list">
                     <Card className="shadow-sm border-slate-200">
-                        <CardHeader className="bg-slate-50 border-b py-4 flex flex-row items-center justify-between">
+                        <CardHeader className="bg-slate-50 border-b py-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                             <CardTitle className="text-lg text-slate-800">保存された加熱調理記録</CardTitle>
-                            <Button variant="outline" onClick={() => setViewMode('print')} className="h-9 px-4 border-slate-300 font-bold bg-white shadow-sm"><Printer className="h-4 w-4 mr-2" /> PDF帳票を出力 (月指定)</Button>
+
+                            <div className="flex flex-wrap items-center gap-2 md:gap-4 w-full md:w-auto">
+                                {canEdit && (
+                                    <Button variant="outline" onClick={handleDeleteAllNarashi} disabled={isSaving} className="h-10 px-3 border-orange-300 text-orange-600 bg-orange-50 hover:bg-orange-100 shadow-sm">
+                                        {isSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <AlertTriangle className="w-4 h-4 mr-2" />} 過去の「ならし運転」を一括削除
+                                    </Button>
+                                )}
+
+                                <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-md border shadow-sm">
+                                    <span className="text-sm font-bold text-slate-600">表示月:</span>
+                                    <Input
+                                        type="month"
+                                        value={`${displayMonth.getFullYear()}-${String(displayMonth.getMonth() + 1).padStart(2, '0')}`}
+                                        onChange={(e) => { if (e.target.value) setDisplayMonth(new Date(e.target.value + "-01")); }}
+                                        className="w-36 h-8 font-bold border-none shadow-none focus-visible:ring-0 px-0"
+                                    />
+                                </div>
+                                <Button variant="outline" onClick={() => setViewMode('print')} className="h-10 px-4 border-indigo-200 text-indigo-700 font-bold bg-indigo-50 hover:bg-indigo-100 shadow-sm ml-auto">
+                                    <Printer className="h-4 w-4 mr-2" /> PDF帳票を出力
+                                </Button>
+                            </div>
                         </CardHeader>
+
                         <CardContent className="p-0">
-                            <Table className="w-full min-w-[800px] text-sm">
+                            <Table className="w-full min-w-[900px] text-sm">
                                 <TableHeader className="bg-slate-100">
                                     <TableRow>
                                         <TableHead className="w-[12%] pl-4">製造日</TableHead>
-                                        <TableHead className="w-[20%]">製造種類 (製品ID)</TableHead>
+                                        <TableHead className="w-[20%]">製造種類 (味)</TableHead>
                                         <TableHead className="w-[15%] text-center">開始 - 終了</TableHead>
                                         <TableHead className="w-[10%] text-center text-red-600">80℃</TableHead>
+                                        <TableHead className="w-[10%] text-center">数量</TableHead>
                                         <TableHead className="w-[10%] text-center">廃棄数</TableHead>
                                         <TableHead className="w-[15%]">操作者 / ファイル</TableHead>
-                                        <TableHead className="w-[10%] text-center">アクション</TableHead>
+                                        <TableHead className="w-[8%] text-center">アクション</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
-                                    {records.map(rec => {
-                                        const sTime = rec.start_time.split(' ')[1] || rec.start_time;
-                                        const eTime = rec.end_time ? (rec.end_time.split(' ')[1] || rec.end_time) : "-";
-                                        const r80Time = rec.reach_80_time !== "-" ? (rec.reach_80_time.split(' ')[1] || rec.reach_80_time) : "未達";
+                                    {targetRecords.map(rec => {
+                                        const sTime = formatTimeHHmm(rec.start_time);
+                                        const eTime = formatTimeHHmm(rec.end_time);
+                                        const r80Time = rec.reach_80_time !== "-" ? formatTimeHHmm(rec.reach_80_time) : "未達";
 
                                         return (
                                             <TableRow key={rec.id} className="hover:bg-slate-50">
                                                 <TableCell className="pl-4 font-bold text-slate-600">{new Date(rec.work_date).toLocaleDateString()}</TableCell>
+
                                                 <TableCell>
-                                                    <div className="font-bold text-slate-800">{rec.product_name || "未入力"}</div>
-                                                    {rec.quantity && <div className="text-[10px] text-slate-500 mt-0.5">{rec.quantity} 個</div>}
+                                                    {editingRecordId === rec.id ? (
+                                                        <select
+                                                            value={editValues.productName}
+                                                            onChange={e => handleEditValueChange('productName', e.target.value)}
+                                                            className="w-full h-8 border-blue-400 rounded px-1 text-xs focus:ring-blue-400"
+                                                        >
+                                                            <option value="">未設定</option>
+                                                            <option value="ならし運転">ならし運転</option>
+                                                            {products.map(p => (
+                                                                <option key={p.id} value={p.variant_name}>{p.name} ({p.variant_name})</option>
+                                                            ))}
+                                                        </select>
+                                                    ) : (
+                                                        <div className="font-bold text-slate-800">{rec.product_name || "未入力"}</div>
+                                                    )}
                                                 </TableCell>
+
                                                 <TableCell className="text-center font-mono text-[10px]">
                                                     <div className="text-slate-700">{sTime}</div>
                                                     <div className="text-slate-400">~ {eTime}</div>
@@ -489,18 +697,87 @@ export default function FujiSteamyPage() {
                                                 <TableCell className="text-center font-mono font-bold text-red-600 text-xs">
                                                     {r80Time}
                                                 </TableCell>
-                                                <TableCell className="text-center font-bold text-slate-800">{rec.discard_qty !== null ? rec.discard_qty : "-"}</TableCell>
-                                                <TableCell>
-                                                    <div className="text-xs font-bold text-slate-700">{rec.checker_name || "-"}</div>
-                                                    <div className="text-[9px] text-slate-400 truncate max-w-[120px]" title={rec.batch_name}>{rec.batch_name}</div>
-                                                </TableCell>
+
                                                 <TableCell className="text-center">
-                                                    {canEdit && <Button variant="ghost" size="icon" onClick={() => handleDeleteRecord(rec.id)} className="h-8 w-8 text-red-500 hover:bg-red-50"><Trash2 className="w-4 h-4" /></Button>}
+                                                    {editingRecordId === rec.id ? (
+                                                        <div className="flex items-center gap-1">
+                                                            <Input type="number" value={editValues.quantity} onChange={e => handleEditValueChange('quantity', e.target.value)} className="h-8 text-xs text-right px-1 w-16" />
+                                                            <span className="text-[10px] text-slate-500">個</span>
+                                                        </div>
+                                                    ) : (
+                                                        rec.quantity ? <span className="font-bold text-slate-700">{rec.quantity} <span className="text-[10px] font-normal text-slate-500">個</span></span> : "-"
+                                                    )}
+                                                </TableCell>
+
+                                                <TableCell className="text-center">
+                                                    {editingRecordId === rec.id ? (
+                                                        <Input type="number" value={editValues.discardQty} onChange={e => handleEditValueChange('discardQty', e.target.value)} className="h-8 text-xs text-right px-1 w-12 mx-auto text-red-600" />
+                                                    ) : (
+                                                        <span className="font-bold text-slate-800">{rec.discard_qty !== null ? rec.discard_qty : "-"}</span>
+                                                    )}
+                                                </TableCell>
+
+                                                {/* ★修正: リスト側の操作者もプルダウン化 */}
+                                                <TableCell>
+                                                    {editingRecordId === rec.id ? (
+                                                        <div className="flex items-center gap-1">
+                                                            <select
+                                                                value={editValues.checkerName}
+                                                                onChange={e => handleEditValueChange('checkerName', e.target.value)}
+                                                                className="h-7 text-xs w-24 px-1 border-blue-400 focus-visible:ring-blue-400 rounded bg-white"
+                                                            >
+                                                                <option value="">未設定</option>
+                                                                {CHECKER_NAMES.map(name => (
+                                                                    <option key={name} value={name}>{name}</option>
+                                                                ))}
+                                                            </select>
+                                                            <Button size="icon" variant="ghost" onClick={() => saveEditedRecord(rec.id)} className="h-7 w-7 text-green-600 hover:bg-green-50">
+                                                                <Check className="h-4 w-4" />
+                                                            </Button>
+                                                        </div>
+                                                    ) : (
+                                                        <div
+                                                            className={`flex items-center gap-1 text-xs font-bold text-slate-700 p-1 -m-1 rounded transition-colors group ${canEdit ? 'cursor-pointer hover:bg-indigo-50' : ''}`}
+                                                            onClick={() => {
+                                                                if (canEdit) {
+                                                                    setEditingRecordId(rec.id);
+                                                                    setEditValues({
+                                                                        productName: rec.product_name || "",
+                                                                        quantity: rec.quantity || "",
+                                                                        discardQty: rec.discard_qty !== null ? rec.discard_qty : "",
+                                                                        checkerName: rec.checker_name || ""
+                                                                    });
+                                                                }
+                                                            }}
+                                                        >
+                                                            <span className={!rec.checker_name ? "text-slate-400 font-normal" : ""}>
+                                                                {rec.checker_name || "未設定"}
+                                                            </span>
+                                                            {canEdit && <Edit2 className="h-3 w-3 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />}
+                                                        </div>
+                                                    )}
+                                                    <div className="text-[9px] text-slate-400 truncate max-w-[120px] mt-0.5" title={rec.batch_name}>{rec.batch_name}</div>
+                                                </TableCell>
+
+                                                <TableCell className="text-center">
+                                                    {canEdit && (
+                                                        editingRecordId === rec.id ? (
+                                                            <div className="flex gap-1 justify-center">
+                                                                <Button size="icon" onClick={() => saveEditedRecord(rec.id)} disabled={isSaving} className="h-7 w-7 bg-green-600 hover:bg-green-700 text-white"><Check className="h-4 w-4" /></Button>
+                                                                <Button size="icon" variant="outline" onClick={cancelEditing} className="h-7 w-7"><X className="h-4 w-4 text-slate-500" /></Button>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="flex gap-1 justify-center">
+                                                                <Button variant="ghost" size="icon" onClick={() => startEditing(rec)} className="h-8 w-8 text-blue-600 hover:bg-blue-50"><Edit2 className="h-4 w-4" /></Button>
+                                                                <Button variant="ghost" size="icon" onClick={() => handleDeleteRecord(rec.id)} className="h-8 w-8 text-red-500 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
+                                                            </div>
+                                                        )
+                                                    )}
                                                 </TableCell>
                                             </TableRow>
                                         );
                                     })}
-                                    {records.length === 0 && <TableRow><TableCell colSpan={7} className="text-center py-12 text-slate-500">記録がありません。</TableCell></TableRow>}
+                                    {targetRecords.length === 0 && <TableRow><TableCell colSpan={8} className="text-center py-12 text-slate-500">指定した月の記録がありません。</TableCell></TableRow>}
                                 </TableBody>
                             </Table>
                         </CardContent>
