@@ -36,15 +36,9 @@ const DEFAULT_CONFIG: Config = {
     chamberTempCol: "DM00148",
 };
 
-// ★追加: 操作者のリスト
+// 操作者のリスト
 const CHECKER_NAMES = [
-    "本間",
-    "田村",
-    "柏木",
-    "水野",
-    "小島",
-    "羽田",
-    "竹村"
+    "本間", "田村", "柏木", "水野", "小島", "羽田", "竹村"
 ];
 
 const formatTimeHHmm = (timeStr: string) => {
@@ -214,7 +208,10 @@ export default function FujiSteamyPage() {
             }
         }
 
-        setParsedList(prev => [...prev, ...newList]);
+        const mergedList = [...parsedList, ...newList];
+        mergedList.sort((a, b) => new Date(a.workDate).getTime() - new Date(b.workDate).getTime() || a.startTime.localeCompare(b.startTime));
+
+        setParsedList(mergedList);
         if (fileInputRef.current) fileInputRef.current.value = "";
         setLoading(false);
     };
@@ -293,11 +290,7 @@ export default function FujiSteamyPage() {
         if (!confirm("【警告】\nデータベースに保存されているすべての「ならし運転」の記録を削除します。\nよろしいですか？")) return;
 
         setIsSaving(true);
-        const { error } = await supabase
-            .from('fuji_steamy_logs')
-            .delete()
-            .eq('product_name', 'ならし運転');
-
+        const { error } = await supabase.from('fuji_steamy_logs').delete().eq('product_name', 'ならし運転');
         setIsSaving(false);
 
         if (error) {
@@ -428,12 +421,6 @@ export default function FujiSteamyPage() {
                                     </span>
                                 </div>
                             </div>
-
-                            {chunkedRecords.length > 1 && (
-                                <div className="text-xs font-bold text-slate-500 mt-2 shrink-0">
-                                    {pageIdx + 1} / {chunkedRecords.length} ページ
-                                </div>
-                            )}
                         </div>
 
                         <table className="w-full border-collapse border-2 border-black text-xs flex-1 table-fixed">
@@ -479,8 +466,16 @@ export default function FujiSteamyPage() {
                             </tbody>
                         </table>
 
-                        <div className="mt-4 text-[10px] text-slate-500 italic">
-                            ※ この記録はフジスチーミーの出力ログ（CSV）からシステムによって自動解析・生成されたものです。（改竄防止機能作動中）
+                        {/* ★修正: ページ番号をフッター（注釈と同じ行の右側）に配置 */}
+                        <div className="mt-4 flex justify-between items-end">
+                            <div className="text-[10px] text-slate-500 italic">
+                                ※ この記録はフジスチーミーの出力ログ（CSV）からシステムによって自動解析・生成されたものです。（改竄防止機能作動中）
+                            </div>
+                            {chunkedRecords.length > 1 && (
+                                <div className="text-xs font-bold text-slate-500 shrink-0 ml-4">
+                                    {pageIdx + 1} / {chunkedRecords.length} ページ
+                                </div>
+                            )}
                         </div>
                     </div>
                 ))}
@@ -515,7 +510,6 @@ export default function FujiSteamyPage() {
                         <Card className="shadow-sm border-slate-200 lg:col-span-1">
                             <CardHeader className="bg-indigo-50/50 border-b pb-4"><CardTitle className="text-base text-indigo-900 flex items-center gap-2"><UploadCloud className="h-5 w-5" /> CSVファイルの投入</CardTitle></CardHeader>
                             <CardContent className="pt-6 space-y-4">
-                                {/* ★修正: 担当者のプルダウン化 */}
                                 <div>
                                     <label className="block text-sm font-bold mb-1 text-slate-700">担当者(操作者) 一括設定</label>
                                     <select
@@ -717,7 +711,6 @@ export default function FujiSteamyPage() {
                                                     )}
                                                 </TableCell>
 
-                                                {/* ★修正: リスト側の操作者もプルダウン化 */}
                                                 <TableCell>
                                                     {editingRecordId === rec.id ? (
                                                         <div className="flex items-center gap-1">
