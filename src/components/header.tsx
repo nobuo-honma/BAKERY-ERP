@@ -2,7 +2,8 @@
 
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetTrigger } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
-import { Menu, Home, ShoppingCart, Factory, Package, ArrowDownToLine, Truck, Database, BookOpen, FileText, Sun, Moon, Beaker, Key, LogOut, LogIn, ShieldCheck, ShieldAlert, Wrench, Sparkles } from "lucide-react";
+// ▼ 修正: Search アイコンのインポートを追加
+import { Menu, Home, ShoppingCart, Factory, Package, ArrowDownToLine, Truck, Database, BookOpen, FileText, Sun, Moon, Beaker, Key, LogOut, LogIn, ShieldCheck, ShieldAlert, LineChart, Search } from "lucide-react";
 import Link from "next/link";
 import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -12,7 +13,6 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 
 export default function Header() {
-  // ★変更: login, logout関数を取得する
   const { role, isLoggedIn, login, logout } = useAuth();
   const [open, setOpen] = useState(false);
   const { theme, setTheme } = useTheme();
@@ -32,29 +32,24 @@ export default function Header() {
     { title: "キープサンプル", href: "/keep-samples", icon: Beaker },
     { title: "入荷管理", href: "/arrivals", icon: ArrowDownToLine },
     { title: "出荷管理", href: "/shipments", icon: Truck },
+    { title: "加熱記録(フジスチーミー)", href: "/fuji-steamy", icon: LineChart },
+    { title: "トレース (追跡)", href: "/traceability", icon: Search },
     { title: "マスタ管理", href: "/master", icon: Database },
-
-    // ▼ ここから下のリンクを整理して1つにまとめました ▼
     { title: "HACCP・衛生管理", href: "/haccp", icon: ShieldCheck },
-    // ▲ ここまで ▲
-
     { title: "マニュアル", href: "/manual", icon: BookOpen },
   ];
 
-  // ★追加: ログインボタンが押された時
   const handleLoginClick = () => {
     setPasswordModalOpen(true);
     setPasswordInput("");
     setPasswordError("");
   };
 
-  // ★追加: パスワード判定処理
   const handlePasswordSubmit = () => {
-    // ※今回は簡易的にシステム内にパスワードを設定しています。
-    const ADMIN_PASSWORD = "7777"; // ← ★ここの文字がパスワードです。自由に変更してください。
+    const ADMIN_PASSWORD = "7777";
 
     if (passwordInput === ADMIN_PASSWORD) {
-      login(); // ★変更: ログイン処理を呼び出す
+      login();
       setPasswordModalOpen(false);
     } else {
       setPasswordError("パスワードが違います");
@@ -69,7 +64,7 @@ export default function Header() {
         </SheetTrigger>
         <SheetContent side="left" className="w-64 bg-slate-950 text-white border-r-slate-800 p-0">
           <SheetHeader className="p-6 border-b border-slate-800 text-left"><SheetTitle className="text-white font-bold text-xl">メニュー</SheetTitle><SheetDescription className="sr-only">ナビゲーション</SheetDescription></SheetHeader>
-          <nav className="flex flex-col p-4 space-y-2">
+          <nav className="flex flex-col p-4 space-y-2 max-h-[calc(100vh-80px)] overflow-y-auto">
             {menuItems.map((item) => (
               <Link key={item.href} href={item.href} onClick={() => setOpen(false)} className="flex items-center gap-3 px-4 py-3 rounded-md hover:bg-slate-800 transition-colors">
                 <item.icon className="h-5 w-5 text-slate-400" /><span className="font-medium">{item.title}</span>
@@ -94,10 +89,8 @@ export default function Header() {
           </Button>
         )}
 
-        {/* --- ★変更: ログイン / ログアウト ボタン --- */}
         <div className="flex items-center">
           {isLoggedIn ? (
-            // ログイン中（管理者）の表示
             <div className="flex items-center bg-slate-800 rounded-lg border border-slate-700 overflow-hidden shadow-sm">
               <div className="px-3 py-1.5 flex items-center gap-1.5 bg-slate-800 text-amber-400 font-bold text-xs border-r border-slate-700">
                 <ShieldCheck className="h-4 w-4" /> <span className="hidden sm:inline">管理者</span>
@@ -111,7 +104,6 @@ export default function Header() {
               </Button>
             </div>
           ) : (
-            // 未ログイン（閲覧者）の表示
             <div className="flex items-center gap-2">
               <Badge variant="outline" className="hidden sm:flex items-center gap-1 bg-slate-800/50 border-slate-700 text-slate-400">
                 <ShieldAlert className="h-3 w-3" /> 閲覧モード

@@ -5,7 +5,7 @@ import {
   BookOpen, Printer, Menu as MenuIcon, Settings, Info,
   ChevronDown, AlertCircle, CheckCircle2, FileText,
   AlertTriangle, HelpCircle, ChevronRight, Truck, Calendar, Factory, Package, ArrowRight,
-  ArrowDownToLine, ShoppingCart, Edit, ShieldCheck
+  ArrowDownToLine, ShoppingCart, Edit, ShieldCheck, LineChart, Search, Bug
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -26,12 +26,15 @@ const USER_TOC = [
   { id: "shipment", title: "第6章　出荷管理" },
   { id: "calendar", title: "第7章　スケジュール表・備考" },
   { id: "haccp", title: "第8章　HACCP・衛生管理記録" },
+  { id: "fuji-steamy", title: "第9章　フジスチーミー自動解析" },
+  { id: "traceability", title: "第10章　トレーサビリティ追跡機能" },
 ];
 
 const TECH_TOC = [
   { num: "01", label: "システム・アーキテクチャ" },
   { num: "02", label: "Lot 番号の自動生成ルール" },
   { num: "03", label: "ケース・ピース混在管理" },
+  { num: "04", label: "監査ログのトリガー機構" },
 ];
 
 // ─────────────────────────────────────────────
@@ -55,9 +58,11 @@ const SWIM_STEPS: [number, string, string][] = [
   [3, "Lot・賞味期限 自動発行", "lot-generator.ts が自動計算"],
   [1, "製造開始ボタン", "実作業スタート"],
   [3, "原料在庫 －減算", "BOM に基づき自動引き落とし"],
+  [1, "フジスチーミー加熱", "装置で加熱・記録(CSV出力)"],
   [1, "製造完了・実績入力", "完成したケース/パック数を入力"],
   [3, "キープサンプル自動引当", "5個 または 10個を自動確保"],
   [3, "製品在庫 ＋加算", "残数が product_stocks へ"],
+  [0, "QRラベル・各種記録", "サンプルラベル発行、HACCP記録入力"],
   [2, "実地棚卸", "一括棚卸でシステムのズレを修正"],
   [0, "出荷引き当て", "古いLotを優先して手入力で確定"],
   [3, "製品在庫 －減算", "0 になった Lot は自動削除"],
@@ -407,6 +412,7 @@ export default function ManualPage() {
                       ["納品先への着予定日", "お客様の希望納期", "必須"],
                       ["出荷先名", "リストから検索して選択", "必須"],
                       ["発注番号", "お客様側の注番・FAX番号など", "任意"],
+                      ["単価 / 摘要", "受注書の印字用データ", "任意"],
                     ]} />
                   </Step>
                   <Step n={3} title="製品と数量を入力し、BOMシミュレーションを確認します">
@@ -418,6 +424,9 @@ export default function ManualPage() {
                   <Step n={4} title="「受注を確定する」ボタンで保存します">
                     <p>保存後、リストに注文書単位のカードが追加されます。</p>
                   </Step>
+
+                  <SectionHead icon={Printer}>受注書の自動発行 (PDF)</SectionHead>
+                  <p className="mb-4 text-slate-700">受注一覧カードの右上にあるプリンターアイコンを押すと、入力したデータが流し込まれた「受注書」がA4横サイズで綺麗に自動生成されます。</p>
 
                   <SectionHead icon={Edit}>登録後の編集・キャンセル</SectionHead>
                   <div className="bg-slate-50 rounded-xl p-5 border border-slate-200 space-y-4">
@@ -475,7 +484,7 @@ export default function ManualPage() {
                     <p>一度に全量を作れない場合は、少ないkg数を入力して<strong>何日にも分割して計画を登録</strong>することができます（残数は自動計算されます）。</p>
                   </Step>
                   <Step n={3} title="自動発行されたLot番号と賞味期限を確認し、保存する">
-                    <p>入力した日付と製品情報を元に、システムがルールに則って正確な Lot番号 と 賞味期限 を発行します。</p>
+                    <p>入力した日付と製品情報を元に、システムがルールに則って正確な Lot番号 と 賞味期限 を発行します。※任意の番号に手書き修正することも可能です。</p>
                   </Step>
 
                   <SectionHead icon={Factory}>2. 製造の実行と実績入力（在庫連動）</SectionHead>
@@ -540,7 +549,7 @@ export default function ManualPage() {
                     <p>右側に「出荷可能なLot」が<strong>古い順</strong>で表示されます。顧客の賞味期限要求を満たすLotを選び、出荷数量を手入力します。</p>
                   </Step>
                   <Step n={3} title="出荷を確定する">
-                    <p>「出荷を確定」ボタンを押すと、選んだLotの製品在庫が減算されます。</p>
+                    <p>「一括で出荷を確定」ボタンを押すと、選んだLotの製品在庫が減算され、出荷管理票に出力可能になります。</p>
                   </Step>
                 </section>
 
@@ -565,17 +574,17 @@ export default function ManualPage() {
                 {/* ── HACCP・衛生管理 ── */}
                 <section>
                   <ChapterTitle id="haccp" num="第8章" title="HACCP・衛生管理記録" bread={["操作マニュアル", "第8章　HACCP・衛生管理記録"]} />
-                  <p className="text-slate-700 mb-6">日々の清掃記録や、防除・駆除の作業記録、そして製品の検査結果などをスマホやタブレットから簡単に入力し、PDFとして一括出力できる機能群です。</p>
+                  <p className="text-slate-700 mb-6">各種チェック表や関連資料をスマホやタブレットから簡単に入力し、専用のPDFフォーマットとして一括出力できる機能群です。</p>
 
                   <SectionHead icon={ShieldCheck}>各帳票の入力とPDF出力</SectionHead>
                   <Step n={1} title="ポータルから目的の帳票を選ぶ">
-                    <p>メニューの「HACCP・衛生管理」を開くと、ポータル画面が表示されます。入力したい帳票（清掃チェック表など）のパネルをクリックします。</p>
+                    <p>メニューの「HACCP・衛生管理」を開くと、ポータル画面が表示されます。入力したい帳票（YO-22など）のパネルをクリックします。</p>
                   </Step>
                   <Step n={2} title="スマホで簡単入力">
                     <p>「日次チェック」タブから日付を選び、〇・× などのボタンをタップするだけで記録が完了します。一部の記録（害虫防除など）では、スマホのカメラで証拠写真を撮影し、そのままアップロードすることも可能です。</p>
                   </Step>
                   <Step n={3} title="月間一覧からPDFを出力する">
-                    <p>「月間一覧」タブを開くと、その月に入力されたデータがマトリックス表（一覧表）として表示されます。「PDF帳票を出力」ボタンを押すと、A4サイズの監査用フォーマットで印刷またはPDF保存ができます。</p>
+                    <p>「一覧」タブを開くと、その月に入力されたデータがマトリックス表として表示されます。「PDF帳票を出力」ボタンを押すと、各種原本とそっくりのフォーマットで印刷またはPDF保存ができます。</p>
                   </Step>
 
                   <SectionHead icon={AlertCircle}>監査ログ（改竄防止機能）について</SectionHead>
@@ -589,6 +598,48 @@ export default function ManualPage() {
                       <li>保健所等の監査時にデータの信頼性を証明する強力なエビデンスとなります。</li>
                     </ul>
                   </div>
+                </section>
+
+                <div className="page-break" />
+
+                {/* ── フジスチーミー自動解析 ── */}
+                <section>
+                  <ChapterTitle id="fuji-steamy" num="第9章" title="フジスチーミー自動解析" bread={["操作マニュアル", "第9章　フジスチーミー解析"]} />
+                  <p className="text-slate-700 mb-6">加熱装置（フジスチーミー）から出力されるCSVログを読み込み、加熱記録表（YO-5）を自動生成する機能です。</p>
+
+                  <Step n={1} title="CSVファイルをドラッグ＆ドロップ">
+                    <p>USBメモリ等から取り出した複数のCSVファイルを、画面の破線エリアに投入します。</p>
+                  </Step>
+                  <Step n={2} title="解析結果の確認と補完">
+                    <p>システムが自動的に「80℃到達時間」や「最高温度」を抽出します。必要に応じて「製造種類」をプルダウンから選び、「数量」を入力します（数量を入れると廃棄数が自動計算されます）。</p>
+                  </Step>
+                  <Step n={3} title="DB保存とPDF出力">
+                    <p>「すべてDBに保存」を押すとデータが確定します。一覧タブから月を指定して印刷ボタンを押すと、A4横の綺麗な加熱調理記録が出力されます。</p>
+                  </Step>
+                </section>
+
+                <div className="page-break" />
+
+                {/* ── トレーサビリティ ── */}
+                <section>
+                  <ChapterTitle id="traceability" num="第10章" title="トレーサビリティ追跡機能" bread={["操作マニュアル", "第10章　トレーサビリティ"]} />
+                  <p className="text-slate-700 mb-6">万が一のクレームや監査時に、システム内の全データを横断して履歴を一瞬で検索する機能です。</p>
+
+                  <Step n={1} title="Lot番号を入力して検索">
+                    <p>メニューの「トレース (追跡)」を開き、調べたい製品のLot番号（例: スB26SB）を入力して検索ボタンを押します。</p>
+                  </Step>
+                  <Step n={2} title="全履歴を1画面で確認">
+                    <p>以下の情報が瞬時に表示され、品質保証のエビデンスとして活用できます。</p>
+                    <ul className="list-disc pl-5 mt-2 space-y-1 text-sm text-slate-600 font-medium">
+                      <li>いつ・どこに出荷されたか（出荷先履歴）</li>
+                      <li>どの原材料を使って製造されたか（BOM）</li>
+                      <li>そのLotの官能検査（YO-30）の結果はどうだったか</li>
+                      <li>製造時の加熱温度（フジスチーミー記録）は適切だったか</li>
+                    </ul>
+                  </Step>
+                  <NoteBox type="supplement">
+                    <strong>QRラベル連携：</strong> 「キープサンプル管理」画面から、Lot番号が埋め込まれたQRコード付きの専用ラベル（段ボール貼付用）を印刷できます。このQRをスマホで読み取ると、すぐに検索が行えます。
+                  </NoteBox>
                 </section>
 
               </main>
@@ -675,6 +726,31 @@ export default function ManualPage() {
                         <div><span className="text-emerald-700 font-bold">p</span>  = Math.floor( (total % unit_per_cs) / 2 )</div>
                       </div>
                     </div>
+                  </div>
+                </section>
+
+                <section id="tech-04" className="scroll-mt-24">
+                  <SectionHead icon={ShieldCheck}>04. 監査ログのトリガー機構</SectionHead>
+                  <p className="text-sm text-slate-600 mb-4">
+                    HACCP記録の改竄を防ぐため、フロントエンドを介さずにデータベース(PostgreSQL)のレイヤーで直接変更を監視・記録しています。
+                  </p>
+                  <div className="bg-slate-900 rounded-xl p-5 overflow-x-auto shadow-inner">
+                    <pre className="text-green-400 font-mono text-[11px] leading-relaxed">
+                      <code>
+                        {`CREATE OR REPLACE FUNCTION log_haccp_changes()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- 変更前(OLD)と変更後(NEW)をJSON形式で記録
+    INSERT INTO haccp_audit_logs (
+        table_name, record_id, action, old_data, new_data
+    ) VALUES (
+        TG_TABLE_NAME, NEW.id, TG_OP, row_to_json(OLD), row_to_json(NEW)
+    );
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;`}
+                      </code>
+                    </pre>
                   </div>
                 </section>
 

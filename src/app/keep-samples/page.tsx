@@ -8,18 +8,17 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Beaker, Loader2, Save, Lock, Edit, Printer, ArrowLeft, Trash2, Plus, AlertTriangle } from "lucide-react";
+import { Beaker, Loader2, Save, Lock, Edit, Printer, ArrowLeft, Trash2, Plus, AlertTriangle, QrCode, CheckSquare } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 
 type KeepSample = { id: string; lot_code: string; product_id: string; management_no: string; saved_quantity: number; production_date: string; expiry_date: string; used_quantity: number; usage_purpose: string; used_date: string; products?: { name: string; variant_name: string }; };
-// ★追加: 新規登録用に製品マスタの型を定義
 type Product = { id: string; name: string; variant_name: string; };
 
 export default function KeepSamplesPage() {
   const { canEdit } = useAuth();
-  const [viewMode, setViewMode] = useState<'list' | 'print'>('list');
+  const [viewMode, setViewMode] = useState<'list' | 'print' | 'print_label'>('list');
   const [samples, setSamples] = useState<KeepSample[]>([]);
-  const [products, setProducts] = useState<Product[]>([]); // ★追加: 製品マスタ
+  const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [editingSample, setEditingSample] = useState<KeepSample | null>(null);
@@ -31,7 +30,7 @@ export default function KeepSamplesPage() {
   const [editUsedDate, setEditUsedDate] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
 
-  // ★追加: 新規登録(補填)用State
+  // 新規登録(補填)用State
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [newProductId, setNewProductId] = useState("");
   const [newLotCode, setNewLotCode] = useState("");
@@ -39,13 +38,14 @@ export default function KeepSamplesPage() {
   const [newProductionDate, setNewProductionDate] = useState("");
   const [newExpiryDate, setNewExpiryDate] = useState("");
 
+  // ★追加: 複数選択用のState
+  const [selectedSampleIds, setSelectedSampleIds] = useState<Set<string>>(new Set());
+
   const fetchSamples = useCallback(async () => {
     setLoading(true);
-    // 既存のサンプル取得
     const { data: sData } = await supabase.from("keep_samples").select("*, products(name, variant_name)").order("production_date", { ascending: false });
     if (sData) setSamples(sData as KeepSample[]);
 
-    // ★追加: 新規登録用の製品マスタ取得
     const { data: pData } = await supabase.from("products").select("id, name, variant_name").order("name", { ascending: true });
     if (pData) setProducts(pData as Product[]);
 
@@ -102,9 +102,6 @@ export default function KeepSamplesPage() {
     setIsProcessing(false);
   };
 
-  // =======================================================================
-  // ★追加: 新規登録(補填)の保存処理
-  // =======================================================================
   const handleSaveNewSample = async () => {
     if (!newProductId || !newLotCode || !newSavedQty || !newProductionDate || !newExpiryDate) {
       alert("すべての必須項目を入力してください。");
@@ -113,7 +110,6 @@ export default function KeepSamplesPage() {
 
     setIsProcessing(true);
     try {
-      // 1. 重複チェック（同じLotのサンプルが既に存在しないか確認）
       const { data: existing } = await supabase.from("keep_samples").select("id").eq("lot_code", newLotCode).maybeSingle();
       if (existing) {
         if (!confirm(`エラーの警告: 既にこのLot番号（${newLotCode}）のキープサンプルが存在します。\n強制的に追加登録してよろしいですか？`)) {
@@ -121,7 +117,6 @@ export default function KeepSamplesPage() {
         }
       }
 
-      // 2. 登録データを作成（管理番号は自動発行）
       const randomManageNo = `KS-${newLotCode}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
       const newSampleData = {
         lot_code: newLotCode,
@@ -140,10 +135,7 @@ export default function KeepSamplesPage() {
       alert(`管理番号: ${randomManageNo} で新規サンプルを手動登録（補填）しました！`);
       setIsAddModalOpen(false);
 
-      // フォームをリセット
       setNewProductId(""); setNewLotCode(""); setNewSavedQty(10); setNewProductionDate(""); setNewExpiryDate("");
-
-      // 一覧を更新
       fetchSamples();
 
     } catch (err: any) {
@@ -152,8 +144,132 @@ export default function KeepSamplesPage() {
     setIsProcessing(false);
   };
 
+  // ★追加: チェックボックスのON/OFF制御
+  const toggleSelectSample = (id: string) => {
+    const newSet = new Set(selectedSampleIds);
+    if (newSet.has(id)) newSet.delete(id);
+    else newSet.add(id);
+    setSelectedSampleIds(newSet);
+  };
+
+  // ★追加: 全選択/全解除
+  const toggleSelectAll = () => {
+    if (selectedSampleIds.size === samples.length) {
+      setSelectedSampleIds(new Set()); // 全解除
+    } else {
+      setSelectedSampleIds(new Set(samples.map(s => s.id))); // 全選択
+    }
+  };
+
   // =======================================================================
-  // 印刷画面
+  // ★追加: キープサンプル 段ボール用まとめラベル印刷画面
+  // =======================================================================
+  if (viewMode === 'print_label') {
+    // 選択されたサンプルのデータを取得
+    const selectedSamplesData = samples.filter(s => selectedSampleIds.has(s.id));
+
+    // QRコードには、検索用にLot番号をカンマ区切りで埋め込む
+    // (例: スB26SB,26MA01,13B26YC50)
+    // ただし、数が多すぎるとQRが複雑になりすぎるため、最初の5個分などに制限する設計もアリですが、今回は全Lotを入れます
+    const lotCodes = selectedSamplesData.map(s => s.lot_code).join(',');
+    const qrData = encodeURIComponent(lotCodes);
+    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${qrData}`;
+
+    // ラベルに記載する期間（最初の製造日〜最後の製造日）
+    const dates = selectedSamplesData.map(s => new Date(s.production_date).getTime());
+    const minDate = new Date(Math.min(...dates));
+    const maxDate = new Date(Math.max(...dates));
+    const dateRangeStr = minDate.getTime() === maxDate.getTime()
+      ? minDate.toLocaleDateString('ja-JP')
+      : `${minDate.toLocaleDateString('ja-JP')} 〜 ${maxDate.toLocaleDateString('ja-JP')}`;
+
+    // 最も短い賞味期限（この箱を廃棄すべき基準日）
+    const expiryDates = selectedSamplesData.map(s => new Date(s.expiry_date).getTime());
+    const minExpiryDate = new Date(Math.min(...expiryDates));
+
+    return (
+      <div className="bg-slate-200 min-h-screen py-8 print:p-0 print:bg-white flex flex-col items-center">
+        <style dangerouslySetInnerHTML={{
+          __html: `
+                @media print { 
+                    header, nav { display: none !important; } 
+                    main { padding: 0 !important; margin: 0 !important; max-width: 100% !important; background: white !important; } 
+                    @page { size: A4 portrait; margin: 15mm; } 
+                    body { background-color: white !important; color: black !important; } 
+                    .print-hide { display: none !important; } 
+                }
+            ` }} />
+        <div className="w-[210mm] print:w-full flex justify-between mb-4 print-hide">
+          <Button variant="outline" onClick={() => setViewMode('list')} className="bg-white text-slate-700 font-bold border-slate-300"><ArrowLeft className="h-4 w-4 mr-2" /> 戻る</Button>
+          <div className="flex gap-2">
+            <span className="text-sm font-bold bg-white px-3 py-2 rounded border border-slate-300 text-slate-600">※A4用紙に印刷し、点線で切り取って段ボールに貼り付けてください。</span>
+            <Button onClick={() => window.print()} className="bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-lg"><Printer className="h-5 w-5 mr-2" /> 印刷する</Button>
+          </div>
+        </div>
+
+        <div className="w-[210mm] min-h-[297mm] bg-white p-8 print:p-0 shadow-xl print:shadow-none text-black font-sans box-border flex flex-col items-center pt-12">
+
+          {/* 切り取り線（ガイド） */}
+          <div className="border-[3px] border-dashed border-slate-400 w-[160mm] p-6 rounded-2xl relative">
+            <div className="absolute -top-3 left-4 bg-white px-2 text-sm font-bold text-slate-400 flex items-center gap-1"><Beaker className="w-4 h-4" /> 段ボール保管用ラベル</div>
+
+            <div className="text-center border-b-2 border-black pb-4 mb-4 flex justify-between items-end">
+              <div className="text-left">
+                <h1 className="text-3xl font-black tracking-widest text-slate-800">キープサンプル保管箱</h1>
+                <p className="text-sm font-bold text-slate-500 mt-1">品質検査・トレーサビリティ用</p>
+              </div>
+              {/* QRコード */}
+              <div className="shrink-0 flex flex-col items-center justify-center p-1.5 border-2 border-slate-300 rounded-lg bg-slate-50">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={qrUrl} alt="QR Code" className="w-20 h-20 mix-blend-multiply" />
+                <div className="text-[8px] font-bold text-slate-500 mt-1 text-center leading-tight">スキャンして検索</div>
+              </div>
+            </div>
+
+            <div className="flex justify-between items-end mb-2">
+              <div className="font-bold text-slate-700">保管されている製品 ({selectedSamplesData.length} ロット)</div>
+              <div className="text-sm font-bold text-slate-600">製造期間: <span className="text-black font-black">{dateRangeStr}</span></div>
+            </div>
+
+            {/* 箱の中身一覧 */}
+            <div className="border-2 border-slate-400 rounded-lg overflow-hidden mb-4 max-h-[120mm] overflow-y-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-100">
+                  <tr>
+                    <th className="py-1.5 px-3 text-left border-b border-slate-300 w-[45%]">製品名 (味)</th>
+                    <th className="py-1.5 px-3 text-left border-b border-slate-300 w-[30%]">Lot番号</th>
+                    <th className="py-1.5 px-3 text-center border-b border-slate-300 w-[10%]">個数</th>
+                    <th className="py-1.5 px-3 text-center border-b border-slate-300 w-[15%]">製造日</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedSamplesData.map(s => (
+                    <tr key={s.id} className="border-b border-slate-200 last:border-b-0">
+                      <td className="py-1.5 px-3 font-bold text-slate-800 truncate max-w-[200px]">{s.products?.name} <span className="text-xs text-slate-500">({s.products?.variant_name})</span></td>
+                      <td className="py-1.5 px-3 font-mono font-black text-blue-800">{s.lot_code}</td>
+                      <td className="py-1.5 px-3 text-center font-bold">{s.saved_quantity}</td>
+                      <td className="py-1.5 px-3 text-center text-xs text-slate-600">{new Date(s.production_date).toLocaleDateString('ja-JP')}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex justify-end border-t-2 border-slate-200 pt-4">
+              <div className="text-right bg-red-50 px-4 py-2 border border-red-200 rounded-lg">
+                <div className="text-xs font-bold text-red-600 mb-0.5">※この箱の最短保管期限 (賞味期限)</div>
+                <div className="text-xl font-black text-red-700">{minExpiryDate.toLocaleDateString('ja-JP')} まで保管</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    );
+  }
+
+  // =======================================================================
+  // 管理記録 印刷画面
   // =======================================================================
   if (viewMode === 'print') {
     const chunkedSamples = [];
@@ -230,7 +346,7 @@ export default function KeepSamplesPage() {
   }
 
   // =======================================================================
-  // 通常のリスト入力画面
+  // 通常のリスト画面
   // =======================================================================
   return (
     <div className="bg-transparent">
@@ -239,23 +355,37 @@ export default function KeepSamplesPage() {
           <h1 className="text-2xl font-bold flex items-center gap-2 text-slate-800"><Beaker className="h-6 w-6 text-blue-600" /> キープサンプル管理</h1>
           {!canEdit && <Badge variant="outline" className="bg-slate-100 text-slate-500 border-slate-300 px-3 py-1 shadow-sm"><Lock className="w-3 h-3 mr-1" /> 閲覧モード</Badge>}
         </div>
-        <div className="flex gap-2">
-          {/* ★追加: 新規登録(補填)ボタン */}
+        <div className="flex gap-2 flex-wrap justify-end">
+          {/* ★追加: 選択されたサンプルからラベルを発行するボタン */}
+          {selectedSampleIds.size > 0 && (
+            <Button onClick={() => setViewMode('print_label')} className="bg-slate-800 hover:bg-slate-900 text-white font-bold shadow-sm h-10">
+              <QrCode className="h-4 w-4 mr-2" /> 選択した {selectedSampleIds.size} 件のラベルを作成
+            </Button>
+          )}
           {canEdit && (
             <Button onClick={() => setIsAddModalOpen(true)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-sm h-10 w-full sm:w-auto">
               <Plus className="h-4 w-4 mr-2" /> 新規登録(補填)
             </Button>
           )}
-          <Button onClick={() => setViewMode('print')} className="bg-slate-800 hover:bg-slate-900 text-white font-bold shadow-sm h-10 w-full sm:w-auto">
+          <Button onClick={() => setViewMode('print')} variant="outline" className="border-blue-200 text-blue-700 hover:bg-blue-50 font-bold shadow-sm h-10 w-full sm:w-auto">
             <Printer className="h-4 w-4 mr-2" /> 管理記録(PDF)作成
           </Button>
         </div>
       </div>
 
       <div className="bg-white border rounded-lg shadow-sm overflow-x-auto">
-        <Table className="min-w-[1000px]">
+        <Table className="min-w-[1100px]">
           <TableHeader className="bg-slate-50">
             <TableRow>
+              {/* ★追加: チェックボックス用のヘッダー */}
+              <TableHead className="w-12 text-center border-r">
+                <input
+                  type="checkbox"
+                  checked={samples.length > 0 && selectedSampleIds.size === samples.length}
+                  onChange={toggleSelectAll}
+                  className="w-4 h-4 rounded text-blue-600"
+                />
+              </TableHead>
               <TableHead className="w-12 text-center">No.</TableHead>
               <TableHead className="w-36 pl-2">管理番号<br /><span className="text-[10px] text-slate-400">Lot番号</span></TableHead>
               <TableHead className="w-48">製品名 / 種類</TableHead>
@@ -273,9 +403,19 @@ export default function KeepSamplesPage() {
               const remainQty = sample.saved_quantity - sample.used_quantity;
               const isUsedUp = remainQty === 0;
               const isPartiallyUsed = sample.used_quantity > 0 && remainQty > 0;
+              const isSelected = selectedSampleIds.has(sample.id); // 選択状態
 
               return (
-                <TableRow key={sample.id} className={isUsedUp ? "bg-slate-50/50 opacity-70" : "hover:bg-slate-50"}>
+                <TableRow key={sample.id} className={`${isUsedUp ? "bg-slate-50/50 opacity-70" : "hover:bg-slate-50"} ${isSelected ? "bg-blue-50/30" : ""}`}>
+                  {/* ★追加: 行ごとのチェックボックス */}
+                  <TableCell className="text-center border-r">
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => toggleSelectSample(sample.id)}
+                      className="w-4 h-4 rounded text-blue-600 cursor-pointer"
+                    />
+                  </TableCell>
                   <TableCell className="text-center text-slate-400 text-xs">{samples.length - index}</TableCell>
                   <TableCell className="pl-2">
                     <div className="font-black text-blue-800 text-sm tracking-wide">{sample.management_no}</div>
@@ -308,25 +448,27 @@ export default function KeepSamplesPage() {
                         <Badge className="bg-green-100 text-green-800 border-none shadow-sm">保管中</Badge>}
                   </TableCell>
                   <TableCell className="text-center pr-4">
-                    {canEdit ? (
-                      <Button variant="outline" size="sm" onClick={() => openEditModal(sample)} className="text-blue-600 border-blue-200 hover:bg-blue-50">
-                        <Edit className="h-3 w-3 mr-1" /> 記録
-                      </Button>
-                    ) : (
-                      <span className="text-xs text-slate-400"><Lock className="w-3 h-3 inline" /></span>
-                    )}
+                    <div className="flex justify-center gap-1">
+                      {canEdit ? (
+                        <Button variant="outline" size="sm" onClick={() => openEditModal(sample)} className="text-blue-600 border-blue-200 hover:bg-blue-50 h-8 px-2">
+                          <Edit className="h-3 w-3 mr-1" /> 記録
+                        </Button>
+                      ) : (
+                        <span className="text-xs text-slate-400 mt-1"><Lock className="w-3 h-3 inline" /></span>
+                      )}
+                    </div>
                   </TableCell>
                 </TableRow>
               );
             })}
-            {!loading && samples.length === 0 && <TableRow><TableCell colSpan={10} className="text-center py-16 text-slate-500 font-bold bg-slate-50/50">キープサンプルのデータがありません。</TableCell></TableRow>}
-            {loading && <TableRow><TableCell colSpan={10} className="text-center py-16"><Loader2 className="h-8 w-8 text-slate-400 animate-spin mx-auto" /></TableCell></TableRow>}
+            {!loading && samples.length === 0 && <TableRow><TableCell colSpan={11} className="text-center py-16 text-slate-500 font-bold bg-slate-50/50">キープサンプルのデータがありません。</TableCell></TableRow>}
+            {loading && <TableRow><TableCell colSpan={11} className="text-center py-16"><Loader2 className="h-8 w-8 text-slate-400 animate-spin mx-auto" /></TableCell></TableRow>}
           </TableBody>
         </Table>
       </div>
 
       {/* =======================================================================
-          ★追加: 新規登録(手動補填)モーダル
+          手動登録ダイアログ
           ======================================================================= */}
       <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
         <DialogContent className="max-w-md bg-white p-6 rounded-xl">
