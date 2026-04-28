@@ -57,7 +57,6 @@ export default function KeepSamplesPage() {
 
   // 複数選択用のState
   const [selectedSampleIds, setSelectedSampleIds] = useState<Set<string>>(new Set());
-  const [labelSample, setLabelSample] = useState<KeepSample | null>(null);
 
   // CSV一括登録用のState
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -85,11 +84,6 @@ export default function KeepSamplesPage() {
     setEditUsedQty(sample.used_quantity === 0 ? "" : sample.used_quantity);
     setEditPurpose(sample.usage_purpose || "官能検査・菌検査");
     setEditUsedDate(sample.used_date || new Date().toISOString().split('T')[0]);
-  };
-
-  const openLabelPrint = (sample: KeepSample) => {
-    setLabelSample(sample);
-    setViewMode('print_label');
   };
 
   const handleSaveUsage = async () => {
@@ -332,11 +326,32 @@ export default function KeepSamplesPage() {
     setIsProcessing(false);
   };
 
+  // ★無限ループを防ぐため、レンダリング時に計算結果をメモ化
+  const chunkedSamples = useMemo(() => {
+    if (viewMode !== 'print') return [];
+    const chunks = [];
+    for (let i = 0; i < samples.length; i += 4) {
+      chunks.push(samples.slice(i, i + 4));
+    }
+    return chunks;
+  }, [samples, viewMode]);
+
   // =======================================================================
   // ラベル印刷画面
   // =======================================================================
-  if (viewMode === 'print_label' && labelSample) {
+  if (viewMode === 'print_label') {
+    // 選択されたサンプルのデータを取得
     const selectedSamplesData = samples.filter(s => selectedSampleIds.has(s.id));
+
+    if (selectedSamplesData.length === 0) {
+      return (
+        <div className="bg-slate-200 min-h-screen py-8 print:p-0 print:bg-white flex flex-col items-center justify-center">
+          <p className="font-bold text-slate-500 mb-4">印刷するサンプルが選択されていません。</p>
+          <Button onClick={() => setViewMode('list')}>戻る</Button>
+        </div>
+      );
+    }
+
     const lotCodes = selectedSamplesData.map(s => s.lot_code).join(',');
     const qrData = encodeURIComponent(lotCodes);
     const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${qrData}`;
@@ -431,22 +446,21 @@ export default function KeepSamplesPage() {
   // =======================================================================
   // 管理記録 印刷画面 (A4横・1ページ4データ表示)
   // =======================================================================
-  // ★修正: 無限ループを防ぐため、レンダリング時に計算結果をメモ化（useMemoを使用）
-  const chunkedSamples = useMemo(() => {
-    if (viewMode !== 'print') return [];
-    const chunks = [];
-    for (let i = 0; i < samples.length; i += 4) {
-      chunks.push(samples.slice(i, i + 4));
-    }
-    return chunks;
-  }, [samples, viewMode]);
-
   if (viewMode === 'print') {
     return (
       <div className="bg-slate-200 min-h-screen py-8 print:p-0 print:bg-white flex flex-col items-center">
         <style dangerouslySetInnerHTML={{ __html: `@media print { header, nav { display: none !important; } main { padding: 0 !important; margin: 0 !important; max-width: 100% !important; background: white !important; } @page { size: A4 landscape; margin: 10mm; } body { background-color: white !important; color: black !important; } .print-hide { display: none !important; } .page-break { page-break-after: always; } }` }} />
         <div className="w-[297mm] print:w-full flex justify-between mb-4 print-hide">
           <Button variant="outline" onClick={() => setViewMode('list')} className="bg-white text-slate-700 font-bold border-slate-300"><ArrowLeft className="h-4 w-4 mr-2" /> 戻る</Button>
+          <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-md border shadow-sm">
+            <span className="text-sm font-bold text-slate-600">表示月:</span>
+            <Input
+              type="month"
+              value={`${printMonth.getFullYear()}-${String(printMonth.getMonth() + 1).padStart(2, '0')}`}
+              onChange={(e) => { if (e.target.value) setPrintMonth(new Date(e.target.value + "-01")); }}
+              className="w-36 h-8 font-bold border-none shadow-none focus-visible:ring-0 px-0"
+            />
+          </div>
           <Button onClick={() => window.print()} className="bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-lg"><Printer className="h-5 w-5 mr-2" /> 印刷する (PDFに保存)</Button>
         </div>
 
@@ -454,14 +468,18 @@ export default function KeepSamplesPage() {
           <div className="w-[297mm] bg-white p-8 text-center text-slate-500 font-bold shadow-xl">データがありません</div>
         ) : (
           chunkedSamples.map((chunk, pageIdx) => (
-            <div key={pageIdx} className={`w-[297mm] h-[210mm] bg-white pt-8 pb-4 px-12 print:p-0 shadow-xl print:shadow-none text-black font-sans box-border flex flex-col ${pageIdx < chunkedSamples.length - 1 ? 'page-break mb-8 print:mb-0' : ''}`}>
+            <div key={pageIdx} className={`w-[297mm] h-[210mm] bg-white pt-8 pb-4 px-12 print:p-0 shadow-xl print:shadow-none text-black font-sans box-border flex flex-col justify-between ${pageIdx < chunkedSamples.length - 1 ? 'page-break mb-8 print:mb-0' : ''}`}>
 
-              <HaccpPrintHeader
-                title="キープサンプル管理記録"
-                docNo="YO-28"
-                establishedDate="2021/4/1"
-                revisedDate=""
-              />
+              <div className="flex justify-between items-start">
+                <div className="flex-1">
+                  <HaccpPrintHeader
+                    title="キープサンプル管理記録"
+                    docNo="YO-28"
+                    establishedDate="2021/4/1"
+                    revisedDate=""
+                  />
+                </div>
+              </div>
 
               <div className="flex-1 flex flex-col gap-4 mt-2">
                 {chunk.map(sample => {
@@ -525,6 +543,17 @@ export default function KeepSamplesPage() {
                     </div>
                   </div>
                 ))}
+              </div>
+
+              <div className="mt-4 flex justify-between items-end">
+                <div className="text-[10px] text-slate-500 italic">
+                  ※ この記録はシステムによって生成されたものです。
+                </div>
+                {chunkedSamples.length > 1 && (
+                  <div className="text-xs font-bold text-slate-500 shrink-0 ml-4">
+                    {pageIdx + 1} / {chunkedSamples.length} ページ
+                  </div>
+                )}
               </div>
             </div>
           ))
@@ -648,9 +677,6 @@ export default function KeepSamplesPage() {
                       </TableCell>
                       <TableCell className="text-center pr-4">
                         <div className="flex justify-center gap-1">
-                          <Button variant="outline" size="icon" onClick={() => openLabelPrint(sample)} className="h-8 w-8 text-slate-500 border-slate-300 hover:bg-slate-100" title="ラベルを1件だけ印刷">
-                            <QrCode className="h-4 w-4" />
-                          </Button>
                           {canEdit ? (
                             <Button variant="outline" size="sm" onClick={() => openEditModal(sample)} className="text-blue-600 border-blue-200 hover:bg-blue-50 h-8 px-2">
                               <Edit className="h-3 w-3 mr-1" /> 記録
