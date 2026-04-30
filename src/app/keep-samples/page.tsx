@@ -31,6 +31,27 @@ type ParsedSample = {
   _error?: string;
 };
 
+// =======================================================================
+// キープサンプル表示用 Lot番号変換関数 (カタカナ -> 数字)
+// =======================================================================
+const DAY_KATAKANA_MAP = [
+  "", "ア", "イ", "ウ", "エ", "オ", "カ", "キ", "ク", "ケ", "コ",
+  "サ", "シ", "ス", "セ", "ソ", "ナ", "ニ", "ヌ", "ネ", "ノ",
+  "ハ", "ヒ", "フ", "ヘ", "ホ", "マ", "ミ", "ム", "メ", "モ", "ヤ"
+];
+
+function formatKeepSampleLot(lotCode: string) {
+  if (!lotCode) return "";
+  const firstChar = lotCode.charAt(0);
+  const dayIndex = DAY_KATAKANA_MAP.indexOf(firstChar);
+  if (dayIndex > 0) {
+    // 先頭がカタカナの場合は数字に置き換える（例: スB26SB -> 13B26SB）
+    return dayIndex.toString() + lotCode.slice(1);
+  }
+  // MA/FDやYC50など、既に数字で始まっている場合はそのまま返す
+  return lotCode;
+}
+
 export default function KeepSamplesPage() {
   const { canEdit } = useAuth();
   const [viewMode, setViewMode] = useState<'list' | 'print' | 'print_label'>('list');
@@ -337,10 +358,9 @@ export default function KeepSamplesPage() {
   }, [samples, viewMode]);
 
   // =======================================================================
-  // ラベル印刷画面
+  // ラベル印刷画面 (A4横に2つ並べる)
   // =======================================================================
   if (viewMode === 'print_label') {
-    // 選択されたサンプルのデータを取得
     const selectedSamplesData = samples.filter(s => selectedSampleIds.has(s.id));
 
     if (selectedSamplesData.length === 0) {
@@ -352,19 +372,18 @@ export default function KeepSamplesPage() {
       );
     }
 
-    const lotCodes = selectedSamplesData.map(s => s.lot_code).join(',');
-    const qrData = encodeURIComponent(lotCodes);
-    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${qrData}`;
+    // 10個単位でチャンクに分割
+    const CHUNK_SIZE = 10;
+    const labelChunks = [];
+    for (let i = 0; i < selectedSamplesData.length; i += CHUNK_SIZE) {
+      labelChunks.push(selectedSamplesData.slice(i, i + CHUNK_SIZE));
+    }
 
-    const dates = selectedSamplesData.map(s => new Date(s.production_date).getTime());
-    const minDate = new Date(Math.min(...dates));
-    const maxDate = new Date(Math.max(...dates));
-    const dateRangeStr = minDate.getTime() === maxDate.getTime()
-      ? minDate.toLocaleDateString('ja-JP')
-      : `${minDate.toLocaleDateString('ja-JP')} 〜 ${maxDate.toLocaleDateString('ja-JP')}`;
-
-    const expiryDates = selectedSamplesData.map(s => new Date(s.expiry_date).getTime());
-    const minExpiryDate = new Date(Math.min(...expiryDates));
+    // 2チャンク（ラベル2つ分）で1ページに分割
+    const pageChunks = [];
+    for (let i = 0; i < labelChunks.length; i += 2) {
+      pageChunks.push(labelChunks.slice(i, i + 2));
+    }
 
     return (
       <div className="bg-slate-200 min-h-screen py-8 print:p-0 print:bg-white flex flex-col items-center">
@@ -373,72 +392,104 @@ export default function KeepSamplesPage() {
                 @media print { 
                     header, nav { display: none !important; } 
                     main { padding: 0 !important; margin: 0 !important; max-width: 100% !important; background: white !important; } 
-                    @page { size: A4 portrait; margin: 15mm; } 
+                    @page { size: A4 landscape; margin: 10mm; } 
                     body { background-color: white !important; color: black !important; } 
                     .print-hide { display: none !important; } 
+                    .page-break { page-break-after: always; }
                 }
             ` }} />
-        <div className="w-[210mm] print:w-full flex justify-between mb-4 print-hide">
-          <Button variant="outline" onClick={() => setViewMode('list')} className="bg-white text-slate-700 font-bold border-slate-300"><ArrowLeft className="h-4 w-4 mr-2" /> 戻る</Button>
+        <div className="w-[297mm] print:w-full flex justify-between mb-4 print-hide">
+          <Button variant="outline" onClick={() => setViewMode('list')} className="bg-white text-slate-700 font-bold border-slate-300">
+            <ArrowLeft className="h-4 w-4 mr-2" /> 戻る
+          </Button>
           <div className="flex gap-2">
-            <span className="text-sm font-bold bg-white px-3 py-2 rounded border border-slate-300 text-slate-600">※A4用紙に印刷し、点線で切り取って段ボールに貼り付けてください。</span>
-            <Button onClick={() => window.print()} className="bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-lg"><Printer className="h-5 w-5 mr-2" /> 印刷する</Button>
+            <span className="text-sm font-bold bg-white px-3 py-2 rounded border border-slate-300 text-slate-600">※A4横で印刷し、真ん中で切り取って段ボールに貼り付けてください。</span>
+            <Button onClick={() => window.print()} className="bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-lg">
+              <Printer className="h-5 w-5 mr-2" /> 印刷する
+            </Button>
           </div>
         </div>
 
-        <div className="w-[210mm] min-h-[297mm] bg-white p-8 print:p-0 shadow-xl print:shadow-none text-black font-sans box-border flex flex-col items-center pt-12">
-          <div className="border-[3px] border-dashed border-slate-400 w-[160mm] p-6 rounded-2xl relative">
-            <div className="absolute -top-3 left-4 bg-white px-2 text-sm font-bold text-slate-400 flex items-center gap-1"><Beaker className="w-4 h-4" /> 段ボール保管用ラベル</div>
+        {pageChunks.map((pair, pageIdx) => (
+          <div key={pageIdx} className={`w-[297mm] h-[210mm] bg-white p-6 print:p-0 shadow-xl print:shadow-none text-black font-sans box-border flex flex-row items-center justify-center gap-8 ${pageIdx < pageChunks.length - 1 ? 'page-break mb-8 print:mb-0' : ''}`}>
 
-            <div className="text-center border-b-2 border-black pb-4 mb-4 flex justify-between items-end">
-              <div className="text-left">
-                <h1 className="text-3xl font-black tracking-widest text-slate-800">キープサンプル保管箱</h1>
-                <p className="text-sm font-bold text-slate-500 mt-1">品質検査・トレーサビリティ用</p>
-              </div>
-              <div className="shrink-0 flex flex-col items-center justify-center p-1.5 border-2 border-slate-300 rounded-lg bg-slate-50">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={qrUrl} alt="QR Code" className="w-20 h-20 mix-blend-multiply" />
-                <div className="text-[8px] font-bold text-slate-500 mt-1 text-center leading-tight">スキャンして検索</div>
-              </div>
-            </div>
+            {pair.map((chunk, chunkIdx) => {
+              const absoluteIndex = pageIdx * 2 + chunkIdx;
+              const lotCodes = chunk.map(s => formatKeepSampleLot(s.lot_code)).join(',');
+              const qrData = encodeURIComponent(lotCodes);
+              const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${qrData}`;
 
-            <div className="flex justify-between items-end mb-2">
-              <div className="font-bold text-slate-700">保管されている製品 ({selectedSamplesData.length} ロット)</div>
-              <div className="text-sm font-bold text-slate-600">製造期間: <span className="text-black font-black">{dateRangeStr}</span></div>
-            </div>
+              const dates = chunk.map(s => new Date(s.production_date).getTime());
+              const minDate = new Date(Math.min(...dates));
+              const maxDate = new Date(Math.max(...dates));
+              const dateRangeStr = minDate.getTime() === maxDate.getTime()
+                ? minDate.toLocaleDateString('ja-JP')
+                : `${minDate.toLocaleDateString('ja-JP')} 〜 ${maxDate.toLocaleDateString('ja-JP')}`;
 
-            <div className="border-2 border-slate-400 rounded-lg overflow-hidden mb-4 max-h-[120mm] overflow-y-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-100">
-                  <tr>
-                    <th className="py-1.5 px-3 text-left border-b border-slate-300 w-[45%]">製品名 (味)</th>
-                    <th className="py-1.5 px-3 text-left border-b border-slate-300 w-[30%]">Lot番号</th>
-                    <th className="py-1.5 px-3 text-center border-b border-slate-300 w-[10%]">個数</th>
-                    <th className="py-1.5 px-3 text-center border-b border-slate-300 w-[15%]">製造日</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {selectedSamplesData.map(s => (
-                    <tr key={s.id} className="border-b border-slate-200 last:border-b-0">
-                      <td className="py-1.5 px-3 font-bold text-slate-800 truncate max-w-[200px]">{s.products?.name} <span className="text-xs text-slate-500">({s.products?.variant_name})</span></td>
-                      <td className="py-1.5 px-3 font-mono font-black text-blue-800">{s.lot_code}</td>
-                      <td className="py-1.5 px-3 text-center font-bold">{s.saved_quantity}</td>
-                      <td className="py-1.5 px-3 text-center text-xs text-slate-600">{new Date(s.production_date).toLocaleDateString('ja-JP')}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+              const expiryDates = chunk.map(s => new Date(s.expiry_date).getTime());
+              const minExpiryDate = new Date(Math.min(...expiryDates));
 
-            <div className="flex justify-end border-t-2 border-slate-200 pt-4">
-              <div className="text-right bg-red-50 px-4 py-2 border border-red-200 rounded-lg">
-                <div className="text-xs font-bold text-red-600 mb-0.5">※この箱の最短保管期限 (賞味期限)</div>
-                <div className="text-xl font-black text-red-700">{minExpiryDate.toLocaleDateString('ja-JP')} まで保管</div>
-              </div>
-            </div>
+              return (
+                <div key={chunkIdx} className="border-[3px] border-dashed border-slate-400 w-[135mm] h-[185mm] p-5 rounded-2xl relative flex flex-col justify-between box-border bg-white">
+                  <div className="absolute -top-3 left-4 bg-white px-2 text-sm font-bold text-slate-400 flex items-center gap-1">
+                    <Beaker className="w-4 h-4" /> 段ボール保管用ラベル
+                  </div>
+
+                  <div>
+                    <div className="text-center border-b-2 border-black pb-3 mb-3 flex justify-between items-end">
+                      <div className="text-left">
+                        <h1 className="text-xl font-black tracking-widest text-slate-800">キープサンプル保管箱</h1>
+                        <p className="text-xs font-bold text-slate-500 mt-1">
+                          品質検査用 {labelChunks.length > 1 && `（${absoluteIndex + 1} / ${labelChunks.length} 箱目）`}
+                        </p>
+                      </div>
+                      <div className="shrink-0 flex flex-col items-center justify-center p-1 border-2 border-slate-300 rounded-lg bg-slate-50">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={qrUrl} alt="QR Code" className="w-16 h-16 mix-blend-multiply" />
+                      </div>
+                    </div>
+
+                    <div className="flex justify-between items-end mb-2">
+                      <div className="font-bold text-slate-700 text-sm">製品 ({chunk.length} ロット)</div>
+                      <div className="text-xs font-bold text-slate-600">製造期間: <span className="text-black font-black">{dateRangeStr}</span></div>
+                    </div>
+
+                    <div className="border border-slate-400 rounded-lg overflow-hidden">
+                      <table className="w-full text-xs">
+                        <thead className="bg-slate-100">
+                          <tr>
+                            <th className="py-1 px-1.5 text-left border-b border-slate-300 w-[42%] text-xs">製品名 (味)</th>
+                            <th className="py-1 px-1.5 text-left border-b border-slate-300 w-[30%] text-xs">Lot番号</th>
+                            <th className="py-1 px-1.5 text-center border-b border-slate-300 w-[10%] text-xs">個数</th>
+                            <th className="py-1 px-1.5 text-center border-b border-slate-300 w-[18%] text-xs">製造日</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {chunk.map(s => (
+                            <tr key={s.id} className="border-b border-slate-200 last:border-b-0">
+                              <td className="py-1 px-1.5 font-bold text-slate-800 truncate max-w-[120px] text-xs">{s.products?.name} <span className="text-[10px] text-slate-500">({s.products?.variant_name})</span></td>
+                              {/* ▼ Lot番号をフォーマットして表示 ▼ */}
+                              <td className="py-1 px-1.5 font-mono font-black text-blue-800 text-[11px]">{formatKeepSampleLot(s.lot_code)}</td>
+                              <td className="py-1 px-1.5 text-center font-bold text-xs">{s.saved_quantity}</td>
+                              <td className="py-1 px-1.5 text-center text-[10px] text-slate-600">{new Date(s.production_date).toLocaleDateString('ja-JP')}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end border-t border-slate-200 pt-3 mt-3">
+                    <div className="text-right bg-red-50 px-3 py-1.5 border border-red-200 rounded-lg">
+                      <div className="text-[10px] font-bold text-red-600 mb-0.5">※最短保管期限 (賞味期限)</div>
+                      <div className="text-lg font-black text-red-700">{minExpiryDate.toLocaleDateString('ja-JP')} まで保管</div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
-
-        </div>
+        ))}
       </div>
     );
   }
@@ -489,7 +540,8 @@ export default function KeepSamplesPage() {
                   return (
                     <div key={sample.id} className="flex border-2 border-black h-[35mm] text-[13px] w-full box-border">
                       <div className="w-[60mm] flex flex-col border-r-2 border-black shrink-0">
-                        <div className="flex-1 flex border-b border-black"><div className="w-[20mm] bg-gray-50 p-1 font-medium border-r border-black flex items-center justify-center text-xs">ロット</div><div className="flex-1 p-1 flex items-center justify-center font-bold text-base tracking-widest">{sample.lot_code}</div></div>
+                        {/* ▼ Lot番号をフォーマットして表示 ▼ */}
+                        <div className="flex-1 flex border-b border-black"><div className="w-[20mm] bg-gray-50 p-1 font-medium border-r border-black flex items-center justify-center text-xs">ロット</div><div className="flex-1 p-1 flex items-center justify-center font-bold text-base tracking-widest">{formatKeepSampleLot(sample.lot_code)}</div></div>
                         <div className="flex-1 flex border-b border-black"><div className="w-[20mm] bg-gray-50 p-1 font-medium border-r border-black flex flex-col items-center justify-center leading-tight text-xs"><span>賞味</span><span>期限</span></div><div className="flex-1 p-1 flex items-center justify-center font-bold tracking-widest">{eStr}</div></div>
                         <div className="flex-1 flex"><div className="w-[20mm] bg-gray-50 p-1 font-medium border-r border-black flex flex-col items-center justify-center leading-tight text-xs"><span>管理</span><span>番号</span></div><div className="flex-1 p-1 flex items-center justify-center font-bold text-sm text-slate-700">{sample.management_no}</div></div>
                       </div>
@@ -647,7 +699,8 @@ export default function KeepSamplesPage() {
                       <TableCell className="text-center text-slate-400 text-xs">{samples.length - index}</TableCell>
                       <TableCell className="pl-2">
                         <div className="font-black text-blue-800 text-sm tracking-wide">{sample.management_no}</div>
-                        <div className="text-xs font-bold text-slate-500">{sample.lot_code}</div>
+                        {/* ▼ Lot番号をフォーマットして表示 ▼ */}
+                        <div className="text-xs font-bold text-slate-500">{formatKeepSampleLot(sample.lot_code)}</div>
                       </TableCell>
                       <TableCell>
                         <div className="font-bold text-slate-800">{sample.products?.name}</div>
