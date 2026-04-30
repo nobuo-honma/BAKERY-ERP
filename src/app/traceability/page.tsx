@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Search, Loader2, ArrowRight, Package, Truck, Factory, LineChart, Eye, FileSpreadsheet, Lock } from "lucide-react";
+import { Search, Loader2, Package, Truck, Factory, LineChart, Eye, FileSpreadsheet, Lock, CheckCircle2, AlertCircle } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 
 type TraceResult = {
@@ -20,6 +20,22 @@ type TraceResult = {
     fujiSteamyLogs: any[];
     sensoryTest: any | null;
     boms: any[]; // 使用原料
+};
+
+// =======================================================================
+// 官能検査結果のキーを日本語に変換するためのマッピング定義
+// =======================================================================
+const SENSORY_LABELS: Record<string, { category: string, label: string }> = {
+    "box_visual": { category: "小箱の状態", label: "視覚（目）" },
+    "box_olfactory": { category: "小箱の状態", label: "嗅覚（鼻）" },
+    "box_tactile": { category: "小箱の状態", label: "触覚（皮膚）" },
+    "alu_visual": { category: "アルミの状態", label: "視覚（目）" },
+    "alu_olfactory": { category: "アルミの状態", label: "嗅覚（鼻）" },
+    "alu_tactile": { category: "アルミの状態", label: "触覚（皮膚）" },
+    "bread_visual": { category: "パンの状態", label: "視覚（目）" },
+    "bread_olfactory": { category: "パンの状態", label: "嗅覚（鼻）" },
+    "bread_gustatory": { category: "パンの状態", label: "味覚（舌）" },
+    "bread_tactile": { category: "パンの状態", label: "触覚（皮膚）" },
 };
 
 export default function TraceabilityPage() {
@@ -53,7 +69,6 @@ export default function TraceabilityPage() {
                 return;
             }
 
-            // ★修正: any 型でキャストすることで TypeScript のエラーを回避
             const sProduct = stockData?.products as any;
             const pProduct = planData?.products as any;
 
@@ -83,7 +98,7 @@ export default function TraceabilityPage() {
                 .select('*')
                 // 計画の製造日と製品IDが一致するものを取得（近似値）
                 .eq('work_date', planData?.production_date)
-                .eq('product_name', productName.split(' ')[0]); // "食パン (プレーン)" -> "食パン" でマッチング試行
+                .eq('product_name', productName.split(' ')[0]);
 
             // 4. 官能検査結果を検索
             const { data: sensory } = await supabase.from('sensory_tests')
@@ -113,6 +128,68 @@ export default function TraceabilityPage() {
             setErrorMsg("検索中にエラーが発生しました。");
         }
         setLoading(false);
+    };
+
+    // =======================================================================
+    // 官能検査のJSONデータをパースして、カテゴリ別にグループ化する関数
+    // =======================================================================
+    const renderSensoryResults = (resultsObj: any) => {
+        if (!resultsObj) return null;
+
+        const grouped: Record<string, { label: string, values: string[], other?: string }[]> = {
+            "小箱の状態": [],
+            "アルミの状態": [],
+            "パンの状態": []
+        };
+
+        Object.keys(resultsObj).forEach(key => {
+            if (key.endsWith('_other_text')) return; // その他テキストは別途処理
+
+            const def = SENSORY_LABELS[key];
+            if (def) {
+                grouped[def.category].push({
+                    label: def.label,
+                    values: resultsObj[key],
+                    other: resultsObj[`${key}_other_text`]
+                });
+            }
+        });
+
+        return (
+            <div className="space-y-4 mt-2">
+                {Object.keys(grouped).map(category => (
+                    <div key={category} className="border border-slate-200 rounded-lg overflow-hidden">
+                        <div className="bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-700 border-b border-slate-200">
+                            {category}
+                        </div>
+                        <div className="divide-y divide-slate-100 bg-white">
+                            {grouped[category].map((item, idx) => {
+                                const isProblem = item.values.some(v => v !== "問題ない" && v !== "規格内");
+                                return (
+                                    <div key={idx} className="px-3 py-2 flex flex-col sm:flex-row sm:items-start gap-1 sm:gap-4 text-xs">
+                                        <div className="w-20 font-bold text-slate-500 shrink-0">{item.label}</div>
+                                        <div className="flex-1 flex flex-wrap gap-1.5">
+                                            {item.values.map((val, vIdx) => {
+                                                const isOk = val === "問題ない" || val === "規格内";
+                                                return (
+                                                    <span key={vIdx} className={`px-2 py-0.5 rounded font-bold ${isOk ? 'bg-blue-50 text-blue-700' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+                                                        {val}
+                                                    </span>
+                                                );
+                                            })}
+                                            {item.other && <span className="text-red-600 bg-red-50 px-2 py-0.5 rounded border border-red-200">詳細: {item.other}</span>}
+                                            {/* 全て問題ない場合のアイコン補足 */}
+                                            {!isProblem && <CheckCircle2 className="w-4 h-4 text-blue-500 ml-1" />}
+                                            {isProblem && <AlertCircle className="w-4 h-4 text-red-500 ml-1" />}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                ))}
+            </div>
+        );
     };
 
     return (
@@ -245,12 +322,12 @@ export default function TraceabilityPage() {
                         <div className="space-y-6">
 
                             {/* 官能検査 */}
-                            <Card className="border-slate-200 shadow-sm">
-                                <CardHeader className="bg-slate-50 border-b py-3 px-4 flex flex-row items-center justify-between">
+                            <Card className="border-slate-200 shadow-sm flex flex-col max-h-[500px]">
+                                <CardHeader className="bg-slate-50 border-b py-3 px-4 flex flex-row items-center justify-between shrink-0">
                                     <CardTitle className="text-sm font-bold text-slate-700 flex items-center gap-2"><Eye className="w-4 h-4 text-pink-600" /> 官能検査結果 (YO-30)</CardTitle>
                                     {result.sensoryTest && <Badge className="bg-green-100 text-green-700 shadow-none border-none">実施済</Badge>}
                                 </CardHeader>
-                                <CardContent className="p-4">
+                                <CardContent className="p-4 overflow-y-auto">
                                     {result.sensoryTest ? (
                                         <div className="space-y-3">
                                             <div className="flex justify-between border-b pb-2 text-xs">
@@ -258,12 +335,24 @@ export default function TraceabilityPage() {
                                                 <span className="font-bold">{new Date(result.sensoryTest.test_date).toLocaleDateString('ja-JP')}</span>
                                             </div>
                                             <div className="flex justify-between border-b pb-2 text-xs">
-                                                <span className="text-slate-500 font-bold">担当者</span>
+                                                <span className="text-slate-500 font-bold">主担当</span>
                                                 <span className="font-bold">{result.sensoryTest.checker_name || "不明"}</span>
                                             </div>
-                                            <div className="text-xs bg-slate-50 p-2 rounded border font-mono whitespace-pre-wrap text-slate-600 max-h-32 overflow-y-auto">
-                                                {JSON.stringify(result.sensoryTest.results, null, 2)}
-                                            </div>
+                                            {result.sensoryTest.sub_checker_name && (
+                                                <div className="flex justify-between border-b pb-2 text-xs">
+                                                    <span className="text-slate-500 font-bold">副担当</span>
+                                                    <span className="font-bold">{result.sensoryTest.sub_checker_name}</span>
+                                                </div>
+                                            )}
+                                            {/* ▼ 日本語化された検査結果の表示 ▼ */}
+                                            {renderSensoryResults(result.sensoryTest.results)}
+
+                                            {result.sensoryTest.notes && (
+                                                <div className="mt-3 bg-pink-50/50 p-2 rounded border border-pink-100 text-xs">
+                                                    <div className="font-bold text-pink-800 mb-1">備考・特記事項</div>
+                                                    <div className="text-slate-700 whitespace-pre-wrap">{result.sensoryTest.notes}</div>
+                                                </div>
+                                            )}
                                         </div>
                                     ) : (
                                         <div className="py-8 text-center text-red-500 text-xs font-bold bg-red-50 rounded border border-red-100">官能検査が未実施、または見つかりません</div>
