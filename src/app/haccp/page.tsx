@@ -297,6 +297,23 @@ export default function HaccpPortalPage() {
                                 </CardContent>
                             </Card>
                         </Link>
+
+                        {/* ▼ 追加：製品説明書 ▼ */}
+                        <Link href="/product-descriptions" className="block group">
+                            <Card className="h-full border-2 border-slate-200 hover:border-blue-400 hover:bg-blue-50/30 transition-all shadow-sm group-hover:shadow-md cursor-pointer">
+                                <CardHeader className="pb-2">
+                                    <div className="flex justify-between items-start">
+                                        <div className="bg-blue-100 p-2.5 rounded-lg text-blue-700 group-hover:scale-110 transition-transform"><FileText className="w-6 h-6" /></div>
+                                        <Badge className="bg-slate-100 text-slate-500 shadow-none border-none text-[10px]">HACCP-P1</Badge>
+                                    </div>
+                                    <CardTitle className="text-xl font-bold text-slate-800 mt-4">製品説明書</CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                    <p className="text-sm text-slate-600 leading-relaxed mb-4">製品ごとの原材料、添加物、アレルギー物質、賞味期限、保存方法などをまとめた説明書を作成・出力します。</p>
+                                    <div className="text-xs font-bold text-blue-600 flex items-center justify-end">作成する / PDF出力 <ArrowRight className="w-4 h-4 ml-1 transition-transform group-hover:translate-x-1" /></div>
+                                </CardContent>
+                            </Card>
+                        </Link>
                     </div>
                 </TabsContent>
 
