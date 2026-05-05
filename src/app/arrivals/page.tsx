@@ -29,6 +29,7 @@ import {
     Lock,
     FileText,
     ExternalLink,
+    ClipboardCheck,
 } from "lucide-react";
 import {
     Table,
@@ -64,6 +65,7 @@ type Arrival = {
 
 type Supplier = "hashiya" | "nexus";
 
+// ===== 発注書印刷用のマスタデータ =====
 const hashiyaItems = [
     { code: "", maker: "横山製粉", name: "あすなろミックス", spec: "20kg", unit: "1袋" },
     { code: "", maker: "日本製粉", name: "P15菓子パンミックス", spec: "20kg", unit: "1袋" },
@@ -90,6 +92,12 @@ const nexusItems = [
     { code: "", maker: "", name: "プチヴェール", spec: "1kg×10", unit: "1ケース" },
     { code: "", maker: "", name: "シーベリーペースト", spec: "1kg", unit: "1袋" },
     { code: "", maker: "", name: "ハスカップペースト", spec: "1kg", unit: "1袋" },
+];
+
+// ===== HACCP YO-14連携用のマッピングデータ =====
+// （品目名とYO-14のIDを紐づけるため）
+const yo14Items = [
+    { id: "m1", name: "デリソフト" }, { id: "m2", name: "チョコチップHCEE" }, { id: "m3", name: "アクアクーベルホワイトカカオ" }, { id: "m4", name: "マスカルポーネ・レジェ" }, { id: "m5", name: "まめまーじゅUSA" }, { id: "m6", name: "ドライクランベリーBR" }, { id: "m7", name: "デザーンココアパウダーテラロッサ" }, { id: "m8", name: "あすなろミックス" }, { id: "m9", name: "コア粉" }, { id: "m10", name: "P15菓子パンミックス" }, { id: "m11", name: "凍結全卵" }, { id: "m12", name: "オレンジカット" }, { id: "m13", name: "かのこ黒豆" }, { id: "m14", name: "キャラメルチョコチップ" }, { id: "m15", name: "Eオイルスーパー６０" }, { id: "m16", name: "ミックスフルーツ" }, { id: "m17", name: "アップルチップ" }, { id: "m18", name: "ホワイトチョコチップ" }, { id: "m19", name: "ドライストロベリー" }, { id: "m20", name: "パンプキンパウダー" }, { id: "m21", name: "FRイースト" }, { id: "m22", name: "ミルシア" }, { id: "m23", name: "ルミナスグランデ" }, { id: "m24", name: "ショコラクリュホワイト" }, { id: "m25", name: "プチヴェール" }, { id: "m26", name: "シーベリーペースト" }, { id: "m27", name: "ハスカップペースト" }, { id: "m28", name: "デバイダーオイル" },
 ];
 
 // ===== 日付ユーティリティ =====
@@ -121,6 +129,9 @@ const formatDateJP = (value?: string | null) => {
     return `${y}/${m}/${d}`;
 };
 
+// =======================================================================
+// メインコンポーネント
+// =======================================================================
 export default function ArrivalsPage() {
     const { canEdit } = useAuth();
 
@@ -148,6 +159,12 @@ export default function ArrivalsPage() {
     const [orderDate, setOrderDate] = useState("");
     const [deliveryInfo, setDeliveryInfo] = useState("最短納品でお願いします。");
     const [orderQuantities, setOrderQuantities] = useState<Record<string, string>>({});
+
+    // HACCP連携用のState
+    const [showHaccpCheck, setShowHaccpCheck] = useState(false);
+    const [haccpData, setHaccpData] = useState({
+        expiry: "", lot: "", appearance: "ok" as 'ok' | 'ng' | null, smell: "ok" as 'ok' | 'ng' | null,
+    });
 
     const fetchData = useCallback(async () => {
         setLoading(true);
@@ -200,9 +217,7 @@ export default function ArrivalsPage() {
 
         try {
             const dateStr = newOrderDate.replace(/-/g, "");
-            const random3 = Math.floor(Math.random() * 1000)
-                .toString()
-                .padStart(3, "0");
+            const random3 = Math.floor(Math.random() * 1000).toString().padStart(3, "0");
 
             const newArrival = {
                 id: `INC-${dateStr}-${random3}`,
@@ -237,6 +252,8 @@ export default function ArrivalsPage() {
         setEditExpectedDate(normalizeDateKey(arrival.expected_date));
         setEditQuantity(arrival.quantity);
         setEditNotes(arrival.notes || "");
+        setShowHaccpCheck(false); // 初期化
+        setHaccpData({ expiry: "", lot: "", appearance: "ok", smell: "ok" });
     };
 
     const handleUpdateArrival = async () => {
@@ -295,12 +312,18 @@ export default function ArrivalsPage() {
         }
     };
 
+    // HACCPチェック画面へ進む
+    const handleProceedToHaccpCheck = () => {
+        setShowHaccpCheck(true);
+    };
+
+    // 入荷完了 ＋ HACCP連携の同時処理
     const handleCompleteArrival = async () => {
         if (!editingArrival) return;
-        if (!confirm(`【${editingArrival.items?.name}】を入荷済みにし、在庫に加算しますか？`)) return;
-
         setIsProcessing(true);
+
         try {
+            // --- 1. 在庫の加算処理 ---
             const { data: stock, error: stockError } = await supabase
                 .from("item_stocks")
                 .select("quantity")
@@ -336,12 +359,47 @@ export default function ArrivalsPage() {
 
             if (arrivalUpdateError) throw arrivalUpdateError;
 
+            // --- 2. HACCP 原材料受入台帳 (YO-14) へのデータ追記 ---
+            const todayStr = getLocalDateKey(new Date());
+            const itemName = editingArrival.items?.name || "";
+
+            // YO-14の項目から一致する品目を検索
+            const matchedItem = yo14Items.find(i => itemName.includes(i.name) || i.name.includes(itemName));
+
+            if (matchedItem) {
+                // まず今日のHACCPデータを取得
+                const { data: existingHaccp } = await supabase.from('material_receiving_checks').select('*').eq('check_date', todayStr).maybeSingle();
+
+                let currentResults = existingHaccp?.results || {};
+
+                // 今回の入荷分をマージ
+                currentResults[matchedItem.id] = {
+                    expiry: haccpData.expiry,
+                    lot: haccpData.lot,
+                    qty: editingArrival.quantity.toString(),
+                    appearance: haccpData.appearance,
+                    smell: haccpData.smell
+                };
+
+                const haccpPayload = {
+                    check_date: todayStr,
+                    results: currentResults,
+                    checker_name: existingHaccp?.checker_name || "自動連携 (システム)",
+                    updated_at: new Date().toISOString()
+                };
+
+                const { error: haccpError } = await supabase.from('material_receiving_checks').upsert(haccpPayload, { onConflict: 'check_date' });
+                if (haccpError) console.error("HACCP連携エラー:", haccpError);
+            }
+
             setEditingArrival(null);
+            setShowHaccpCheck(false);
             await fetchData();
-            alert("入荷処理が完了し、在庫に加算されました！");
-        } catch (err) {
+            alert(`入荷処理が完了し、在庫に加算されました！\n${matchedItem ? "（HACCP受入台帳にも自動記録しました）" : "（※この品目はHACCP受入台帳の対象外です）"}`);
+
+        } catch (err: any) {
             console.error(err);
-            alert("入荷処理中にエラーが発生しました。");
+            alert("入荷処理中にエラーが発生しました: " + err.message);
         } finally {
             setIsProcessing(false);
         }
@@ -379,14 +437,13 @@ export default function ArrivalsPage() {
     };
 
     // =======================================================================
-    // 発注書表示
+    // 発注書表示 (PDF)
     // =======================================================================
     if (viewMode === "order_sheet") {
         const currentItems = orderSupplier === "hashiya" ? hashiyaItems : nexusItems;
         const orderDateObj = orderDate ? new Date(`${orderDate}T00:00:00`) : new Date();
         const reiwaYear = orderDateObj.getFullYear() - 2018;
-        const dateStr = `令和${reiwaYear}年${orderDateObj.getMonth() + 1}月${orderDateObj.getDate()}日 (${["日", "月", "火", "水", "木", "金", "土"][orderDateObj.getDay()]
-            })`;
+        const dateStr = `令和${reiwaYear}年${orderDateObj.getMonth() + 1}月${orderDateObj.getDate()}日 (${["日", "月", "火", "水", "木", "金", "土"][orderDateObj.getDay()]})`;
 
         return (
             <div className="bg-slate-200 min-h-screen py-8 print:p-0 print:bg-white flex flex-col items-center">
@@ -394,26 +451,11 @@ export default function ArrivalsPage() {
                     dangerouslySetInnerHTML={{
                         __html: `
                         @media print {
-                            header, nav {
-                                display: none !important;
-                            }
-                            main {
-                                padding: 0 !important;
-                                margin: 0 !important;
-                                max-width: 100% !important;
-                                background: white !important;
-                            }
-                            @page {
-                                size: A4 portrait;
-                                margin: 15mm;
-                            }
-                            body {
-                                background-color: white !important;
-                                color: black !important;
-                            }
-                            .print-hide {
-                                display: none !important;
-                            }
+                            header, nav { display: none !important; }
+                            main { padding: 0 !important; margin: 0 !important; max-width: 100% !important; background: white !important; }
+                            @page { size: A4 portrait; margin: 15mm; }
+                            body { background-color: white !important; color: black !important; }
+                            .print-hide { display: none !important; }
                         }
                     `,
                     }}
@@ -535,74 +577,30 @@ export default function ArrivalsPage() {
 
         return (
             <div className="bg-white min-h-screen print:p-0 print:m-0 -mx-4 px-4 md:mx-0 md:px-0 pt-4 md:pt-0">
-                <style
-                    dangerouslySetInnerHTML={{
-                        __html: `
-                        @media print {
-                            header {
-                                display: none !important;
-                            }
-                            main {
-                                padding: 0 !important;
-                                margin: 0 !important;
-                                max-width: 100% !important;
-                            }
-                            @page {
-                                size: landscape;
-                                margin: 10mm;
-                            }
-                            body {
-                                background-color: white !important;
-                            }
-                        }
-                    `,
-                    }}
-                />
+                <style dangerouslySetInnerHTML={{ __html: `@media print { header { display: none !important; } main { padding: 0 !important; margin: 0 !important; max-width: 100% !important; } @page { size: landscape; margin: 10mm; } body { background-color: white !important; } }` }} />
 
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 print:hidden bg-slate-50 p-4 rounded-lg border shadow-sm">
-                    <Button
-                        variant="outline"
-                        onClick={() => setViewMode("list")}
-                        className="gap-2"
-                    >
+                    <Button variant="outline" onClick={() => setViewMode("list")} className="gap-2">
                         <ArrowLeft className="h-4 w-4" />
                         <span className="hidden sm:inline">入力へ戻る</span>
                         <span className="sm:hidden">戻る</span>
                     </Button>
 
                     <div className="flex items-center justify-center gap-4 w-full md:w-auto">
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() =>
-                                setCalendarMonth(new Date(currentYear, calendarMonth.getMonth() - 1, 1))
-                            }
-                        >
+                        <Button variant="ghost" size="icon" onClick={() => setCalendarMonth(new Date(currentYear, calendarMonth.getMonth() - 1, 1))}>
                             <ChevronLeft className="h-6 w-6" />
                         </Button>
-
                         <h2 className="text-xl font-bold text-slate-800 w-32 text-center">
                             {currentYear}年 {currentMonthStr}月
                         </h2>
-
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() =>
-                                setCalendarMonth(new Date(currentYear, calendarMonth.getMonth() + 1, 1))
-                            }
-                        >
+                        <Button variant="ghost" size="icon" onClick={() => setCalendarMonth(new Date(currentYear, calendarMonth.getMonth() + 1, 1))}>
                             <ChevronRight className="h-6 w-6" />
                         </Button>
                     </div>
 
                     <div className="flex justify-end w-full md:w-auto">
-                        <Button
-                            onClick={() => window.print()}
-                            className="bg-blue-600 hover:bg-blue-700 text-white gap-2 font-bold shadow-sm w-full md:w-auto"
-                        >
-                            <Printer className="h-4 w-4" />
-                            印刷
+                        <Button onClick={() => window.print()} className="bg-blue-600 hover:bg-blue-700 text-white gap-2 font-bold shadow-sm w-full md:w-auto">
+                            <Printer className="h-4 w-4" /> 印刷
                         </Button>
                     </div>
                 </div>
@@ -617,15 +615,7 @@ export default function ArrivalsPage() {
                     <div className="hidden md:block print:block">
                         <div className="grid grid-cols-7 bg-slate-100 print:bg-gray-200 border-b border-slate-300 print:border-black">
                             {["日", "月", "火", "水", "木", "金", "土"].map((d, i) => (
-                                <div
-                                    key={d}
-                                    className={`p-2 text-center font-bold text-sm border-r border-slate-300 print:border-black last:border-r-0 ${i === 0
-                                        ? "text-red-600"
-                                        : i === 6
-                                            ? "text-blue-600"
-                                            : "text-slate-700 print:text-black"
-                                        }`}
-                                >
+                                <div key={d} className={`p-2 text-center font-bold text-sm border-r border-slate-300 print:border-black last:border-r-0 ${i === 0 ? "text-red-600" : i === 6 ? "text-blue-600" : "text-slate-700 print:text-black"}`}>
                                     {d}
                                 </div>
                             ))}
@@ -633,44 +623,19 @@ export default function ArrivalsPage() {
 
                         <div className="grid grid-cols-7">
                             {daysArray.map((day, idx) => {
-                                const dateStr = day
-                                    ? `${currentYear}-${currentMonthStr}-${String(day).padStart(2, "0")}`
-                                    : null;
-
-                                const dayArrivals = dateStr
-                                    ? calendarData.filter((a) => normalizeDateKey(a.expected_date) === dateStr)
-                                    : [];
+                                const dateStr = day ? `${currentYear}-${currentMonthStr}-${String(day).padStart(2, "0")}` : null;
+                                const dayArrivals = dateStr ? calendarData.filter((a) => normalizeDateKey(a.expected_date) === dateStr) : [];
 
                                 return (
-                                    <div
-                                        key={idx}
-                                        className={`min-h-[140px] print:min-h-[100px] border-b border-slate-300 print:border-black p-1 ${idx % 7 !== 6 ? "border-r print:border-black" : ""
-                                            } ${!day ? "bg-slate-50 print:bg-white" : "bg-white"}`}
-                                    >
+                                    <div key={idx} className={`min-h-[140px] print:min-h-[100px] border-b border-slate-300 print:border-black p-1 ${idx % 7 !== 6 ? "border-r print:border-black" : ""} ${!day ? "bg-slate-50 print:bg-white" : "bg-white"}`}>
                                         {day && (
                                             <>
-                                                <div
-                                                    className={`text-right font-bold text-sm mb-1 ${idx % 7 === 0
-                                                        ? "text-red-600"
-                                                        : idx % 7 === 6
-                                                            ? "text-blue-600"
-                                                            : "text-slate-700 print:text-black"
-                                                        }`}
-                                                >
+                                                <div className={`text-right font-bold text-sm mb-1 ${idx % 7 === 0 ? "text-red-600" : idx % 7 === 6 ? "text-blue-600" : "text-slate-700 print:text-black"}`}>
                                                     {day}
                                                 </div>
-
                                                 <div className="space-y-1.5 print:space-y-1">
                                                     {dayArrivals.map((arr) => (
-                                                        <div
-                                                            key={arr.id}
-                                                            // ★修正: e.stopPropagation() を追加してクリックの干渉を防ぐ
-                                                            onClick={(e) => { e.stopPropagation(); openEditDialog(arr); }}
-                                                            className={`${arr.status === "arrived"
-                                                                ? "bg-green-50 border-green-300"
-                                                                : "bg-blue-50 border-blue-200"
-                                                                } border rounded p-1.5 print:p-1 cursor-pointer hover:shadow-md text-xs leading-tight wrap-break-word relative group`}
-                                                        >
+                                                        <div key={arr.id} onClick={(e) => { e.stopPropagation(); openEditDialog(arr); }} className={`${arr.status === "arrived" ? "bg-green-50 border-green-300" : "bg-blue-50 border-blue-200"} border rounded p-1.5 print:p-1 cursor-pointer hover:shadow-md text-xs leading-tight wrap-break-word relative group`}>
                                                             {canEdit && (
                                                                 <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 print:hidden text-slate-400">
                                                                     <Edit className="h-3 w-3" />
@@ -683,8 +648,7 @@ export default function ArrivalsPage() {
                                                                 {arr.items?.name}
                                                             </div>
                                                             <div className="font-black text-blue-700 print:text-black mt-0.5">
-                                                                {arr.quantity.toLocaleString()}{" "}
-                                                                <span className="font-normal text-[10px]">{arr.unit}</span>
+                                                                {arr.quantity.toLocaleString()} <span className="font-normal text-[10px]">{arr.unit}</span>
                                                             </div>
                                                         </div>
                                                     ))}
@@ -699,86 +663,58 @@ export default function ArrivalsPage() {
 
                     {/* スマホ表示 */}
                     <div className="block md:hidden print:hidden divide-y divide-slate-200 bg-slate-50">
-                        {daysArray
-                            .filter((d) => d !== null)
-                            .map((day) => {
-                                const dateStr = `${currentYear}-${currentMonthStr}-${String(day).padStart(2, "0")}`;
-                                const dObj = new Date(currentYear, calendarMonth.getMonth(), day as number);
-                                const dow = dObj.getDay();
-                                const dowStr = ["日", "月", "火", "水", "木", "金", "土"][dow];
-                                const dowColor =
-                                    dow === 0 ? "text-red-600" : dow === 6 ? "text-blue-600" : "text-slate-700";
+                        {daysArray.filter((d) => d !== null).map((day) => {
+                            const dateStr = `${currentYear}-${currentMonthStr}-${String(day).padStart(2, "0")}`;
+                            const dObj = new Date(currentYear, calendarMonth.getMonth(), day as number);
+                            const dow = dObj.getDay();
+                            const dowStr = ["日", "月", "火", "水", "木", "金", "土"][dow];
+                            const dowColor = dow === 0 ? "text-red-600" : dow === 6 ? "text-blue-600" : "text-slate-700";
+                            const dayArrivals = calendarData.filter((a) => normalizeDateKey(a.expected_date) === dateStr);
 
-                                const dayArrivals = calendarData.filter(
-                                    (a) => normalizeDateKey(a.expected_date) === dateStr
-                                );
-
-                                return (
-                                    <div
-                                        key={day}
-                                        className={`flex p-3 ${dow === 0 ? "bg-red-50/30" : dow === 6 ? "bg-blue-50/30" : "bg-white"
-                                            }`}
-                                    >
-                                        <div className="w-12 shrink-0 flex flex-col items-center pt-1 border-r border-slate-100 mr-3 pr-1">
-                                            <span className={`text-xl font-black leading-none ${dowColor}`}>{day}</span>
-                                            <span className={`text-[10px] mt-1 font-bold ${dowColor}`}>{dowStr}</span>
-                                        </div>
-
-                                        <div className="flex-1 space-y-2.5 py-1 min-h-12">
-                                            {dayArrivals.map((arr) => (
-                                                <div
-                                                    key={arr.id}
-                                                    // ★修正: stopPropagation 追加
-                                                    onClick={(e) => { e.stopPropagation(); openEditDialog(arr); }}
-                                                    className={`${arr.status === "arrived"
-                                                        ? "bg-green-50 border-green-300"
-                                                        : "bg-blue-50 border-blue-200"
-                                                        } border rounded p-2.5 text-xs shadow-sm relative group cursor-pointer hover:bg-slate-50`}
-                                                >
-                                                    <div className="flex justify-between items-start mb-1.5 border-b border-white/40 pb-1.5">
-                                                        <div className="text-[10px] text-slate-500 font-bold">
-                                                            {arr.items?.item_type === "raw_material" ? "原料" : "資材"}
-                                                        </div>
-                                                        {arr.status === "arrived" ? (
-                                                            <span className="text-[10px] bg-green-600 text-white px-1.5 rounded font-bold flex items-center gap-0.5">
-                                                                <CheckCircle2 className="h-2.5 w-2.5" />
-                                                                入荷済
-                                                            </span>
-                                                        ) : (
-                                                            <span className="text-[10px] bg-blue-500 text-white px-1.5 rounded font-bold flex items-center gap-0.5">
-                                                                <PackageCheck className="h-2.5 w-2.5" />
-                                                                発注済
-                                                            </span>
-                                                        )}
-                                                    </div>
-
-                                                    <div className="font-bold text-slate-800 text-sm mb-1.5">
-                                                        {arr.items?.name}
-                                                    </div>
-
-                                                    <div className="flex justify-between items-end gap-2">
-                                                        <div className="text-[10px] text-slate-500 italic max-w-[60%] truncate bg-white/50 p-1 rounded">
-                                                            {arr.notes || "-"}
-                                                        </div>
-                                                        <div className="font-black text-blue-700 text-lg whitespace-nowrap">
-                                                            {arr.quantity.toLocaleString()}{" "}
-                                                            <span className="font-normal text-xs text-slate-500">
-                                                                {arr.unit}
-                                                            </span>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            ))}
-
-                                            {dayArrivals.length === 0 && (
-                                                <div className="text-xs text-slate-400 flex h-full items-center justify-center font-medium border border-dashed rounded-lg py-4 bg-slate-50/50">
-                                                    入荷予定なし
-                                                </div>
-                                            )}
-                                        </div>
+                            return (
+                                <div key={day} className={`flex p-3 ${dow === 0 ? "bg-red-50/30" : dow === 6 ? "bg-blue-50/30" : "bg-white"}`}>
+                                    <div className="w-12 shrink-0 flex flex-col items-center pt-1 border-r border-slate-100 mr-3 pr-1">
+                                        <span className={`text-xl font-black leading-none ${dowColor}`}>{day}</span>
+                                        <span className={`text-[10px] mt-1 font-bold ${dowColor}`}>{dowStr}</span>
                                     </div>
-                                );
-                            })}
+
+                                    <div className="flex-1 space-y-2.5 py-1 min-h-12">
+                                        {dayArrivals.map((arr) => (
+                                            <div key={arr.id} onClick={(e) => { e.stopPropagation(); openEditDialog(arr); }} className={`${arr.status === "arrived" ? "bg-green-50 border-green-300" : "bg-blue-50 border-blue-200"} border rounded p-2.5 text-xs shadow-sm relative group cursor-pointer hover:bg-slate-50`}>
+                                                <div className="flex justify-between items-start mb-1.5 border-b border-white/40 pb-1.5">
+                                                    <div className="text-[10px] text-slate-500 font-bold">
+                                                        {arr.items?.item_type === "raw_material" ? "原料" : "資材"}
+                                                    </div>
+                                                    {arr.status === "arrived" ? (
+                                                        <span className="text-[10px] bg-green-600 text-white px-1.5 rounded font-bold flex items-center gap-0.5">
+                                                            <CheckCircle2 className="h-2.5 w-2.5" /> 入荷済
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-[10px] bg-blue-500 text-white px-1.5 rounded font-bold flex items-center gap-0.5">
+                                                            <PackageCheck className="h-2.5 w-2.5" /> 発注済
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <div className="font-bold text-slate-800 text-sm mb-1.5">
+                                                    {arr.items?.name}
+                                                </div>
+                                                <div className="flex justify-between items-end gap-2">
+                                                    <div className="text-[10px] text-slate-500 italic max-w-[60%] truncate bg-white/50 p-1 rounded">
+                                                        {arr.notes || "-"}
+                                                    </div>
+                                                    <div className="font-black text-blue-700 text-lg whitespace-nowrap">
+                                                        {arr.quantity.toLocaleString()} <span className="font-normal text-xs text-slate-500">{arr.unit}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                        {dayArrivals.length === 0 && (
+                                            <div className="text-xs text-slate-400 flex h-full items-center justify-center font-medium border border-dashed rounded-lg py-4 bg-slate-50/50">入荷予定なし</div>
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        })}
                     </div>
                 </div>
             </div>
@@ -799,40 +735,21 @@ export default function ArrivalsPage() {
                         入荷管理
                     </h1>
                     {!canEdit && (
-                        <Badge
-                            variant="outline"
-                            className="bg-slate-100 text-slate-500 border-slate-300 px-3 py-1 shadow-sm hidden md:flex"
-                        >
-                            <Lock className="w-3 h-3 mr-1" />
-                            閲覧モード
+                        <Badge variant="outline" className="bg-slate-100 text-slate-500 border-slate-300 px-3 py-1 shadow-sm hidden md:flex">
+                            <Lock className="w-3 h-3 mr-1" /> 閲覧モード
                         </Badge>
                     )}
                 </div>
 
                 <div className="flex flex-wrap gap-2 w-full xl:w-auto">
-                    <Button
-                        onClick={() => window.open("https://tano.mu/item?page=1", "_blank", "noopener,noreferrer")}
-                        className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-sm h-12 md:h-10"
-                    >
-                        <ExternalLink className="h-4 w-4 mr-2" />
-                        大槻食材へ
+                    <Button onClick={() => window.open("https://tano.mu/item?page=1", "_blank", "noopener,noreferrer")} className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-sm h-12 md:h-10">
+                        <ExternalLink className="h-4 w-4 mr-2" /> 大槻食材へ
                     </Button>
-
-                    <Button
-                        onClick={openOrderSheetDialog}
-                        className="w-full sm:w-auto bg-slate-800 hover:bg-slate-900 text-white font-bold shadow-sm h-12 md:h-10"
-                    >
-                        <FileText className="h-4 w-4 mr-2" />
-                        発注書(PDF)作成
+                    <Button onClick={openOrderSheetDialog} className="w-full sm:w-auto bg-slate-800 hover:bg-slate-900 text-white font-bold shadow-sm h-12 md:h-10">
+                        <FileText className="h-4 w-4 mr-2" /> 発注書(PDF)作成
                     </Button>
-
-                    <Button
-                        onClick={() => setViewMode("calendar")}
-                        variant="outline"
-                        className="w-full sm:w-auto border-blue-300 text-blue-700 hover:bg-blue-50 gap-2 font-bold shadow-sm h-12 md:h-10"
-                    >
-                        <CalendarDays className="h-5 w-5" />
-                        カレンダー表示
+                    <Button onClick={() => setViewMode("calendar")} variant="outline" className="w-full sm:w-auto border-blue-300 text-blue-700 hover:bg-blue-50 gap-2 font-bold shadow-sm h-12 md:h-10">
+                        <CalendarDays className="h-5 w-5" /> カレンダー表示
                     </Button>
                 </div>
             </div>
@@ -843,96 +760,49 @@ export default function ArrivalsPage() {
                         <Card className="border-slate-200 shadow-sm sticky top-24">
                             <CardHeader className="bg-slate-50 pb-4 border-b">
                                 <CardTitle className="text-lg flex items-center gap-2">
-                                    <Plus className="h-5 w-5" />
-                                    新規入荷予定の登録
+                                    <Plus className="h-5 w-5" /> 新規入荷予定の登録
                                 </CardTitle>
                             </CardHeader>
-
                             <CardContent className="pt-6 space-y-4">
                                 <div>
                                     <label className="block text-sm font-bold mb-1">対象品目</label>
-                                    <select
-                                        value={newItemId}
-                                        onChange={(e) => setNewItemId(e.target.value)}
-                                        className="w-full border border-blue-200 rounded-md p-2.5 text-sm bg-white focus:ring-blue-500"
-                                    >
+                                    <select value={newItemId} onChange={(e) => setNewItemId(e.target.value)} className="w-full border border-blue-200 rounded-md p-2.5 text-sm bg-white focus:ring-blue-500">
                                         <option value="">品目を選択</option>
                                         <optgroup label="原材料">
-                                            {items
-                                                .filter((i) => i.item_type === "raw_material")
-                                                .map((i) => (
-                                                    <option key={i.id} value={i.id}>
-                                                        {i.name}
-                                                    </option>
-                                                ))}
+                                            {items.filter((i) => i.item_type === "raw_material").map((i) => (
+                                                <option key={i.id} value={i.id}>{i.name}</option>
+                                            ))}
                                         </optgroup>
                                         <optgroup label="資材">
-                                            {items
-                                                .filter((i) => i.item_type === "material")
-                                                .map((i) => (
-                                                    <option key={i.id} value={i.id}>
-                                                        {i.name}
-                                                    </option>
-                                                ))}
+                                            {items.filter((i) => i.item_type === "material").map((i) => (
+                                                <option key={i.id} value={i.id}>{i.name}</option>
+                                            ))}
                                         </optgroup>
                                     </select>
                                 </div>
-
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>
                                         <label className="block text-sm font-bold mb-1">発注日</label>
-                                        <Input
-                                            type="date"
-                                            value={newOrderDate}
-                                            onChange={(e) => setNewOrderDate(e.target.value)}
-                                            className="bg-white"
-                                        />
+                                        <Input type="date" value={newOrderDate} onChange={(e) => setNewOrderDate(e.target.value)} className="bg-white" />
                                     </div>
                                     <div>
                                         <label className="block text-sm font-bold mb-1 text-blue-800">入荷予定日</label>
-                                        <Input
-                                            type="date"
-                                            value={newExpectedDate}
-                                            onChange={(e) => setNewExpectedDate(e.target.value)}
-                                            className="bg-white border-blue-300 shadow-sm"
-                                        />
+                                        <Input type="date" value={newExpectedDate} onChange={(e) => setNewExpectedDate(e.target.value)} className="bg-white border-blue-300 shadow-sm" />
                                     </div>
                                 </div>
-
                                 <div>
                                     <label className="block text-sm font-bold mb-1">発注数</label>
                                     <div className="flex items-center gap-3">
-                                        <Input
-                                            type="number"
-                                            min="0"
-                                            value={newQuantity}
-                                            onChange={(e) =>
-                                                setNewQuantity(e.target.value === "" ? "" : Number(e.target.value))
-                                            }
-                                            className="text-xl font-bold text-right border-blue-300 shadow-sm h-12"
-                                        />
-                                        <span className="text-lg font-bold text-slate-500 w-12">
-                                            {selectedItemUnit || "-"}
-                                        </span>
+                                        <Input type="number" min="0" value={newQuantity} onChange={(e) => setNewQuantity(e.target.value === "" ? "" : Number(e.target.value))} className="text-xl font-bold text-right border-blue-300 shadow-sm h-12" />
+                                        <span className="text-lg font-bold text-slate-500 w-12">{selectedItemUnit || "-"}</span>
                                     </div>
                                 </div>
-
                                 <div>
                                     <label className="block text-sm font-bold mb-1">備考</label>
-                                    <textarea
-                                        value={newNotes}
-                                        onChange={(e) => setNewNotes(e.target.value)}
-                                        placeholder="発注先など..."
-                                        className="w-full p-2 border border-slate-300 rounded-md text-sm resize-none h-20"
-                                    />
+                                    <textarea value={newNotes} onChange={(e) => setNewNotes(e.target.value)} placeholder="発注先など..." className="w-full p-2 border border-slate-300 rounded-md text-sm resize-none h-20" />
                                 </div>
-
                                 <div className="pt-2">
-                                    <Button
-                                        onClick={handleSaveArrival}
-                                        disabled={!newItemId || newQuantity === "" || Number(newQuantity) <= 0}
-                                        className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold h-12 shadow-sm"
-                                    >
+                                    <Button onClick={handleSaveArrival} disabled={!newItemId || newQuantity === "" || Number(newQuantity) <= 0} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold h-12 shadow-sm">
                                         予定を登録する
                                     </Button>
                                 </div>
@@ -941,10 +811,7 @@ export default function ArrivalsPage() {
                     ) : (
                         <Card className="border-slate-200 bg-slate-50 opacity-70">
                             <CardHeader className="bg-slate-50 pb-4 border-b">
-                                <CardTitle className="text-lg flex items-center gap-2">
-                                    <Lock className="h-5 w-5" />
-                                    閲覧モード
-                                </CardTitle>
+                                <CardTitle className="text-lg flex items-center gap-2"><Lock className="h-5 w-5" /> 閲覧モード</CardTitle>
                             </CardHeader>
                             <CardContent className="p-8 text-center text-slate-500">
                                 <Lock className="w-12 h-12 mx-auto mb-4 text-slate-300" />
@@ -967,7 +834,6 @@ export default function ArrivalsPage() {
                                     <TableHead className="w-20 text-center">詳細</TableHead>
                                 </TableRow>
                             </TableHeader>
-
                             <TableBody>
                                 {arrivals.slice(0, 15).map((arrival) => {
                                     const expectedDateKey = normalizeDateKey(arrival.expected_date);
@@ -978,65 +844,33 @@ export default function ArrivalsPage() {
                                             <TableCell className={isOverdue ? "text-red-600 font-bold" : ""}>
                                                 {formatDateJP(arrival.expected_date)}
                                             </TableCell>
-
                                             <TableCell>
                                                 <div className="font-bold text-slate-800">{arrival.items?.name}</div>
-                                                <div className="text-[10px] text-slate-500">
-                                                    {arrival.items?.item_type === "raw_material" ? "原料" : "資材"}
-                                                </div>
+                                                <div className="text-[10px] text-slate-500">{arrival.items?.item_type === "raw_material" ? "原料" : "資材"}</div>
                                             </TableCell>
-
                                             <TableCell className="text-right font-bold text-lg text-blue-700">
-                                                {arrival.quantity.toLocaleString()}{" "}
-                                                <span className="text-sm font-normal text-slate-500">{arrival.unit}</span>
+                                                {arrival.quantity.toLocaleString()} <span className="text-sm font-normal text-slate-500">{arrival.unit}</span>
                                             </TableCell>
-
                                             <TableCell>
                                                 {arrival.status === "arrived" ? (
-                                                    <Badge className="bg-green-100 text-green-800 border-none shadow-sm">
-                                                        <CheckCircle2 className="w-3 h-3 mr-1" />
-                                                        入荷済
-                                                    </Badge>
+                                                    <Badge className="bg-green-100 text-green-800 border-none shadow-sm"><CheckCircle2 className="w-3 h-3 mr-1" />入荷済</Badge>
                                                 ) : (
-                                                    <Badge className="bg-blue-500 text-white border-none shadow-sm">
-                                                        <PackageCheck className="w-3 h-3 mr-1" />
-                                                        発注済
-                                                    </Badge>
+                                                    <Badge className="bg-blue-500 text-white border-none shadow-sm"><PackageCheck className="w-3 h-3 mr-1" />発注済</Badge>
                                                 )}
                                             </TableCell>
-
                                             <TableCell className="text-center">
-                                                <Button
-                                                    variant="outline"
-                                                    size="sm"
-                                                    // ★修正: stopPropagation 追加
-                                                    onClick={(e) => { e.stopPropagation(); openEditDialog(arrival); }}
-                                                    className="text-blue-600 border-blue-200 hover:bg-blue-50"
-                                                >
-                                                    確認
-                                                </Button>
+                                                <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); openEditDialog(arrival); }} className="text-blue-600 border-blue-200 hover:bg-blue-50">確認</Button>
                                             </TableCell>
                                         </TableRow>
                                     );
                                 })}
 
                                 {loading && arrivals.length === 0 && (
-                                    <TableRow>
-                                        <TableCell colSpan={5} className="text-center py-12">
-                                            <Loader2 className="animate-spin h-8 w-8 text-slate-400 mx-auto" />
-                                        </TableCell>
-                                    </TableRow>
+                                    <TableRow><TableCell colSpan={5} className="text-center py-12"><Loader2 className="animate-spin h-8 w-8 text-slate-400 mx-auto" /></TableCell></TableRow>
                                 )}
 
                                 {!loading && arrivals.length === 0 && (
-                                    <TableRow>
-                                        <TableCell
-                                            colSpan={5}
-                                            className="text-center py-12 text-slate-500 border border-dashed rounded-lg bg-white"
-                                        >
-                                            データがありません
-                                        </TableCell>
-                                    </TableRow>
+                                    <TableRow><TableCell colSpan={5} className="text-center py-12 text-slate-500 border border-dashed rounded-lg bg-white">データがありません</TableCell></TableRow>
                                 )}
                             </TableBody>
                         </Table>
@@ -1044,99 +878,53 @@ export default function ArrivalsPage() {
                 </div>
             </div>
 
-            {/* 入荷詳細ダイアログ */}
+            {/* 入荷詳細ダイアログ ＋ HACCPチェック画面 */}
             <Dialog open={!!editingArrival} onOpenChange={(open) => !open && setEditingArrival(null)}>
                 <DialogContent className="max-w-md bg-white">
                     <DialogHeader>
-                        <DialogTitle className="flex justify-between items-center">
-                            <span>入荷予定の詳細 / 処理</span>
+                        <DialogTitle className="flex items-center gap-2 text-slate-800">
+                            {showHaccpCheck ? <ClipboardCheck className="w-5 h-5 text-indigo-600" /> : <PackageCheck className="w-5 h-5 text-blue-600" />}
+                            {showHaccpCheck ? "HACCP 受入状態チェック" : "入荷予定の詳細 / 処理"}
                         </DialogTitle>
                     </DialogHeader>
 
-                    {editingArrival && (
+                    {/* 入荷詳細画面 */}
+                    {editingArrival && !showHaccpCheck && (
                         <div className="space-y-4 mt-2">
                             <div className="bg-slate-50 p-3 rounded border text-sm">
-                                <div className="text-slate-500 text-xs mb-1">
-                                    発注日: {formatDateJP(editingArrival.order_date)}
-                                </div>
-                                <div className="font-bold text-lg text-blue-900 leading-tight">
-                                    {editingArrival.items?.name}
-                                </div>
-                                <div className="text-slate-500 text-xs mt-1">
-                                    {editingArrival.items?.item_type === "raw_material" ? "原材料" : "資材"}
-                                </div>
+                                <div className="text-slate-500 text-xs mb-1">発注日: {formatDateJP(editingArrival.order_date)}</div>
+                                <div className="font-bold text-lg text-blue-900 leading-tight">{editingArrival.items?.name}</div>
+                                <div className="text-slate-500 text-xs mt-1">{editingArrival.items?.item_type === "raw_material" ? "原材料" : "資材"}</div>
                             </div>
 
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-xs font-bold text-slate-500 mb-1">入荷予定日</label>
-                                    <Input
-                                        type="date"
-                                        value={editExpectedDate}
-                                        onChange={(e) => setEditExpectedDate(e.target.value)}
-                                        disabled={editingArrival.status === "arrived" || !canEdit}
-                                        className="h-10 md:h-9"
-                                    />
+                                    <Input type="date" value={editExpectedDate} onChange={(e) => setEditExpectedDate(e.target.value)} disabled={editingArrival.status === "arrived" || !canEdit} className="h-10 md:h-9" />
                                 </div>
-
                                 <div>
-                                    <label className="block text-xs font-bold text-slate-500 mb-1">
-                                        数量 ({editingArrival.unit})
-                                    </label>
-                                    <Input
-                                        type="number"
-                                        value={editQuantity}
-                                        onChange={(e) =>
-                                            setEditQuantity(e.target.value === "" ? "" : Number(e.target.value))
-                                        }
-                                        disabled={editingArrival.status === "arrived" || !canEdit}
-                                        className="h-10 md:h-9 text-right font-bold text-lg text-blue-700"
-                                    />
+                                    <label className="block text-xs font-bold text-slate-500 mb-1">数量 ({editingArrival.unit})</label>
+                                    <Input type="number" value={editQuantity} onChange={(e) => setEditQuantity(e.target.value === "" ? "" : Number(e.target.value))} disabled={editingArrival.status === "arrived" || !canEdit} className="h-10 md:h-9 text-right font-bold text-lg text-blue-700" />
                                 </div>
                             </div>
 
                             <div>
                                 <label className="block text-xs font-bold text-slate-500 mb-1">備考</label>
-                                <Input
-                                    value={editNotes}
-                                    onChange={(e) => setEditNotes(e.target.value)}
-                                    disabled={editingArrival.status === "arrived" || !canEdit}
-                                    className="h-10 md:h-9"
-                                    placeholder="備考を入力..."
-                                />
+                                <Input value={editNotes} onChange={(e) => setEditNotes(e.target.value)} disabled={editingArrival.status === "arrived" || !canEdit} className="h-10 md:h-9" placeholder="備考を入力..." />
                             </div>
 
                             {canEdit && (
                                 <div className="pt-4 border-t flex flex-col gap-3">
                                     {editingArrival.status === "pending" && (
                                         <div className="flex gap-2">
-                                            <Button
-                                                onClick={handleUpdateArrival}
-                                                disabled={isProcessing}
-                                                className="flex-1 bg-slate-800 text-white h-10 md:h-9"
-                                            >
-                                                <Edit className="h-4 w-4 mr-2" />
-                                                内容更新
-                                            </Button>
-                                            <Button
-                                                onClick={handleDeleteArrival}
-                                                disabled={isProcessing}
-                                                variant="outline"
-                                                className="text-red-600 h-10 md:h-9"
-                                            >
-                                                <Trash2 className="h-4 w-4" />
-                                            </Button>
+                                            <Button onClick={handleUpdateArrival} disabled={isProcessing} className="flex-1 bg-slate-800 text-white h-10 md:h-9"><Edit className="h-4 w-4 mr-2" />内容更新</Button>
+                                            <Button onClick={handleDeleteArrival} disabled={isProcessing} variant="outline" className="text-red-600 h-10 md:h-9"><Trash2 className="h-4 w-4" /></Button>
                                         </div>
                                     )}
 
                                     {editingArrival.status === "pending" && (
-                                        <Button
-                                            onClick={handleCompleteArrival}
-                                            disabled={isProcessing}
-                                            className="w-full bg-green-600 hover:bg-green-700 text-white font-bold h-12 shadow-sm text-base"
-                                        >
-                                            <ArrowDownToLine className="h-5 w-5 mr-2" />
-                                            入荷済にする (在庫加算)
+                                        <Button onClick={handleProceedToHaccpCheck} disabled={isProcessing} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold h-12 shadow-sm text-base">
+                                            <ArrowDownToLine className="h-5 w-5 mr-2" />入荷済にする (受入チェックへ)
                                         </Button>
                                     )}
                                 </div>
@@ -1150,10 +938,59 @@ export default function ArrivalsPage() {
 
                             {!canEdit && editingArrival.status !== "arrived" && (
                                 <div className="text-center text-sm font-bold text-slate-500 bg-slate-50 py-3 rounded-md">
-                                    <Lock className="w-4 h-4 inline mr-1" />
-                                    閲覧モードのため処理はできません
+                                    <Lock className="w-4 h-4 inline mr-1" /> 閲覧モードのため処理はできません
                                 </div>
                             )}
+                        </div>
+                    )}
+
+                    {/* HACCP 受入チェック画面 */}
+                    {editingArrival && showHaccpCheck && (
+                        <div className="space-y-4 mt-2">
+                            <div className="bg-indigo-50 p-3 rounded-lg border border-indigo-100 text-sm">
+                                <div className="font-bold text-indigo-900 leading-tight flex items-center gap-2"><PackageCheck className="w-4 h-4" /> {editingArrival.items?.name}</div>
+                                <div className="text-indigo-700 text-xs mt-1 font-bold">入荷数: {editingArrival.quantity} {editingArrival.unit}</div>
+                            </div>
+
+                            <p className="text-xs text-slate-500 font-bold">※入力した情報は自動的に HACCP原材料受入台帳 (YO-14) に記録されます。</p>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-600 mb-1">賞味期限 (任意)</label>
+                                    <Input type="date" value={haccpData.expiry} onChange={e => setHaccpData({ ...haccpData, expiry: e.target.value })} className="bg-white h-10" />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-600 mb-1">Lot番号 (任意)</label>
+                                    <Input value={haccpData.lot} onChange={e => setHaccpData({ ...haccpData, lot: e.target.value })} className="bg-white h-10" placeholder="ロット記号..." />
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4 pt-2">
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-600 mb-2">外観 (状態)</label>
+                                    <div className="flex bg-slate-100 rounded-lg p-1 h-12 shadow-inner">
+                                        <button onClick={() => setHaccpData({ ...haccpData, appearance: 'ok' })} className={`flex-1 text-sm font-bold rounded-md transition-colors ${haccpData.appearance === 'ok' ? 'bg-emerald-500 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-200'}`}>良</button>
+                                        <button onClick={() => setHaccpData({ ...haccpData, appearance: 'ng' })} className={`flex-1 text-sm font-bold rounded-md transition-colors ${haccpData.appearance === 'ng' ? 'bg-red-500 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-200'}`}>不良</button>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-600 mb-2">臭い</label>
+                                    <div className="flex bg-slate-100 rounded-lg p-1 h-12 shadow-inner">
+                                        <button onClick={() => setHaccpData({ ...haccpData, smell: 'ok' })} className={`flex-1 text-sm font-bold rounded-md transition-colors ${haccpData.smell === 'ok' ? 'bg-emerald-500 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-200'}`}>良</button>
+                                        <button onClick={() => setHaccpData({ ...haccpData, smell: 'ng' })} className={`flex-1 text-sm font-bold rounded-md transition-colors ${haccpData.smell === 'ng' ? 'bg-red-500 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-200'}`}>不良</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="pt-4 border-t flex gap-2">
+                                <Button variant="outline" onClick={() => setShowHaccpCheck(false)} disabled={isProcessing} className="flex-1 font-bold h-12">
+                                    <ArrowLeft className="w-4 h-4 mr-2" /> 戻る
+                                </Button>
+                                <Button onClick={handleCompleteArrival} disabled={isProcessing} className="flex-[2] bg-indigo-600 hover:bg-indigo-700 text-white font-bold h-12 shadow-md">
+                                    {isProcessing ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : <CheckCircle2 className="w-5 h-5 mr-2" />}
+                                    確定して在庫加算
+                                </Button>
+                            </div>
                         </div>
                     )}
                 </DialogContent>

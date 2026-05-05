@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Beaker, Loader2, Save, Lock, Edit, Printer, ArrowLeft, Trash2, Plus, AlertTriangle, QrCode, UploadCloud, FileSpreadsheet } from "lucide-react";
+import { Beaker, Loader2, Save, Lock, Edit, Printer, ArrowLeft, Trash2, Plus, AlertTriangle, QrCode, UploadCloud, FileSpreadsheet, CopyMinus } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import HaccpPrintHeader from "@/components/HaccpPrintHeader";
 import { generateLotNumber } from "@/lib/lot-generator";
@@ -189,6 +189,59 @@ export default function KeepSamplesPage() {
     setIsProcessing(false);
   };
 
+  const handleRemoveDuplicates = async () => {
+    if (!confirm("同じ製品・同じLot番号で複数登録されているデータを検索し、最新の1件だけを残して他をすべて削除します。よろしいですか？")) return;
+
+    setIsProcessing(true);
+    try {
+      if (samples.length === 0) {
+        alert("データがありません。");
+        setIsProcessing(false);
+        return;
+      }
+
+      const grouped: Record<string, KeepSample[]> = {};
+      samples.forEach(s => {
+        const key = `${s.product_id}_${s.lot_code}_${s.saved_quantity}`;
+        if (!grouped[key]) grouped[key] = [];
+        grouped[key].push(s);
+      });
+
+      const idsToDelete: string[] = [];
+      let duplicateGroupCount = 0;
+
+      Object.values(grouped).forEach(group => {
+        if (group.length > 1) {
+          duplicateGroupCount++;
+          for (let i = 1; i < group.length; i++) {
+            idsToDelete.push(group[i].id);
+          }
+        }
+      });
+
+      if (idsToDelete.length === 0) {
+        alert("重複しているデータは見つかりませんでした。");
+        setIsProcessing(false);
+        return;
+      }
+
+      if (!confirm(`${duplicateGroupCount} 種類のLotで重複が見つかりました。\n合計 ${idsToDelete.length} 件の不要なデータを削除してよろしいですか？`)) {
+        setIsProcessing(false);
+        return;
+      }
+
+      const { error } = await supabase.from("keep_samples").delete().in('id', idsToDelete);
+      if (error) throw error;
+
+      alert(`${idsToDelete.length} 件の重複データを一括削除しました！`);
+      fetchSamples();
+
+    } catch (err: any) {
+      alert("削除中にエラーが発生しました: " + err.message);
+    }
+    setIsProcessing(false);
+  };
+
   const toggleSelectSample = (id: string) => {
     const newSet = new Set(selectedSampleIds);
     if (newSet.has(id)) newSet.delete(id);
@@ -358,7 +411,7 @@ export default function KeepSamplesPage() {
   }, [samples, viewMode]);
 
   // =======================================================================
-  // ラベル印刷画面 (A4横に2つ並べる)
+  // ラベル印刷画面 (横20cm × 縦9cm, A4縦に3枚配置)
   // =======================================================================
   if (viewMode === 'print_label') {
     const selectedSamplesData = samples.filter(s => selectedSampleIds.has(s.id));
@@ -372,17 +425,17 @@ export default function KeepSamplesPage() {
       );
     }
 
-    // 10個単位でチャンクに分割
+    // 10個単位で1枚のラベル（チャンク）に分割
     const CHUNK_SIZE = 10;
     const labelChunks = [];
     for (let i = 0; i < selectedSamplesData.length; i += CHUNK_SIZE) {
       labelChunks.push(selectedSamplesData.slice(i, i + CHUNK_SIZE));
     }
 
-    // 2チャンク（ラベル2つ分）で1ページに分割
+    // 3チャンク（ラベル3つ分）で1ページに分割
     const pageChunks = [];
-    for (let i = 0; i < labelChunks.length; i += 2) {
-      pageChunks.push(labelChunks.slice(i, i + 2));
+    for (let i = 0; i < labelChunks.length; i += 3) {
+      pageChunks.push(labelChunks.slice(i, i + 3));
     }
 
     return (
@@ -392,29 +445,30 @@ export default function KeepSamplesPage() {
                 @media print { 
                     header, nav { display: none !important; } 
                     main { padding: 0 !important; margin: 0 !important; max-width: 100% !important; background: white !important; } 
-                    @page { size: A4 landscape; margin: 10mm; } 
+                    /* A4縦で、上下左右にマージンを持たせる */
+                    @page { size: A4 portrait; margin: 10mm 5mm; } 
                     body { background-color: white !important; color: black !important; } 
                     .print-hide { display: none !important; } 
                     .page-break { page-break-after: always; }
                 }
             ` }} />
-        <div className="w-[297mm] print:w-full flex justify-between mb-4 print-hide">
+        <div className="w-[210mm] print:w-full flex justify-between mb-4 print-hide">
           <Button variant="outline" onClick={() => setViewMode('list')} className="bg-white text-slate-700 font-bold border-slate-300">
             <ArrowLeft className="h-4 w-4 mr-2" /> 戻る
           </Button>
           <div className="flex gap-2">
-            <span className="text-sm font-bold bg-white px-3 py-2 rounded border border-slate-300 text-slate-600">※A4横で印刷し、真ん中で切り取って段ボールに貼り付けてください。</span>
+            <span className="text-sm font-bold bg-white px-3 py-2 rounded border border-slate-300 text-slate-600">※A4用紙に印刷し、点線で切り取って段ボールに貼り付けてください。</span>
             <Button onClick={() => window.print()} className="bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-lg">
               <Printer className="h-5 w-5 mr-2" /> 印刷する
             </Button>
           </div>
         </div>
 
-        {pageChunks.map((pair, pageIdx) => (
-          <div key={pageIdx} className={`w-[297mm] h-[210mm] bg-white p-6 print:p-0 shadow-xl print:shadow-none text-black font-sans box-border flex flex-row items-center justify-center gap-8 ${pageIdx < pageChunks.length - 1 ? 'page-break mb-8 print:mb-0' : ''}`}>
+        {pageChunks.map((pageGroup, pageIdx) => (
+          <div key={pageIdx} className={`w-[200mm] bg-white print:p-0 shadow-xl print:shadow-none text-black font-sans box-border flex flex-col items-center justify-start gap-[5mm] pt-[5mm] pb-[5mm] ${pageIdx < pageChunks.length - 1 ? 'page-break mb-8 print:mb-0' : ''}`}>
 
-            {pair.map((chunk, chunkIdx) => {
-              const absoluteIndex = pageIdx * 2 + chunkIdx;
+            {pageGroup.map((chunk, chunkIdx) => {
+              const absoluteIndex = pageIdx * 3 + chunkIdx;
               const lotCodes = chunk.map(s => formatKeepSampleLot(s.lot_code)).join(',');
               const qrData = encodeURIComponent(lotCodes);
               const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${qrData}`;
@@ -429,61 +483,99 @@ export default function KeepSamplesPage() {
               const expiryDates = chunk.map(s => new Date(s.expiry_date).getTime());
               const minExpiryDate = new Date(Math.min(...expiryDates));
 
+              // ラベル内のテーブルを左右2列に分ける (最大5個ずつ)
+              const half1 = chunk.slice(0, 5);
+              const half2 = chunk.slice(5, 10);
+
               return (
-                <div key={chunkIdx} className="border-[3px] border-dashed border-slate-400 w-[135mm] h-[185mm] p-5 rounded-2xl relative flex flex-col justify-between box-border bg-white">
-                  <div className="absolute -top-3 left-4 bg-white px-2 text-sm font-bold text-slate-400 flex items-center gap-1">
-                    <Beaker className="w-4 h-4" /> 段ボール保管用ラベル
+                <div key={chunkIdx} className="border-[3px] border-dashed border-slate-400 w-[200mm] h-[90mm] p-3 rounded-2xl relative flex flex-col justify-between box-border bg-white shrink-0">
+
+                  {/* --- ヘッダーエリア --- */}
+                  <div className="flex justify-between items-start mb-1">
+                    <div className="flex flex-col">
+                      <div className="text-[11px] font-bold text-slate-500 flex items-center gap-1 mb-1">
+                        <Beaker className="w-3.5 h-3.5" /> 段ボール保管用ラベル
+                      </div>
+                      <h1 className="text-2xl font-black tracking-widest text-slate-800 leading-none">キープサンプル保管箱</h1>
+                      <p className="text-[10px] font-bold text-slate-500 mt-1">
+                        品質検査・トレーサビリティ用 {labelChunks.length > 1 && `（${absoluteIndex + 1} / ${labelChunks.length} 箱目）`}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-4">
+                      <div className="text-right bg-red-50 px-3 py-1.5 border border-red-200 rounded-lg">
+                        <div className="text-[9px] font-bold text-red-600 mb-0.5">※最短保管期限 (賞味期限)</div>
+                        <div className="text-lg font-black text-red-700 leading-none">{minExpiryDate.toLocaleDateString('ja-JP')} まで保管</div>
+                      </div>
+                      <div className="p-1 border border-slate-300 rounded bg-slate-50">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={qrUrl} alt="QR Code" className="w-12 h-12 mix-blend-multiply" />
+                      </div>
+                    </div>
                   </div>
 
-                  <div>
-                    <div className="text-center border-b-2 border-black pb-3 mb-3 flex justify-between items-end">
-                      <div className="text-left">
-                        <h1 className="text-xl font-black tracking-widest text-slate-800">キープサンプル保管箱</h1>
-                        <p className="text-xs font-bold text-slate-500 mt-1">
-                          品質検査用 {labelChunks.length > 1 && `（${absoluteIndex + 1} / ${labelChunks.length} 箱目）`}
-                        </p>
-                      </div>
-                      <div className="shrink-0 flex flex-col items-center justify-center p-1 border-2 border-slate-300 rounded-lg bg-slate-50">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={qrUrl} alt="QR Code" className="w-16 h-16 mix-blend-multiply" />
-                      </div>
-                    </div>
+                  <div className="flex justify-between items-end mb-1 mt-1">
+                    <div className="font-bold text-slate-700 text-xs">保管製品 ({chunk.length} ロット)</div>
+                    <div className="text-[10px] font-bold text-slate-600">製造期間: <span className="text-black font-black">{dateRangeStr}</span></div>
+                  </div>
 
-                    <div className="flex justify-between items-end mb-2">
-                      <div className="font-bold text-slate-700 text-sm">製品 ({chunk.length} ロット)</div>
-                      <div className="text-xs font-bold text-slate-600">製造期間: <span className="text-black font-black">{dateRangeStr}</span></div>
-                    </div>
+                  {/* --- テーブルエリア（2列レイアウト） --- */}
+                  <div className="flex gap-3 flex-1 h-[45px]">
 
-                    <div className="border border-slate-400 rounded-lg overflow-hidden">
-                      <table className="w-full text-xs">
+                    {/* 左側テーブル */}
+                    <div className="flex-1 border border-slate-400 rounded-lg overflow-hidden h-full">
+                      <table className="w-full text-[9px] table-fixed">
                         <thead className="bg-slate-100">
                           <tr>
-                            <th className="py-1 px-1.5 text-left border-b border-slate-300 w-[42%] text-xs">製品名 (味)</th>
-                            <th className="py-1 px-1.5 text-left border-b border-slate-300 w-[30%] text-xs">Lot番号</th>
-                            <th className="py-1 px-1.5 text-center border-b border-slate-300 w-[10%] text-xs">個数</th>
-                            <th className="py-1 px-1.5 text-center border-b border-slate-300 w-[18%] text-xs">製造日</th>
+                            <th className="py-0.5 px-1.5 text-left border-b border-slate-300 w-[42%]">製品名 (味)</th>
+                            <th className="py-0.5 px-1.5 text-left border-b border-slate-300 w-[25%]">Lot番号</th>
+                            <th className="py-0.5 px-1.5 text-center border-b border-slate-300 w-[10%]">個数</th>
+                            <th className="py-0.5 px-1.5 text-center border-b border-slate-300 w-[23%]">製造日</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {chunk.map(s => (
+                          {half1.map(s => (
                             <tr key={s.id} className="border-b border-slate-200 last:border-b-0">
-                              <td className="py-1 px-1.5 font-bold text-slate-800 truncate max-w-[120px] text-xs">{s.products?.name} <span className="text-[10px] text-slate-500">({s.products?.variant_name})</span></td>
+                              <td className="py-0.5 px-1.5 font-bold text-slate-800 truncate whitespace-nowrap overflow-hidden">{s.products?.name} <span className="text-[8px] text-slate-500">({s.products?.variant_name})</span></td>
                               {/* ▼ Lot番号をフォーマットして表示 ▼ */}
-                              <td className="py-1 px-1.5 font-mono font-black text-blue-800 text-[11px]">{formatKeepSampleLot(s.lot_code)}</td>
-                              <td className="py-1 px-1.5 text-center font-bold text-xs">{s.saved_quantity}</td>
-                              <td className="py-1 px-1.5 text-center text-[10px] text-slate-600">{new Date(s.production_date).toLocaleDateString('ja-JP')}</td>
+                              <td className="py-0.5 px-1.5 font-mono font-black text-blue-800 text-[10px] truncate">{formatKeepSampleLot(s.lot_code)}</td>
+                              <td className="py-0.5 px-1.5 text-center font-bold">{s.saved_quantity}</td>
+                              <td className="py-0.5 px-1.5 text-center text-[9px] text-slate-600">{new Date(s.production_date).toLocaleDateString('ja-JP')}</td>
                             </tr>
                           ))}
                         </tbody>
                       </table>
                     </div>
-                  </div>
 
-                  <div className="flex justify-end border-t border-slate-200 pt-3 mt-3">
-                    <div className="text-right bg-red-50 px-3 py-1.5 border border-red-200 rounded-lg">
-                      <div className="text-[10px] font-bold text-red-600 mb-0.5">※最短保管期限 (賞味期限)</div>
-                      <div className="text-lg font-black text-red-700">{minExpiryDate.toLocaleDateString('ja-JP')} まで保管</div>
+                    {/* 右側テーブル */}
+                    <div className="flex-1 border border-slate-400 rounded-lg overflow-hidden h-full">
+                      {half2.length > 0 ? (
+                        <table className="w-full text-[9px] table-fixed">
+                          <thead className="bg-slate-100">
+                            <tr>
+                              <th className="py-0.5 px-1.5 text-left border-b border-slate-300 w-[42%]">製品名 (味)</th>
+                              <th className="py-0.5 px-1.5 text-left border-b border-slate-300 w-[25%]">Lot番号</th>
+                              <th className="py-0.5 px-1.5 text-center border-b border-slate-300 w-[10%]">個数</th>
+                              <th className="py-0.5 px-1.5 text-center border-b border-slate-300 w-[23%]">製造日</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {half2.map(s => (
+                              <tr key={s.id} className="border-b border-slate-200 last:border-b-0">
+                                <td className="py-0.5 px-1.5 font-bold text-slate-800 truncate whitespace-nowrap overflow-hidden">{s.products?.name} <span className="text-[8px] text-slate-500">({s.products?.variant_name})</span></td>
+                                {/* ▼ Lot番号をフォーマットして表示 ▼ */}
+                                <td className="py-0.5 px-1.5 font-mono font-black text-blue-800 text-[10px] truncate">{formatKeepSampleLot(s.lot_code)}</td>
+                                <td className="py-0.5 px-1.5 text-center font-bold">{s.saved_quantity}</td>
+                                <td className="py-0.5 px-1.5 text-center text-[9px] text-slate-600">{new Date(s.production_date).toLocaleDateString('ja-JP')}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      ) : (
+                        <div className="w-full h-full bg-slate-50/50 flex items-center justify-center text-[9px] text-slate-400 font-bold">空き</div>
+                      )}
                     </div>
+
                   </div>
                 </div>
               );
@@ -649,8 +741,12 @@ export default function KeepSamplesPage() {
 
         <TabsContent value="list" className="mt-0">
           {canEdit && (
-            <div className="mb-4 flex justify-end">
-              <Button onClick={() => setIsAddModalOpen(true)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-sm h-10">
+            <div className="mb-4 flex justify-between items-center bg-slate-50 p-2 rounded-lg border border-slate-200">
+              <Button onClick={handleRemoveDuplicates} disabled={isProcessing} variant="outline" className="text-red-600 border-red-200 bg-red-50 hover:bg-red-100 font-bold h-9">
+                {isProcessing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <CopyMinus className="w-4 h-4 mr-2" />}
+                重複データを一括削除
+              </Button>
+              <Button onClick={() => setIsAddModalOpen(true)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-sm h-9">
                 <Plus className="h-4 w-4 mr-2" /> 手動で1件追加する
               </Button>
             </div>

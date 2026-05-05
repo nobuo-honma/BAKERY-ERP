@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 // ▼ 修正: PackageOpen をインポートリストに追加しました ▼
-import { FileText, Plus, ExternalLink, Edit, Trash2, Loader2, Save, Lock, Search, ShieldCheck, ClipboardCheck, Building2, Wrench, Sparkles, ShieldAlert, ArrowRight, Trash, Eye, PackageOpen, Box, LineChart } from "lucide-react";
+import { FileText, Plus, ExternalLink, Edit, Trash2, Loader2, Save, Lock, Search, ShieldCheck, ClipboardCheck, Building2, Wrench, Sparkles, ShieldAlert, ArrowRight, Trash, Eye, PackageOpen, Box, LineChart, GitMerge } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import Link from "next/link";
 
@@ -311,6 +311,23 @@ export default function HaccpPortalPage() {
                                 <CardContent>
                                     <p className="text-sm text-slate-600 leading-relaxed mb-4">製品ごとの原材料、添加物、アレルギー物質、賞味期限、保存方法などをまとめた説明書を作成・出力します。</p>
                                     <div className="text-xs font-bold text-blue-600 flex items-center justify-end">作成する / PDF出力 <ArrowRight className="w-4 h-4 ml-1 transition-transform group-hover:translate-x-1" /></div>
+                                </CardContent>
+                            </Card>
+                        </Link>
+
+                        {/* ▼ 追加：製造工程フロー図 ▼ */}
+                        <Link href="/manufacturing-flows" className="block group">
+                            <Card className="h-full border-2 border-slate-200 hover:border-purple-400 hover:bg-purple-50/30 transition-all shadow-sm group-hover:shadow-md cursor-pointer">
+                                <CardHeader className="pb-2">
+                                    <div className="flex justify-between items-start">
+                                        <div className="bg-purple-100 p-2.5 rounded-lg text-purple-700 group-hover:scale-110 transition-transform"><GitMerge className="w-6 h-6" /></div>
+                                        <Badge className="bg-slate-100 text-slate-500 shadow-none border-none text-[10px]">HACCP-F1</Badge>
+                                    </div>
+                                    <CardTitle className="text-xl font-bold text-slate-800 mt-4">製造工程フロー図</CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                    <p className="text-sm text-slate-600 leading-relaxed mb-4">原材料の受入から出荷までの各工程と、重要管理点（CCP）を設定し、フロー図としてPDF出力します。</p>
+                                    <div className="text-xs font-bold text-purple-600 flex items-center justify-end">作成する / PDF出力 <ArrowRight className="w-4 h-4 ml-1 transition-transform group-hover:translate-x-1" /></div>
                                 </CardContent>
                             </Card>
                         </Link>
