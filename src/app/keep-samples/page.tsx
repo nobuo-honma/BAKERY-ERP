@@ -45,10 +45,8 @@ function formatKeepSampleLot(lotCode: string) {
   const firstChar = lotCode.charAt(0);
   const dayIndex = DAY_KATAKANA_MAP.indexOf(firstChar);
   if (dayIndex > 0) {
-    // 先頭がカタカナの場合は数字に置き換える（例: スB26SB -> 13B26SB）
     return dayIndex.toString() + lotCode.slice(1);
   }
-  // MA/FDやYC50など、既に数字で始まっている場合はそのまま返す
   return lotCode;
 }
 
@@ -88,7 +86,8 @@ export default function KeepSamplesPage() {
 
   const fetchSamples = useCallback(async () => {
     setLoading(true);
-    const { data: sData } = await supabase.from("keep_samples").select("*, products(name, variant_name)").order("production_date", { ascending: false });
+    // ★変更: production_date を古い順 (ascending: true) で取得するように修正
+    const { data: sData } = await supabase.from("keep_samples").select("*, products(name, variant_name)").order("production_date", { ascending: true });
     if (sData) setSamples(sData as KeepSample[]);
 
     const { data: pData } = await supabase.from("products").select("id, name, variant_name").order("name", { ascending: true });
@@ -400,7 +399,6 @@ export default function KeepSamplesPage() {
     setIsProcessing(false);
   };
 
-  // ★無限ループを防ぐため、レンダリング時に計算結果をメモ化
   const chunkedSamples = useMemo(() => {
     if (viewMode !== 'print') return [];
     const chunks = [];
@@ -469,8 +467,14 @@ export default function KeepSamplesPage() {
 
             {pageGroup.map((chunk, chunkIdx) => {
               const absoluteIndex = pageIdx * 3 + chunkIdx;
-              const lotCodes = chunk.map(s => formatKeepSampleLot(s.lot_code)).join(',');
-              const qrData = encodeURIComponent(lotCodes);
+
+              // ★変更: QRコードのデータを「Lot / 期限 / 個数」の改行リストに変更
+              const qrInfoList = chunk.map(s => {
+                const formattedLot = formatKeepSampleLot(s.lot_code);
+                const expiry = new Date(s.expiry_date).toLocaleDateString('ja-JP');
+                return `${formattedLot} / ${expiry} / ${s.saved_quantity}個`;
+              }).join('\n');
+              const qrData = encodeURIComponent(qrInfoList);
               const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${qrData}`;
 
               const dates = chunk.map(s => new Date(s.production_date).getTime());
@@ -537,7 +541,6 @@ export default function KeepSamplesPage() {
                           {half1.map(s => (
                             <tr key={s.id} className="border-b border-slate-200 last:border-b-0">
                               <td className="py-0.5 px-1.5 font-bold text-slate-800 truncate whitespace-nowrap overflow-hidden">{s.products?.name} <span className="text-[8px] text-slate-500">({s.products?.variant_name})</span></td>
-                              {/* ▼ Lot番号をフォーマットして表示 ▼ */}
                               <td className="py-0.5 px-1.5 font-mono font-black text-blue-800 text-[10px] truncate">{formatKeepSampleLot(s.lot_code)}</td>
                               <td className="py-0.5 px-1.5 text-center font-bold">{s.saved_quantity}</td>
                               <td className="py-0.5 px-1.5 text-center text-[9px] text-slate-600">{new Date(s.production_date).toLocaleDateString('ja-JP')}</td>
@@ -563,7 +566,6 @@ export default function KeepSamplesPage() {
                             {half2.map(s => (
                               <tr key={s.id} className="border-b border-slate-200 last:border-b-0">
                                 <td className="py-0.5 px-1.5 font-bold text-slate-800 truncate whitespace-nowrap overflow-hidden">{s.products?.name} <span className="text-[8px] text-slate-500">({s.products?.variant_name})</span></td>
-                                {/* ▼ Lot番号をフォーマットして表示 ▼ */}
                                 <td className="py-0.5 px-1.5 font-mono font-black text-blue-800 text-[10px] truncate">{formatKeepSampleLot(s.lot_code)}</td>
                                 <td className="py-0.5 px-1.5 text-center font-bold">{s.saved_quantity}</td>
                                 <td className="py-0.5 px-1.5 text-center text-[9px] text-slate-600">{new Date(s.production_date).toLocaleDateString('ja-JP')}</td>
