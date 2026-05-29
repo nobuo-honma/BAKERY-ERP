@@ -331,6 +331,26 @@ export default function HaccpPortalPage() {
                                 </CardContent>
                             </Card>
                         </Link>
+
+                        {/* ▼ 追加：電子はかり 日常点検データシート ▼ */}
+                        <Link href="/scale-checks" className="block group">
+                            <Card className="h-full border-2 border-slate-200 hover:border-teal-400 hover:bg-teal-50/30 transition-all shadow-sm group-hover:shadow-md cursor-pointer">
+                                <CardHeader className="pb-2">
+                                    <div className="flex justify-between items-start">
+                                        <div className="bg-teal-100 p-2.5 rounded-lg text-teal-700 group-hover:scale-110 transition-transform">
+                                            {/* Lucide の Scale アイコンを使用 */}
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-scale"><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z" /><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z" /><path d="M7 21h10" /><path d="M12 3v18" /><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2" /></svg>
+                                        </div>
+                                        <Badge className="bg-slate-100 text-slate-500 shadow-none border-none text-[10px]">YO-15</Badge>
+                                    </div>
+                                    <CardTitle className="text-xl font-bold text-slate-800 mt-4">電子はかり 日常点検シート</CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                    <p className="text-sm text-slate-600 leading-relaxed mb-4">水平やゼロ点の確認に加え、100gの標準分銅を5箇所に載せた際の重量と誤差(±0.2g以内)を毎日記録します。</p>
+                                    <div className="text-xs font-bold text-teal-600 flex items-center justify-end">記録する / PDF出力 <ArrowRight className="w-4 h-4 ml-1 transition-transform group-hover:translate-x-1" /></div>
+                                </CardContent>
+                            </Card>
+                        </Link>
                     </div>
                 </TabsContent>
 
