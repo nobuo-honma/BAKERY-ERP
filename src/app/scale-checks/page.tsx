@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react"; // ← ここに React を追加しました
+import React, { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -142,33 +142,34 @@ export default function ScaleChecksPage() {
     };
 
     // =======================================================================
-    // 印刷（PDF帳票）ビュー - A4横（上下2段レイアウト）
+    // 印刷（PDF帳票）ビュー - PDFを完全に再現したレイアウト
     // =======================================================================
     if (viewMode === 'print') {
         const y = calendarMonth.getFullYear();
         const m = calendarMonth.getMonth() + 1;
         const daysInMonth = new Date(y, m, 0).getDate();
-
         const daysTop = Array.from({ length: 16 }, (_, i) => i + 1);
-        const daysBottom = Array.from({ length: 16 }, (_, i) => i + 17);
+        const daysBottom = Array.from({ length: 15 }, (_, i) => i + 17); // 31日まで
 
         // テーブル生成用の共通コンポーネント
         const renderTable = (daysArr: number[], isTop: boolean) => (
-            <table className="w-full border-collapse border-2 border-black text-[10px] table-fixed mb-4">
+            <table className="w-full border-collapse border-2 border-black text-[9px] table-fixed mb-0 bg-white">
                 <thead>
-                    <tr className="bg-gray-50 h-6">
-                        {isTop && (
-                            <th rowSpan={2} className="border border-black font-bold text-lg w-[8%] tracking-widest bg-white">計量</th>
-                        )}
-                        {!isTop && (
-                            <th rowSpan={2} className="border border-black bg-white w-[8%]"></th>
+                    <tr className="h-5">
+                        {isTop ? (
+                            <th colSpan={2} rowSpan={2} className="border border-black font-black text-2xl w-[11.5%] tracking-widest bg-white pb-1 text-center align-middle">計量</th>
+                        ) : (
+                            <th colSpan={2} rowSpan={2} className="border border-black bg-white w-[11.5%]"></th>
                         )}
                         {daysArr.map(day => {
-                            if (day > daysInMonth) return <th key={`header-${day}`} className="border border-black w-[5.7%] bg-gray-200"></th>;
+                            if (day > daysInMonth) return <th key={`header-${day}`} className="border border-black bg-white w-[5.5%]"></th>;
                             const dateObj = new Date(y, m - 1, day);
                             const dow = ["日", "月", "火", "水", "木", "金", "土"][dateObj.getDay()];
+                            const isSat = dateObj.getDay() === 6;
+                            const isSun = dateObj.getDay() === 0;
+                            const dowColor = isSat ? "text-blue-600" : isSun ? "text-red-600" : "text-black";
                             return (
-                                <th key={`date-${day}`} className="border border-black font-medium leading-tight py-0.5">
+                                <th key={`date-${day}`} className={`border border-black font-bold leading-tight py-0.5 border-t-[3px] border-t-black text-center ${dowColor}`}>
                                     {m}月{day}日<br />({dow})
                                 </th>
                             );
@@ -176,53 +177,99 @@ export default function ScaleChecksPage() {
                     </tr>
                     <tr className="h-4">
                         {daysArr.map(day => {
-                            if (day > daysInMonth) return <th key={`time-${day}`} className="border border-black bg-gray-200"></th>;
+                            if (day > daysInMonth) return <th key={`time-${day}`} className="border border-black bg-white"></th>;
                             const dStr = `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                            return <th key={`time-${day}`} className="border border-black font-medium">：{monthlyData[dStr]?.check_time || "　"}</th>;
+                            const timeVal = monthlyData[dStr]?.check_time;
+                            return (
+                                <th key={`time-${day}`} className="border border-black font-medium text-[8px] text-center py-0">
+                                    {timeVal ? timeVal : "："}
+                                </th>
+                            );
                         })}
                     </tr>
                 </thead>
                 <tbody>
-                    <tr className="h-5"><th className="border border-black font-medium bg-gray-50 text-left px-1">設置状態の確認</th><th className="border border-black bg-gray-50">A</th>
-                        {daysArr.map(d => d > daysInMonth ? <td key={`A-${d}`} className="border border-black bg-gray-200"></td> : <td key={`A-${d}`} className="border border-black text-center font-bold text-xs">{renderOkNg(monthlyData[`${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`]?.status_a)}</td>)}
+                    <tr className="h-[18px]">
+                        <th rowSpan={2} className="border border-black font-medium text-left px-1.5 w-[9%] text-[9px] leading-tight align-middle">設置状態の<br />確認</th>
+                        <th className="border border-black text-center font-medium w-[2.5%] text-[9px] py-0">A</th>
+                        {daysArr.map(d => d > daysInMonth ? <td key={`A-${d}`} className="border border-black bg-white"></td> : <td key={`A-${d}`} className="border border-black text-center font-bold text-xs">{renderOkNg(monthlyData[`${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`]?.status_a)}</td>)}
                     </tr>
-                    <tr className="h-5"><th className="border border-black bg-gray-50"></th><th className="border border-black bg-gray-50">B</th>
-                        {daysArr.map(d => d > daysInMonth ? <td key={`B-${d}`} className="border border-black bg-gray-200"></td> : <td key={`B-${d}`} className="border border-black text-center font-bold text-xs">{renderOkNg(monthlyData[`${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`]?.status_b)}</td>)}
+                    <tr className="h-[18px]">
+                        <th className="border border-black text-center font-medium text-[9px] py-0">B</th>
+                        {daysArr.map(d => d > daysInMonth ? <td key={`B-${d}`} className="border border-black bg-white"></td> : <td key={`B-${d}`} className="border border-black text-center font-bold text-xs">{renderOkNg(monthlyData[`${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`]?.status_b)}</td>)}
                     </tr>
-                    <tr className="h-5"><th className="border border-black font-medium bg-gray-50 text-left px-1">ゼロ点の確認</th><th className="border border-black bg-gray-50">C</th>
-                        {daysArr.map(d => d > daysInMonth ? <td key={`C-${d}`} className="border border-black bg-gray-200"></td> : <td key={`C-${d}`} className="border border-black text-center font-bold text-xs">{renderOkNg(monthlyData[`${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`]?.status_c)}</td>)}
+                    <tr className="h-[18px]">
+                        <th className="border border-black font-medium text-left px-1.5 text-[9px] leading-tight align-middle">ゼロ点の確<br />認</th>
+                        <th className="border border-black text-center font-medium text-[9px] py-0">C</th>
+                        {daysArr.map(d => d > daysInMonth ? <td key={`C-${d}`} className="border border-black bg-white"></td> : <td key={`C-${d}`} className="border border-black text-center font-bold text-xs">{renderOkNg(monthlyData[`${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`]?.status_c)}</td>)}
                     </tr>
 
-                    {[1, 2, 3, 4, 5].map((num, idx) => (
-                        <React.Fragment key={`group-${num}`}>
-                            <tr key={`w-${num}`} className="h-5">
-                                {idx === 0 && <th rowSpan={10} className="border border-black bg-white p-0 relative">
-                                    <div className="absolute top-1 text-[8px] font-medium w-full text-center">※5点測定箇所</div>
-                                    <div className="mx-auto mt-6 w-16 h-12 border border-black relative bg-gray-50">
-                                        <div className="absolute top-0 left-0 bg-white border-b border-r border-black text-[7px] px-1">デジタル表示</div>
-                                        <div className="absolute top-4 left-1 text-[9px] w-3 h-3 rounded-full border border-black flex items-center justify-center">1</div>
-                                        <div className="absolute top-4 right-1 text-[9px] w-3 h-3 rounded-full border border-black flex items-center justify-center">2</div>
-                                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-[9px] w-3 h-3 rounded-full border border-black flex items-center justify-center">3</div>
-                                        <div className="absolute bottom-1 left-1 text-[9px] w-3 h-3 rounded-full border border-black flex items-center justify-center">4</div>
-                                        <div className="absolute bottom-1 right-1 text-[9px] w-3 h-3 rounded-full border border-black flex items-center justify-center">5</div>
-                                    </div>
-                                </th>}
-                                <th className="border border-black bg-gray-50">D{num}</th>
-                                {daysArr.map(d => d > daysInMonth ? <td key={`D${num}-${d}`} className="border border-black bg-gray-200"></td> : <td key={`D${num}-${d}`} className="border border-black text-center font-bold">{monthlyData[`${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`]?.[`d${num}_weight` as keyof ScaleCheck] || ""}</td>)}
-                            </tr>
-                            <tr key={`diff-${num}`} className="h-5">
-                                <th className="border border-black bg-gray-50 text-slate-500">(差)</th>
-                                {daysArr.map(d => d > daysInMonth ? <td key={`Diff${num}-${d}`} className="border border-black bg-gray-200"></td> : <td key={`Diff${num}-${d}`} className="border border-black text-center text-slate-600">{monthlyData[`${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`]?.[`d${num}_diff` as keyof ScaleCheck] || ""}</td>)}
-                            </tr>
-                        </React.Fragment>
-                    ))}
-
-                    <tr className="h-6 bg-gray-50">
-                        <th colSpan={2} className="border border-black text-right pr-2">確認者</th>
+                    <tr className="h-[18px]">
+                        {/* 左側の「重量表示の確認」とデジタル表示の図 */}
+                        <th rowSpan={10} className="border border-black bg-white p-1 text-center align-middle">
+                            <div className="flex flex-col items-center justify-between h-full py-1 box-border">
+                                <div className="w-full text-center">
+                                    <div className="text-[9px] font-bold leading-tight tracking-wider">重量表示の</div>
+                                    <div className="text-[9px] font-bold leading-tight tracking-wider">確認</div>
+                                    <div className="text-[7px] font-bold mt-1 text-slate-600 scale-[0.9] leading-none">※5点測定箇所</div>
+                                </div>
+                                <div className="w-[58px] h-[34px] border border-black relative bg-white shrink-0 mt-2">
+                                    <div className="absolute top-0 left-0 bg-white border-b border-r border-black text-[5px] font-bold px-0.5 py-0.2 z-10 leading-none scale-[0.8] origin-top-left">デジタル表示</div>
+                                    <div className="absolute top-[13px] left-[2.5px] text-[7px] font-bold w-2.5 h-2.5 rounded-full border border-black flex items-center justify-center bg-white leading-none">1</div>
+                                    <div className="absolute top-[13px] left-1/2 -translate-x-1/2 text-[7px] font-bold w-2.5 h-2.5 rounded-full border border-black flex items-center justify-center bg-white leading-none">3</div>
+                                    <div className="absolute top-[13px] right-[2.5px] text-[7px] font-bold w-2.5 h-2.5 rounded-full border border-black flex items-center justify-center bg-white leading-none">2</div>
+                                    <div className="absolute bottom-[2px] left-[2.5px] text-[7px] font-bold w-2.5 h-2.5 rounded-full border border-black flex items-center justify-center bg-white leading-none">4</div>
+                                    <div className="absolute bottom-[2px] right-[2.5px] text-[7px] font-bold w-2.5 h-2.5 rounded-full border border-black flex items-center justify-center bg-white leading-none">5</div>
+                                </div>
+                            </div>
+                        </th>
+                        <th className="border border-black font-bold px-1 text-[9px] py-0">D①</th>
                         {daysArr.map(d => {
-                            if (d > daysInMonth) return <td key={`chk-${d}`} className="border border-black bg-gray-200"></td>;
+                            if (d > daysInMonth) return <td key={`D1-${d}`} className="border border-black bg-white"></td>;
+                            const dStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                            return <td key={`D1-${d}`} className="border border-black text-center font-bold text-[10px]">{monthlyData[dStr]?.d1_weight || ""}</td>;
+                        })}
+                    </tr>
+                    <tr className="h-[18px]">
+                        <th className="border border-black font-medium px-1 text-[8px] py-0" style={{ borderBottomStyle: 'dashed', borderBottomWidth: '1px' }}>(差)</th>
+                        {daysArr.map(d => {
+                            if (d > daysInMonth) return <td key={`Diff1-${d}`} className="border border-black bg-white" style={{ borderBottomStyle: 'dashed', borderBottomWidth: '1px' }}></td>;
+                            const dStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                            return <td key={`Diff1-${d}`} className="border border-black text-center text-[9px]" style={{ borderBottomStyle: 'dashed', borderBottomWidth: '1px' }}>{monthlyData[dStr]?.d1_diff || ""}</td>;
+                        })}
+                    </tr>
+
+                    {[2, 3, 4, 5].map((num) => {
+                        const isLast = num === 5;
+                        const borderBottomStyle = isLast ? {} : { borderBottomStyle: 'dashed' as const, borderBottomWidth: '1px' };
+                        return (
+                            <React.Fragment key={`group-${num}`}>
+                                <tr className="h-[18px]">
+                                    <th className="border border-black font-bold px-1 text-[9px] py-0">D{num}</th>
+                                    {daysArr.map(d => {
+                                        if (d > daysInMonth) return <td key={`D${num}-${d}`} className="border border-black bg-white"></td>;
+                                        const dStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                                        return <td key={`D${num}-${d}`} className="border border-black text-center font-bold text-[10px]">{monthlyData[dStr]?.[`d${num}_weight` as keyof ScaleCheck] || ""}</td>;
+                                    })}
+                                </tr>
+                                <tr className="h-[18px]">
+                                    <th className="border border-black font-medium px-1 text-[8px] py-0" style={borderBottomStyle}>(差)</th>
+                                    {daysArr.map(d => {
+                                        if (d > daysInMonth) return <td key={`Diff${num}-${d}`} className="border border-black bg-white" style={borderBottomStyle}></td>;
+                                        const dStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                                        return <td key={`Diff${num}-${d}`} className="border border-black text-center text-[9px]" style={borderBottomStyle}>{monthlyData[dStr]?.[`d${num}_diff` as keyof ScaleCheck] || ""}</td>;
+                                    })}
+                                </tr>
+                            </React.Fragment>
+                        );
+                    })}
+
+                    <tr className="h-6">
+                        <th className="border border-black text-center font-bold text-[9px] py-0" colSpan={2}>確認者</th>
+                        {daysArr.map(d => {
+                            if (d > daysInMonth) return <td key={`chk-${d}`} className="border border-black bg-white"></td>;
                             const checker = monthlyData[`${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`]?.checker_name;
-                            return <td key={`chk-${d}`} className="border border-black text-center p-0">{checker ? <div className="text-[8px] truncate max-w-[24px] mx-auto">{checker.slice(0, 2)}</div> : ""}</td>;
+                            return <td key={`chk-${d}`} className="border border-black text-center p-0.5">{checker ? <div className="text-[9px] truncate max-w-[24px] mx-auto font-bold">{checker.slice(0, 2)}</div> : ""}</td>;
                         })}
                     </tr>
                 </tbody>
@@ -236,7 +283,8 @@ export default function ScaleChecksPage() {
                     @media print {
                         header, nav { display: none !important; }
                         main { padding: 0 !important; margin: 0 !important; max-width: 100% !important; background: white !important; }
-                        @page { size: A4 landscape; margin: 10mm; }
+                        /* A4横 (Landscape)で余白を調整 */
+                        @page { size: A4 landscape; margin: 6mm 10mm; }
                         body { background-color: white !important; color: black !important; }
                         .print-hide { display: none !important; }
                     }
@@ -251,38 +299,57 @@ export default function ScaleChecksPage() {
                     </Button>
                 </div>
 
-                <div className="w-[297mm] h-[210mm] bg-white pt-8 pb-4 px-12 print:p-0 shadow-xl print:shadow-none text-black font-sans box-border flex flex-col justify-start">
+                <div className="w-[297mm] h-[210mm] bg-white py-4 px-8 print:p-0 shadow-xl print:shadow-none text-black font-sans box-border flex flex-col justify-between overflow-hidden">
 
-                    <div className="flex justify-between items-end mb-2 shrink-0">
-                        <div className="flex items-end gap-6">
-                            <div className="text-sm font-bold">{y}年</div>
-                            <h1 className="text-3xl font-bold tracking-widest leading-none mb-1">電子はかり 日常点検データシート</h1>
+                    <div className="flex justify-between items-end mb-1 shrink-0 relative">
+                        <div className="flex flex-col relative z-10 pb-1">
+                            <h1 className="text-3xl font-black tracking-widest leading-none">電子はかり 日常点検データシート</h1>
                         </div>
-                        <table className="border-collapse border-2 border-black text-[11px] text-center leading-none w-[120px]">
+
+                        <table className="border-collapse border-2 border-black text-[9px] text-center leading-tight w-[280px]">
                             <tbody>
-                                <tr className="h-5"><td className="border-none bg-transparent"></td><th className="border border-black font-medium w-16">施設長</th><th className="border border-black font-medium w-16">担当</th></tr>
-                                <tr className="h-5"><td className="p-0"><table className="w-full border-collapse"><tbody>
-                                    <tr><th className="border-t border-b border-l border-r border-black font-medium bg-gray-50 px-1 py-0.5">文書No.</th><td className="border-t border-b border-black font-bold px-1 py-0.5">YO-15</td></tr>
-                                    <tr><th className="border-b border-l border-r border-black font-medium bg-gray-50 px-1 py-0.5">制定日</th><td className="border-b border-black font-bold px-1 py-0.5">2021/4/1</td></tr>
-                                    <tr><th className="border-b border-l border-r border-black font-medium bg-gray-50 px-1 py-0.5">改定日</th><td className="border-b border-black font-bold px-1 py-0.5"></td></tr>
-                                </tbody></table></td><td className="border border-black h-14" rowSpan={3}></td><td className="border border-black h-14" rowSpan={3}></td></tr>
-                                <tr><td className="border-b border-l border-black text-[8px] bg-gray-50 py-0.5 text-center">ワークセンター・やまびこ</td></tr>
+                                <tr className="h-5">
+                                    <td className="border border-black font-bold text-left px-2 py-0.5" colSpan={2}>ワークセンター・やまびこ</td>
+                                    <th className="border border-black font-medium w-[60px] py-0.5 bg-slate-50">施設長</th>
+                                    <th className="border border-black font-medium w-[60px] py-0.5 bg-slate-50">担当</th>
+                                </tr>
+                                <tr className="h-5">
+                                    <th className="border border-black font-medium w-[60px] py-0.5 bg-slate-50">文書No.</th>
+                                    <td className="border border-black font-bold w-[100px] py-0.5 bg-white">YO-15</td>
+                                    <td className="border border-black bg-white" rowSpan={3}></td>
+                                    <td className="border border-black bg-white" rowSpan={3}></td>
+                                </tr>
+                                <tr className="h-5">
+                                    <th className="border border-black font-medium py-0.5 bg-slate-50">制定日</th>
+                                    <td className="border border-black font-bold py-0.5 bg-white">2021/4/1</td>
+                                </tr>
+                                <tr className="h-5">
+                                    <th className="border border-black font-medium py-0.5 bg-slate-50">改定日</th>
+                                    <td className="border border-black font-bold py-0.5 bg-white"></td>
+                                </tr>
                             </tbody>
                         </table>
                     </div>
 
-                    {renderTable(daysTop, true)}
-                    {renderTable(daysBottom, false)}
-
-                    <div className="mt-1 flex justify-between text-[11px] font-bold text-slate-800 leading-relaxed px-16">
+                    <div className="flex-1 flex flex-col justify-between mt-1 gap-2">
                         <div>
-                            <div>※ A ： 水平が取れている事。 (水準器で確認)</div>
-                            <div>※ B ： 汚れ・異物付着の無き事。 (目視で確認)</div>
-                            <div>※ C ： ゼロ点設定後、分銅を3回測定し表示がゼロ(0g)へ戻る事。</div>
-                            <div>※ D ： 100gの標準分銅を載せて誤差±0.2g以内である事。(5点で確認)</div>
+                            <div className="text-[10px] font-bold pl-1 mb-0.5 text-left">{y}年</div>
+                            {renderTable(daysTop, true)}
                         </div>
-                        <div className="text-right">
-                            ※ 破損等の異常発見時は上長に報告し指示を仰ぐ事。
+                        <div className="mt-1">
+                            {renderTable(daysBottom, false)}
+                        </div>
+                    </div>
+
+                    <div className="flex justify-between items-start text-[9px] font-bold mt-2 px-1 leading-normal shrink-0 border-t border-transparent pt-1">
+                        <div className="space-y-0.5 text-left">
+                            <div>※A：水平が取れている事。(水準器で確認)</div>
+                            <div>※B：汚れ・異物付着の無き事。(目視で確認)</div>
+                            <div>※C：ゼロ点設定後、分銅を3回測定し表示がゼロ(0g)へ戻る事。</div>
+                            <div>※D：100gの標準分銅を載せて誤差±0.2g以内である事。(5点で確認)</div>
+                        </div>
+                        <div className="text-right align-top pt-0.5">
+                            ※破損等の異常発見時は上長に報告し指示を仰ぐ事。
                         </div>
                     </div>
 
