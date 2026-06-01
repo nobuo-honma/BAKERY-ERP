@@ -28,6 +28,7 @@ const USER_TOC = [
   { id: "haccp", title: "第8章　HACCP・衛生管理記録" },
   { id: "fuji-steamy", title: "第9章　フジスチーミー自動解析" },
   { id: "traceability", title: "第10章　トレーサビリティ追跡機能" },
+  { id: "faq", title: "第11章　よくある質問（FAQ）" },
 ];
 
 const TECH_TOC = [
@@ -128,7 +129,7 @@ function ChapterTitle({ id, num, title, bread }: { id: string; num?: string; tit
       {bread && <Breadcrumb items={bread} />}
       <div className="flex items-center gap-4">
         {num && (
-          <div className="flex flex-col items-center justify-center shrink-0 w-12 h-12 rounded-xl bg-linear-to-br from-blue-600 to-indigo-700 text-white shadow-md print:bg-slate-800 print:text-white">
+          <div className="flex flex-col items-center justify-center shrink-0 w-12 h-12 rounded-xl bg-[linear-gradient(to_bottom_right,var(--color-blue-600),var(--color-indigo-700))] text-white shadow-md print:bg-slate-800 print:text-white">
             <span className="text-[10px] font-bold opacity-80 leading-none -mb-1">{num.replace('第', '').replace('章', '')}</span>
             <span className="text-lg font-black leading-none">CH</span>
           </div>
@@ -143,7 +144,7 @@ function SectionHead({ children, icon: Icon }: { children: React.ReactNode, icon
   return (
     <h3 className="text-lg font-bold text-slate-800 mb-4 mt-8 flex items-center gap-2 border-b border-slate-100 pb-2">
       {Icon && <Icon className="w-5 h-5 text-blue-600" />}
-      {!Icon && <span className="w-1.5 h-5 bg-linear-to-b from-blue-500 to-indigo-600 rounded-full inline-block shrink-0 print:bg-slate-800" />}
+      {!Icon && <span className="w-1.5 h-5 bg-[linear-gradient(to_bottom,var(--color-blue-500),var(--color-indigo-600))] rounded-full inline-block shrink-0 print:bg-slate-800" />}
       {children}
     </h3>
   );
@@ -222,6 +223,29 @@ function FieldTable({ rows }: { rows: [string, string, string?][] }) {
   );
 }
 
+function Accordion({ title, children }: { title: string; children: React.ReactNode }) {
+  const [isOpen, setIsOpen] = useState(false);
+  return (
+    <div className="border border-slate-200 rounded-xl overflow-hidden my-4 bg-slate-50/30 shadow-sm transition-all hover:border-blue-200 print:hidden">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full flex items-center justify-between px-5 py-4 bg-white text-left font-bold text-slate-700 hover:bg-slate-50 transition-colors"
+      >
+        <span className="flex items-center gap-2.5 text-sm md:text-base font-bold text-slate-800">
+          <HelpCircle className="w-5 h-5 text-blue-500 shrink-0" />
+          {title}
+        </span>
+        <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+      <div className={`transition-all duration-300 ease-in-out overflow-hidden ${isOpen ? 'max-h-[1500px] opacity-100 border-t border-slate-100' : 'max-h-0 opacity-0'}`}>
+        <div className="p-5 bg-white text-sm text-slate-600 leading-relaxed space-y-4">
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─────────────────────────────────────────────
 //  メイン
 // ─────────────────────────────────────────────
@@ -255,7 +279,7 @@ export default function ManualPage() {
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden print:border-none print:shadow-none">
 
           {/* ── 表紙ヘッダー ── */}
-          <header className="bg-linear-to-r from-slate-900 to-slate-800 px-6 md:px-10 py-8 print:bg-white print:text-black print:border-b-2 print:border-black">
+          <header className="bg-[linear-gradient(to_right,var(--color-slate-900),var(--color-slate-800))] px-6 md:px-10 py-8 print:bg-white print:text-black print:border-b-2 print:border-black">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
               <div className="flex items-center gap-5">
                 <div className="bg-white/10 p-3 rounded-xl shrink-0 print:hidden backdrop-blur-sm">
@@ -355,14 +379,26 @@ export default function ManualPage() {
                     <p className="font-bold mb-2 text-base">在庫数は「完全連動」で増減します</p>
                     <p className="mb-3 text-slate-600">システム内の在庫データは、各画面でのステータス変更操作と同時に自動で計算されます。必ず実際の作業と同じタイミングでシステムを操作してください。</p>
                     <div className="grid sm:grid-cols-2 gap-3 text-sm font-medium">
-                      <div className="bg-white p-3 rounded border shadow-sm">入荷済ボタン <ArrowRight className="inline w-3 h-3 mx-1 text-slate-400" /> <span className="text-blue-600 font-bold">原料在庫 ＋</span></div>
-                      <div className="bg-white p-3 rounded border shadow-sm">製造開始ボタン <ArrowRight className="inline w-3 h-3 mx-1 text-slate-400" /> <span className="text-red-600 font-bold">原料在庫 －</span></div>
-                      <div className="bg-white p-3 rounded border shadow-sm">製造完了ボタン <ArrowRight className="inline w-3 h-3 mx-1 text-slate-400" /> <span className="text-blue-600 font-bold">製品在庫 ＋</span></div>
-                      <div className="bg-white p-3 rounded border shadow-sm">出荷確定ボタン <ArrowRight className="inline w-3 h-3 mx-1 text-slate-400" /> <span className="text-red-600 font-bold">製品在庫 －</span></div>
+                      <div className="bg-white p-3 rounded border shadow-sm flex items-center justify-between">
+                        <span>入荷予定の確定操作</span>
+                        <span className="flex items-center gap-1"><ArrowRight className="w-3 h-3 text-slate-400" /><strong className="text-emerald-600">原料在庫 ＋加算</strong></span>
+                      </div>
+                      <div className="bg-white p-3 rounded border shadow-sm flex items-center justify-between">
+                        <span>製造計画の開始操作</span>
+                        <span className="flex items-center gap-1"><ArrowRight className="w-3 h-3 text-slate-400" /><strong className="text-red-600">原料在庫 －減算</strong></span>
+                      </div>
+                      <div className="bg-white p-3 rounded border shadow-sm flex items-center justify-between">
+                        <span>製造完了の実績入力</span>
+                        <span className="flex items-center gap-1"><ArrowRight className="w-3 h-3 text-slate-400" /><strong className="text-emerald-600">製品在庫 ＋加算</strong></span>
+                      </div>
+                      <div className="bg-white p-3 rounded border shadow-sm flex items-center justify-between">
+                        <span>出荷指示の確定操作</span>
+                        <span className="flex items-center gap-1"><ArrowRight className="w-3 h-3 text-slate-400" /><strong className="text-red-600">製品在庫 －減算</strong></span>
+                      </div>
                     </div>
                   </NoteBox>
                   <NoteBox type="supplement">
-                    <strong>権限について：</strong>ヘッダー右上のスイッチで「👑 管理者」と「👀 閲覧者」を切り替えられます。情報の登録・編集や在庫を動かす操作は管理者モードでのみ可能です。現場での確認作業時は閲覧者モードを推奨します。
+                    <strong>権限制御スイッチ：</strong>ヘッダー右上に配置されている「👑 管理者 / 👀 閲覧者」のトグルスイッチにより、編集・登録・削除権限が制御されます。閲覧者モードでは、入力フォームや登録用ボタンが非活性、または非表示となり誤入力を防ぎます。
                   </NoteBox>
                 </section>
 
@@ -381,7 +417,7 @@ export default function ManualPage() {
                       { t: "見込み生産", d: "受注残に関係なく、在庫補充を目的として計画する製造のことです。" },
                       { t: "ロールバック", d: "製造計画をキャンセル（削除）した際、連動して動いた在庫を自動で元の数に戻す安全機能です。" },
                     ].map((item) => (
-                      <div key={item.t} className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+                      <div key={item.t} className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:border-blue-100 transition-colors">
                         <div className="font-bold text-blue-800 mb-1">{item.t}</div>
                         <div className="text-sm text-slate-600 leading-relaxed">{item.d}</div>
                       </div>
@@ -392,7 +428,7 @@ export default function ManualPage() {
                 {/* ── 業務フロー ── */}
                 <section>
                   <ChapterTitle id="swimlane" num="第1章" title="業務フロー（全体図）" bread={["操作マニュアル", "第1章　業務フロー"]} />
-                  <p className="text-slate-600 mb-6">担当者ごとの作業レーンと、システムが裏側で自動処理するステップ（右端）を時系列で表しています。</p>
+                  <p className="text-slate-600 mb-6 leading-relaxed">担当者ごとの作業レーンと、システムが裏側で自動処理するステップ（右端）を時系列で表しています。各工程が次の工程へデータを引き継いでいく流れをご確認ください。</p>
                   <SwimlaneChart />
                 </section>
 
@@ -402,43 +438,40 @@ export default function ManualPage() {
                 <section>
                   <ChapterTitle id="order" num="第2章" title="受注管理（注文の登録と計算）" bread={["操作マニュアル", "第2章　受注管理"]} />
 
-                  <SectionHead icon={ShoppingCart}>受注データの新規登録</SectionHead>
-                  <Step n={1} title="「新規受注登録」ボタンを押します">
-                    <p>管理者の場合のみボタンが表示されます。</p>
+                  <SectionHead icon={ShoppingCart}>受注データの新規登録手順</SectionHead>
+                  <Step n={1} title="「新規受注登録」ボタンの押下">
+                    <p>受注一覧画面（`/orders`）の右上にある青色の<strong>「新規受注登録」</strong>ボタンを押します（管理者モードのみ表示）。</p>
                   </Step>
-                  <Step n={2} title="1枚の注文書（グループ）として基本情報を入力します">
+                  <Step n={2} title="基本情報の入力">
+                    <p>注文書に記載された情報を正確に入力します。カレンダー選択ツールを利用して日付を指定します。</p>
                     <FieldTable rows={[
-                      ["出荷予定日", "工場から製品を出す日", "必須"],
-                      ["納品先への着予定日", "お客様の希望納期", "必須"],
-                      ["出荷先名", "リストから検索して選択", "必須"],
-                      ["発注番号", "お客様側の注番・FAX番号など", "任意"],
-                      ["単価 / 摘要", "受注書の印字用データ", "任意"],
+                      ["出荷予定日", "工場から製品をトラック等に積み込み搬出する日", "必須"],
+                      ["納品先への着予定日", "お客様が指定した、納品先への配達予定日", "必須"],
+                      ["出荷先名", "入力欄をクリックすると登録済みの出荷先リストが表示され、フィルタ検索も可能です", "必須"],
+                      ["発注番号", "お客様が発行した注文書番号（FAX注番等）。トレーサビリティの検索フックにもなります", "任意"],
+                      ["摘要", "受注連絡票や出荷案内書に付記する特記事項（例：「午前着指定」など）", "任意"],
                     ]} />
                   </Step>
-                  <Step n={3} title="製品と数量を入力し、BOMシミュレーションを確認します">
-                    <p>「製品を追加する」ボタンで、複数の味を1つの注文書にまとめて登録できます。</p>
-                    <NoteBox type="caution">
-                      数値を入力すると右側に「必要資材のシミュレーション」がリアルタイムで表示されます。現在庫と比較して<strong>不足がある場合は赤色で警告</strong>が出ます。受注登録は可能ですが、必ず入荷管理で手配してください。
+                  <Step n={3} title="製品と数量の指定 ＆ BOMリアルタイムシミュレーション">
+                    <p>製品を追加し、数量をケース（c/s）単位で入力します。複数のフレーバーをまとめて1枚の受注として登録可能です。</p>
+                    <NoteBox type="info">
+                      <p className="font-bold mb-1">BOM（部品表）シミュレーションアラートの動作</p>
+                      数量を入力した瞬間、裏側で必要となる原材料・外箱・缶・ラベルなどの「必要量」が自動計算され、現在の倉庫在庫と比較されます。
+                      <strong>不足する原材料・資材がある場合、不足数が赤い文字で警告表示されます。</strong> この状態でも受注登録自体は可能ですが、速やかに「入荷管理（発注）」を計画してください。
                     </NoteBox>
                   </Step>
-                  <Step n={4} title="「受注を確定する」ボタンで保存します">
-                    <p>保存後、リストに注文書単位のカードが追加されます。</p>
+                  <Step n={4} title="「受注を確定する」ボタンで保存">
+                    <p>エラーや不足アラートを確認後、問題がなければ下部の「受注を確定する」ボタンを押して登録を完了します。</p>
                   </Step>
 
-                  <SectionHead icon={Printer}>受注書の自動発行 (PDF)</SectionHead>
-                  <p className="mb-4 text-slate-700">受注一覧カードの右上にあるプリンターアイコンを押すと、入力したデータが流し込まれた「受注書」がA4横サイズで綺麗に自動生成されます。</p>
-
-                  <SectionHead icon={Edit}>登録後の編集・キャンセル</SectionHead>
-                  <div className="bg-slate-50 rounded-xl p-5 border border-slate-200 space-y-4">
-                    <div>
-                      <span className="font-bold text-slate-800 bg-white px-2 py-1 rounded shadow-sm border mr-2">編集</span>
-                      <span className="text-sm text-slate-600">受注カードの右上にある鉛筆アイコン（✏）から内容を修正できます。</span>
+                  <Accordion title="応用: 受注情報の編集・キャンセルとBOM警告時の連動">
+                    <div className="space-y-3">
+                      <p className="font-bold text-slate-800">■ 登録後の内容変更と削除ルール</p>
+                      <p>一度登録した受注は、受注カード右上の<strong>鉛筆アイコン（✏）</strong>から編集画面を開くことができます。ただし、該当の受注に対してすでに「製造計画」が1つでも作成されている場合、安全のために受注数量の変更および削除はロックされます。変更したい場合は、先に製造計画側を削除（ロールバック）してください。</p>
+                      <p className="font-bold text-slate-800 mt-4">■ BOM警告から入荷管理へのスマート連携</p>
+                      <p>受注登録時に不足アラートが出た資材は、「在庫予測カレンダー（MRP）」にも自動で欠品予定として反映されます。入荷管理（`/arrivals`）画面に移動し、欠品する予定日の前日までに入荷が完了するよう発注処理（大槻食材等）を行ってください。</p>
                     </div>
-                    <div>
-                      <span className="font-bold text-red-600 bg-red-50 px-2 py-1 rounded shadow-sm border border-red-200 mr-2">キャンセル</span>
-                      <span className="text-sm text-slate-600">編集画面の左下にあるボタンから、注文書全体を削除（キャンセル）できます。※製造計画が作成済みの場合は削除できません。</span>
-                    </div>
-                  </div>
+                  </Accordion>
                 </section>
 
                 <div className="page-break" />
@@ -447,23 +480,33 @@ export default function ManualPage() {
                 <section>
                   <ChapterTitle id="arrival" num="第3章" title="入荷管理（資材の発注と受入）" bread={["操作マニュアル", "第3章　入荷管理"]} />
 
-                  <SectionHead icon={FileText}>資材の発注とPDF作成</SectionHead>
-                  <Step n={1} title="発注データの登録">
-                    <p>左側のフォームで対象品目、発注日、入荷予定日、数量を登録します。ステータスは「発注済」となり、この時点では在庫は増えません。</p>
+                  <SectionHead icon={FileText}>資材の発注およびPDF書式作成</SectionHead>
+                  <Step n={1} title="新規発注データの起票">
+                    <p>入荷管理画面の左側の登録パネルで、発注日、入荷予定日、品目、数量を入力します。この時点のステータスは「発注済」となり、在庫にはまだ加算されません（MRPカレンダー上の「入荷予定数」として組み込まれます）。</p>
                   </Step>
-                  <Step n={2} title="発注書 (PDF) の作成">
-                    <p>画面右上の「発注書(PDF)作成」ボタンを押すと、取引先別の発注書レイアウトに切り替わります。そのまま印刷してFAX等に利用できます。</p>
+                  <Step n={2} title="発注書 PDF の自動出力と送付">
+                    <p>右上の「発注書（PDF）作成」ボタンを押すと、登録されたデータに基づきメーカー・取引先別の正式な発注書フォーマットがレイアウトされます。ブラウザの印刷ダイアログから紙に印刷、またはPDF保存してFAX・メールで送信します。</p>
                     <p className="text-xs text-slate-500 mt-1">※大槻食材への発注は専用ボタンから別サイトを開いて行います。</p>
                   </Step>
 
-                  <SectionHead icon={Truck}>入荷受け入れ（在庫加算）</SectionHead>
-                  <Step n={1} title="届いた資材を確認する">
-                    <p>リストまたはカレンダーから、該当する入荷予定の「確認」ボタンを押します。</p>
+                  <SectionHead icon={Truck}>入荷受け入れ（現物チェックと在庫確定）</SectionHead>
+                  <Step n={1} title="入荷予定リスト・カレンダーの現物照合">
+                    <p>資材が工場に届いたら、現物と納品書を確認します。画面の「入荷予定」一覧から該当する資材の「受入確認」ボタンを押します。</p>
                   </Step>
-                  <Step n={2} title="「入荷済にする」ボタンを押して確定">
+                  <Step n={2} title="「入荷済にする」ボタンの押下で在庫加算">
                     <p>数量に間違いがなければ緑色のボタンを押します。</p>
-                    <NoteBox type="check">このボタンを押した瞬間に <strong>item_stocks（原料在庫）に実数が加算</strong>されます。</NoteBox>
+                    <NoteBox type="check">
+                      「入荷済にする」ボタンが押された瞬間に、データベースの <strong>item_stocks（原材料・資材在庫）に実数量が加算</strong>され、MRP予測の予定値が「実績値」に切り替わります。
+                    </NoteBox>
                   </Step>
+
+                  <Accordion title="トラブル解決: 届いた現物の数量が発注時と異なっていた場合">
+                    <div className="space-y-2">
+                      <p className="font-bold text-slate-800">現物が不足・破損していた場合の「一部入荷」処理</p>
+                      <p>納品された数量が発注数より少ない場合、または運送破損があり一部を返品する場合は、受入画面で<strong>「受入数量」の数値を手動で実際に届いた良品数に書き換えてから</strong>「入荷済にする」を実行してください。</p>
+                      <p>システムは「実際に受け入れた数」だけを在庫に加算し、残りの不足分は自動的に「発注残（未納）」ステータスとして入荷予定リストに残留します。後日追加で届いた際に、再度残分を受け入れることが可能です。</p>
+                    </div>
+                  </Accordion>
                 </section>
 
                 <div className="page-break" />
@@ -471,39 +514,50 @@ export default function ManualPage() {
                 {/* ── 製造管理 ── */}
                 <section>
                   <ChapterTitle id="production" num="第4章" title="製造管理（計画とLot発行）" bread={["操作マニュアル", "第4章　製造管理"]} />
-                  <p className="text-slate-600 mb-6">システムの心臓部です。製造計画を立て、実際の製造に合わせてステータスを進めることで在庫が自動連動します。</p>
+                  <p className="text-slate-600 mb-6 leading-relaxed">システムの心臓部です。製造計画を立て、実際の製造に合わせてステータスを進めることで在庫が自動連動します。</p>
 
                   <SectionHead icon={Calendar}>1. 製造計画の登録（分割・見込み生産）</SectionHead>
-                  <Step n={1} title="製造する対象を選ぶ">
-                    <ul className="list-disc pl-5 space-y-1 mt-2">
-                      <li><strong>受注引当：</strong> 左側の「未計画の残数がある受注」リストから選びます。</li>
-                      <li><strong>見込み生産：</strong> 右上の「在庫品として製造」ボタンを押し、対象製品をプルダウンで選びます。</li>
-                    </ul>
+                  <Step n={1} title="製造対象（受注引当 または 在庫補充）の選択">
+                    <p>画面左側の「未計画受注リスト」から対象を選ぶ（受注紐付け製造）、または「見込み生産（在庫品として製造）」ボタンを押して製品と製造予定量を決定します。</p>
                   </Step>
                   <Step n={2} title="製造予定日と製造量(kg)を入力する">
-                    <p>一度に全量を作れない場合は、少ないkg数を入力して<strong>何日にも分割して計画を登録</strong>することができます（残数は自動計算されます）。</p>
+                    <p>一度に全量を作れない場合は、少ないkg数を入力して<strong>何日にも分割して計画を登録</strong>することが可能です（残数は自動計算されます）。</p>
                   </Step>
                   <Step n={3} title="自動発行されたLot番号と賞味期限を確認し、保存する">
                     <p>入力した日付と製品情報を元に、システムがルールに則って正確な Lot番号 と 賞味期限 を発行します。※任意の番号に手書き修正することも可能です。</p>
                   </Step>
 
-                  <SectionHead icon={Factory}>2. 製造の実行と実績入力（在庫連動）</SectionHead>
-                  <Step n={1} title="製造を開始する（原料の減算）">
-                    <p>予定表（カレンダー）等から計画を開き、「製造を開始する」を押します。</p>
-                    <NoteBox type="caution">この操作により、BOMレシピに基づいて<strong>必要な原料・資材が在庫から即時引き落とし</strong>されます。</NoteBox>
+                  <SectionHead icon={Factory}>2. 製造の実行と実績入力（自動在庫コントロール）</SectionHead>
+                  <Step n={1} title="製造開始操作（原材料の自動引き落とし）">
+                    <p>製造当日に該当計画の「製造を開始する」ボタンを押します。</p>
+                    <NoteBox type="caution">
+                      この操作が行われると、登録されているBOM（レシピ）に基づき、<strong>必要な小麦粉や缶などの原材料・資材在庫が即時にマイナス（引き落とし）処理</strong>されます。
+                    </NoteBox>
                   </Step>
-                  <Step n={2} title="製造完了・実績数を入力する（製品の加算）">
-                    <p>パンが焼き上がり包装が終わったら、「製造を完了し、実績数を入力」ボタンを押します。完成したケース数・パック数を入力して確定します。</p>
+                  <Step n={2} title="製造完了・実績数入力（製品在庫の加算とサンプル除外）">
+                    <p>製造作業がすべて完了したら、「完了実績を入力」ボタンを押し、実際に包装・仕上がったケース（c/s）数およびパック（p）数を入力します。</p>
                     <NoteBox type="info">
-                      <p className="font-bold mb-1">キープサンプルの自動引当機能</p>
-                      <p>入力した完成数から、<strong>システムが自動的に品質検査用のキープサンプル（MA/FD製品は5個、それ以外は10個）を引き抜き</strong>ます。<br />残りの数量が、製品在庫として倉庫に加算されます。</p>
+                      <p className="font-bold mb-1">キープサンプルの自動引当ルール</p>
+                      実績確定時、システムは品質検査用に保管する「キープサンプル」を自動的に計算して引き抜きます。
+                      <ul className="list-disc pl-5 mt-1 space-y-1 text-slate-700">
+                        <li><strong>MA製品 / FD製品:</strong> 実績数から自動で <strong>5個（pieces）</strong> を除外保管。</li>
+                        <li><strong>上記以外の通常製品:</strong> 実績数から自動で <strong>10個（pieces）</strong> を除外保管。</li>
+                      </ul>
+                      サンプル差し引き後の製品数が、最終的な製品倉庫の利用可能在庫（`product_stocks`）に加算されます。
                     </NoteBox>
                   </Step>
 
-                  <SectionHead icon={ArrowRight}>計画の取り消し（ロールバック）について</SectionHead>
-                  <p className="text-sm text-slate-700 leading-relaxed bg-slate-50 p-4 rounded-xl border border-slate-200">
-                    製造中、または完了済みの計画を「キャンセル（削除）」した場合、システムは自動的に連動した在庫を元に戻します（原料の復元、または製品在庫の取り消し）。手動で在庫数を直す必要はありません。
-                  </p>
+                  <Accordion title="解説: 計画の削除と安全な自動復元（ロールバック）機構">
+                    <div className="space-y-2">
+                      <p className="font-bold text-slate-800">■ 万が一のミスを救済する「ロールバック」機能</p>
+                      <p>操作を間違えて「製造開始」を押してしまった、あるいは途中で計画が中止になった場合、該当の計画を削除すると、システムが現在のステータスを自動検知して以下のように安全に巻き戻しを行います。</p>
+                      <ul className="list-disc pl-5 text-slate-700 space-y-1">
+                        <li><strong>「製造中」で削除した場合:</strong> すでに引き落とされたBOM原料・資材在庫が、元あった数量へと自動で復元されます。</li>
+                        <li><strong>「完了済」で削除した場合:</strong> 加算された製品在庫が消去されると同時に、自動キープサンプル引当データも破棄され、消費されたBOM原料在庫が元の数に復元されます。</li>
+                      </ul>
+                      <p className="text-xs text-red-600 font-bold">※手動で原料在庫テーブルを直接編集して修正する必要はありません。必ず計画の「削除ボタン」によるロールバックを行ってください。</p>
+                    </div>
+                  </Accordion>
                 </section>
 
                 <div className="page-break" />
@@ -538,6 +592,8 @@ export default function ManualPage() {
                     <p>実際の在庫を数えながら入力します。変更された項目は黄色くハイライトされます。「一括保存」を押すと、すべての差異が調整履歴として記録されます。</p>
                   </Step>
                 </section>
+
+                <div className="page-break" />
 
                 {/* ── 出荷管理 ── */}
                 <section>
@@ -576,16 +632,70 @@ export default function ManualPage() {
                   <ChapterTitle id="haccp" num="第8章" title="HACCP・衛生管理記録" bread={["操作マニュアル", "第8章　HACCP・衛生管理記録"]} />
                   <p className="text-slate-700 mb-6">各種チェック表や関連資料をスマホやタブレットから簡単に入力し、専用のPDFフォーマットとして一括出力できる機能群です。</p>
 
-                  <SectionHead icon={ShieldCheck}>各帳票の入力とPDF出力</SectionHead>
-                  <Step n={1} title="ポータルから目的の帳票を選ぶ">
-                    <p>メニューの「HACCP・衛生管理」を開くと、ポータル画面が表示されます。入力したい帳票（YO-22など）のパネルをクリックします。</p>
-                  </Step>
-                  <Step n={2} title="スマホで簡単入力">
-                    <p>「日次チェック」タブから日付を選び、〇・× などのボタンをタップするだけで記録が完了します。一部の記録（害虫防除など）では、スマホのカメラで証拠写真を撮影し、そのままアップロードすることも可能です。</p>
-                  </Step>
-                  <Step n={3} title="月間一覧からPDFを出力する">
-                    <p>「一覧」タブを開くと、その月に入力されたデータがマトリックス表として表示されます。「PDF帳票を出力」ボタンを押すと、各種原本とそっくりのフォーマットで印刷またはPDF保存ができます。</p>
-                  </Step>
+                  <SectionHead icon={ShieldCheck}>各帳票の入力方法</SectionHead>
+
+                  <Accordion title="1. 日次・月次チェック表（清掃・施設・廃棄物など）">
+                    <div className="space-y-3">
+                      <p><strong>対象:</strong> YO-22(清掃・点検)、YO-26(施設設備)、YO-27(製造施設)、YO-21(エリア清掃)、YO-41(廃棄物)</p>
+                      <ul className="list-decimal pl-5 space-y-2">
+                        <li>ポータルから目的の帳票パネルをクリックします。</li>
+                        <li>「対象日付」のカレンダーから、入力したい日を選択します（デフォルトは今日）。</li>
+                        <li>各項目の右側にある<strong>トグルボタンをタップ</strong>して、「良(〇)」「不良(×)」を切り替えます。<br /><span className="text-xs text-slate-500">※スマホでの操作に最適化された大きなボタンになっています。</span></li>
+                        <li>画面下部の「この日の記録を保存」ボタンを押して完了です。</li>
+                      </ul>
+                      <NoteBox type="supplement">
+                        <strong>PDF出力:</strong> 「月間一覧」タブを開くと、その月に入力されたデータがマトリックス（表）形式で表示されます。右上の「PDF帳票を出力」ボタンを押すと、指定された原本とそっくりのフォーマットで印刷できます。
+                      </NoteBox>
+                    </div>
+                  </Accordion>
+
+                  <Accordion title="2. 電子はかり 日常点検データシート (YO-15)">
+                    <div className="space-y-3">
+                      <p>水平やゼロ点の確認（〇/×）に加えて、<strong>重量の数値入力</strong>と誤差の自動計算を行います。</p>
+                      <ul className="list-decimal pl-5 space-y-2">
+                        <li>日付と点検時間を選択します。</li>
+                        <li>基本状態（A, B, C）をボタンでチェックします。</li>
+                        <li>Dの重量表示確認にて、1〜5の測定箇所ごとに、100gの標準分銅を載せた際の<strong>「重量表示(g)」に数値を入力</strong>します。</li>
+                        <li>数値を入力すると、自動的に100gからの<strong>「差(g)」が計算</strong>されます。</li>
+                      </ul>
+                      <NoteBox type="caution">
+                        計算された「差(g)」が <strong>±0.2gの誤差を超えた場合、入力枠が赤く警告表示</strong>されます。すぐに上長に報告し、はかりの校正を行ってください。
+                      </NoteBox>
+                    </div>
+                  </Accordion>
+
+                  <Accordion title="3. 官能検査実施表 (YO-30)">
+                    <div className="space-y-3">
+                      <p>製造された製品ロットに対する、視覚・嗅覚等の官能検査結果を記録します。</p>
+                      <ul className="list-decimal pl-5 space-y-2">
+                        <li>製造日を選択すると、その日に製造された「Lot番号」がプルダウンで選べるようになります。</li>
+                        <li>小箱・アルミ・パンの状態ごとに、該当する結果のボタンをタップします（複数選択可）。</li>
+                        <li><strong>「問題ない」「規格内」を選択すると青色</strong>に、<strong>それ以外の異常を選択すると赤色</strong>にボタンが変化します。</li>
+                        <li>「その他」を選択した場合は、表示されるテキストボックスに詳細を入力してください。</li>
+                      </ul>
+                    </div>
+                  </Accordion>
+
+                  <Accordion title="4. 製品説明書 と 製造工程フロー図 の作成">
+                    <div className="space-y-3">
+                      <p>HACCPの前提となる基本情報やフローチャートをシステム上で作成し、美しいPDFとして出力します。</p>
+                      <p className="font-bold mt-2">■ 製品説明書 (HACCP-P1)</p>
+                      <ul className="list-disc pl-5 space-y-1 mb-2 text-sm text-slate-700">
+                        <li>リストから対象製品の「作成（編集）」ボタンを押します。</li>
+                        <li>原材料名やアレルギー物質、賞味期限などをテキストで入力して保存します。</li>
+                      </ul>
+
+                      <p className="font-bold mt-4">■ 製造工程フロー図 (HACCP-F1)</p>
+                      <ul className="list-disc pl-5 space-y-1 text-sm text-slate-700">
+                        <li>まず「連携用 原材料・資材リスト」に原料を登録し、それが「どの工程で投入されるか（合流先）」をプルダウンで指定します。</li>
+                        <li>「工程（ステップ）の設定」で、計量・ミキシング等の工程を順に追加していきます。<br /><span className="text-xs text-red-600">※ CCP（重要管理点）に該当する工程はチェックを入れてCCP番号を入力してください。</span></li>
+                        <li>上下の矢印ボタンで工程の順番を入れ替えることができます。</li>
+                      </ul>
+                      <NoteBox type="info">
+                        <strong>自動結線システム:</strong> フロー図をPDF出力する際、設定した「原料の合流先」のデータに基づき、システムが自動的に線のルートを計算し、美しいフローチャートとしてA4用紙に描画します。図形作成ソフトを使う必要はありません。
+                      </NoteBox>
+                    </div>
+                  </Accordion>
 
                   <SectionHead icon={AlertCircle}>監査ログ（改竄防止機能）について</SectionHead>
                   <div className="bg-red-50 border border-red-200 rounded-xl p-5 shadow-sm mt-2">
@@ -593,7 +703,7 @@ export default function ManualPage() {
                       HACCPの信頼性を担保するため、システムに入力された衛生管理記録は<strong>「いつ・誰が・どのデータを・どのように書き換えたか」</strong>がデータベースの裏側で強制的に追跡（トレース）されています。
                     </p>
                     <ul className="list-disc pl-5 space-y-2 text-sm text-red-800 font-medium">
-                      <li>過去のデータをこっそり修正したり削除したりした場合でも、全て履歴として残ります。</li>
+                      <li>過去のデータをこっそり修正したり削除したりした場合でも、全て履歴として残ります（変更前と変更後の差分が色付きで表示されます）。</li>
                       <li>この監査ログは、システム利用者からは絶対に削除・改竄できない仕組みになっています。</li>
                       <li>保健所等の監査時にデータの信頼性を証明する強力なエビデンスとなります。</li>
                     </ul>
@@ -640,6 +750,35 @@ export default function ManualPage() {
                   <NoteBox type="supplement">
                     <strong>QRラベル連携：</strong> 「キープサンプル管理」画面から、Lot番号が埋め込まれたQRコード付きの専用ラベル（段ボール貼付用）を印刷できます。このQRをスマホで読み取ると、すぐに検索が行えます。
                   </NoteBox>
+                </section>
+
+                <div className="page-break" />
+
+                {/* ── FAQ ── */}
+                <section>
+                  <ChapterTitle id="faq" num="第11章" title="よくある質問（FAQ）" bread={["操作マニュアル", "第11章　FAQ"]} />
+
+                  <div className="space-y-4">
+                    <Accordion title="Q. 製造計画を間違えて「開始」してしまいました。元に戻せますか？">
+                      はい、戻せます。<br />
+                      製造管理の画面で該当する計画の「確認」を開き、左下の「キャンセル（削除）」ボタンを押してください。システムが自動的に、引き落とされた原料・資材在庫を元の数に戻して計画を白紙にします。
+                    </Accordion>
+
+                    <Accordion title="Q. 受注内容を変更したいのですが、ロックされていて編集できません。">
+                      すでにその受注に対して「製造計画」が組まれていると、整合性を保つために編集がロックされます。<br />
+                      製造管理の画面から、対象の受注に紐付いている製造計画を一度削除してから、受注内容を変更してください。
+                    </Accordion>
+
+                    <Accordion title="Q. 発注した資材が、発注数より少なく届きました（一部未納）。">
+                      入荷管理の「確認」画面で、数量の項目を<strong>「実際に届いた数」</strong>に書き換えてから「入荷済にする」を押してください。<br />
+                      入力した数だけが在庫に加算され、残りの未納分は引き続き「発注済」ステータスとして一覧に残りますので、後日追加で届いた際に再度受け入れが可能です。
+                    </Accordion>
+
+                    <Accordion title="Q. キープサンプルのラベルを印刷したいのに「印刷するサンプルが選択されていません」と出ます。">
+                      キープサンプル管理の「記録一覧」タブで、左端のチェックボックス（四角い枠）をクリックして、印刷したい対象のサンプルにチェック（青色）を入れてください。<br />
+                      その後、右上に出現する「選択した〇件のラベルを作成」ボタンを押すと印刷画面に進めます。
+                    </Accordion>
+                  </div>
                 </section>
 
               </main>
