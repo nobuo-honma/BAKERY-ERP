@@ -351,6 +351,26 @@ export default function HaccpPortalPage() {
                                 </CardContent>
                             </Card>
                         </Link>
+
+                        {/* ▼ 追加：来場者記録 ▼ */}
+                        <Link href="/visitor-logs" className="block group">
+                            <Card className="h-full border-2 border-slate-200 hover:border-indigo-400 hover:bg-indigo-50/30 transition-all shadow-sm group-hover:shadow-md cursor-pointer">
+                                <CardHeader className="pb-2">
+                                    <div className="flex justify-between items-start">
+                                        <div className="bg-indigo-100 p-2.5 rounded-lg text-indigo-700 group-hover:scale-110 transition-transform">
+                                            {/* Lucide の Users アイコンを使用 */}
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-users"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
+                                        </div>
+                                        <Badge className="bg-slate-100 text-slate-500 shadow-none border-none text-[10px]">YO-42</Badge>
+                                    </div>
+                                    <CardTitle className="text-xl font-bold text-slate-800 mt-4">来場者記録</CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                    <p className="text-sm text-slate-600 leading-relaxed mb-4">施設への来場者の入場・退場時間、健康状態（熱・吐き気等）、身だしなみのチェック結果を記録します。</p>
+                                    <div className="text-xs font-bold text-indigo-600 flex items-center justify-end">記録する / PDF出力 <ArrowRight className="w-4 h-4 ml-1 transition-transform group-hover:translate-x-1" /></div>
+                                </CardContent>
+                            </Card>
+                        </Link>
                     </div>
                 </TabsContent>
 
