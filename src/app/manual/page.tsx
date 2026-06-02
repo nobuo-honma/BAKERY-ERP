@@ -36,6 +36,7 @@ const TECH_TOC = [
   { num: "02", label: "Lot 番号の自動生成ルール" },
   { num: "03", label: "ケース・ピース混在管理" },
   { num: "04", label: "監査ログのトリガー機構" },
+  { num: "05", label: "データベース・スキーマ定義" },
 ];
 
 // ─────────────────────────────────────────────
@@ -254,18 +255,40 @@ export default function ManualPage() {
   const [mobileTocOpen, setMobileTocOpen] = useState(false);
   const [techTocOpen, setTechTocOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [activeSection, setActiveSection] = useState("intro");
 
-  useEffect(() => setMounted(true), []);
+  useEffect(() => {
+    setMounted(true);
+    if (typeof window === "undefined") return;
+
+    const handleScroll = () => {
+      const tocItems = tab === "user" ? USER_TOC : [];
+      for (const item of [...tocItems].reverse()) {
+        const el = document.getElementById(item.id);
+        if (el) {
+          const rect = el.getBoundingClientRect();
+          if (rect.top <= 120) {
+            setActiveSection(item.id);
+            break;
+          }
+        }
+      }
+    };
+
+    window.addEventListener("scroll", handleScroll);
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, [tab]);
 
   const scrollTo = (id: string) => {
     const el = document.getElementById(id);
-    if (el) window.scrollTo({ top: el.getBoundingClientRect().top - 80, behavior: "smooth" });
+    if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 80, behavior: "smooth" });
     setMobileTocOpen(false);
+    setActiveSection(id);
   };
 
   const scrollToTech = (num: string) => {
     const el = document.getElementById(`tech-${num}`);
-    if (el) window.scrollTo({ top: el.getBoundingClientRect().top - 80, behavior: "smooth" });
+    if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 80, behavior: "smooth" });
     setTechTocOpen(false);
   };
 
@@ -336,10 +359,10 @@ export default function ManualPage() {
               {/* PC サイドバー (目次) */}
               <aside className="hidden md:block w-72 shrink-0 border-r border-slate-100 bg-slate-50/50 print-hidden">
                 <div className="sticky top-20 max-h-[calc(100vh-6rem)] overflow-y-auto p-4 custom-scrollbar">
-                  <div className="text-xs font-black text-slate-400 tracking-widest uppercase mb-4 ml-2">Table of Contents</div>
+                  <div className="text-xs font-black text-slate-444 tracking-widest uppercase mb-4 ml-2">Table of Contents</div>
                   <nav className="space-y-1">
                     {USER_TOC.map((item) => (
-                      <TocRow key={item.id} label={item.title} onClick={() => scrollTo(item.id)} />
+                      <TocRow key={item.id} label={item.title} isActive={activeSection === item.id} onClick={() => scrollTo(item.id)} />
                     ))}
                   </nav>
                 </div>
@@ -358,7 +381,7 @@ export default function ManualPage() {
                   <nav className="px-4 pb-4 bg-white border-t border-slate-100 shadow-inner max-h-[60vh] overflow-y-auto">
                     {USER_TOC.map((item) => (
                       <button key={item.id} onClick={() => scrollTo(item.id)}
-                        className="block w-full text-left py-3 text-sm font-bold text-slate-600 hover:text-blue-600 border-b border-slate-50 last:border-0">
+                        className={`block w-full text-left py-3 text-sm font-bold border-b border-slate-50 last:border-0 ${activeSection === item.id ? "text-blue-600 font-black" : "text-slate-600 hover:text-blue-600"}`}>
                         {item.title}
                       </button>
                     ))}
@@ -792,10 +815,10 @@ export default function ManualPage() {
             <div className="flex flex-col md:flex-row relative">
               <aside className="hidden md:block w-72 shrink-0 border-r border-slate-100 bg-slate-50/50 print-hidden">
                 <div className="sticky top-20 max-h-[calc(100vh-6rem)] overflow-y-auto p-4 custom-scrollbar">
-                  <div className="text-xs font-black text-slate-400 tracking-widest uppercase mb-4 ml-2">Tech Specs</div>
+                  <div className="text-xs font-black text-slate-444 tracking-widest uppercase mb-4 ml-2">Tech Specs</div>
                   <nav className="space-y-1">
                     {TECH_TOC.map((row) => (
-                      <TocRow key={row.num} label={`${row.num}. ${row.label}`} onClick={() => scrollToTech(`tech-${row.num}`)} />
+                      <TocRow key={row.num} label={`${row.num}. ${row.label}`} onClick={() => scrollToTech(row.num)} />
                     ))}
                   </nav>
                 </div>
@@ -888,6 +911,45 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;`}
+                      </code>
+                    </pre>
+                  </div>
+                </section>
+
+                <section id="tech-05" className="scroll-mt-24">
+                  <SectionHead icon={Settings}>05. データベース・スキーマ定義</SectionHead>
+                  <p className="text-sm text-slate-600 mb-4">
+                    データ整合性を担保するため、外部キー制約（`REFERENCES`）およびオンデリート・カスケード / レストリクトを適切に設定しています。
+                  </p>
+                  <div className="bg-slate-900 rounded-xl p-5 overflow-x-auto shadow-inner">
+                    <pre className="text-blue-400 font-mono text-[11px] leading-relaxed">
+                      <code>
+                        {`-- 製品マスタ
+CREATE TABLE m_products (
+    id VARCHAR(50) PRIMARY KEY,
+    name VARCHAR(250) NOT NULL,
+    unit_per_cs INT NOT NULL DEFAULT 24, -- 1ケースあたりのピース数
+    safety_stock INT NOT NULL DEFAULT 0
+);
+
+-- 製品在庫状況テーブル (Lot単位管理)
+CREATE TABLE product_stocks (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    product_id VARCHAR(50) REFERENCES m_products(id),
+    lot_number VARCHAR(100) NOT NULL UNIQUE,
+    expiration_date DATE NOT NULL,
+    total_pieces INT NOT NULL DEFAULT 0 CHECK (total_pieces >= 0),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 原材料・資材在庫テーブル
+CREATE TABLE item_stocks (
+    id VARCHAR(50) PRIMARY KEY,
+    name VARCHAR(250) NOT NULL,
+    stock_qty NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+    unit VARCHAR(20) NOT NULL,
+    safety_stock NUMERIC(10, 2) NOT NULL DEFAULT 0.00
+);`}
                       </code>
                     </pre>
                   </div>
