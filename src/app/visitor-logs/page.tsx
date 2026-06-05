@@ -6,10 +6,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Save, Loader2, Printer, ArrowLeft, Lock, Users, Trash2, Edit2, Plus } from "lucide-react";
+import { Save, Loader2, CalendarDays, Printer, ArrowLeft, Lock, Users, Trash2, Edit2, Plus } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import HaccpPrintHeader from "@/components/HaccpPrintHeader";
 
 type VisitorLog = {
     id: string;
@@ -46,7 +48,7 @@ export default function VisitorLogsPage() {
     // 入力・編集用
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [formData, setFormData] = useState<Partial<VisitorLog>>(DEFAULT_STATE);
-    const [isSaving, setIsSaving] = useState(false); // ★修正: isProcessing の代わりに isSaving を使用する
+    const [isSaving, setIsSaving] = useState(false);
 
     useEffect(() => {
         if (viewMode === 'list' || viewMode === 'monthly' || viewMode === 'print') {
@@ -124,7 +126,6 @@ export default function VisitorLogsPage() {
         const y = calendarMonth.getFullYear();
 
         // 印刷用データの整形 (20行分の枠を用意)
-        // ★修正: PrintRow 型を使用して TypeScript のエラーを回避
         const printRows: PrintRow[] = [...monthlyLogs];
         while (printRows.length < 21) {
             printRows.push({ id: `empty-${printRows.length}`, isEmpty: true });
@@ -145,7 +146,7 @@ export default function VisitorLogsPage() {
                 `}} />
 
                 <div className="w-[297mm] print:w-full flex justify-between mb-4 print-hide">
-                    <Button variant="outline" onClick={() => setViewMode('list')} className="bg-white text-slate-700 font-bold border-slate-300">
+                    <Button variant="outline" onClick={() => setViewMode('monthly')} className="bg-white text-slate-700 font-bold border-slate-300">
                         <ArrowLeft className="h-4 w-4 mr-2" /> 戻る
                     </Button>
                     <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-md border shadow-sm">
@@ -217,7 +218,6 @@ export default function VisitorLogsPage() {
                             </thead>
                             <tbody>
                                 {printRows.slice(0, 21).map((row, idx) => {
-                                    // ★修正: 型ガードで空行かどうかを判定する
                                     if ('isEmpty' in row && row.isEmpty) {
                                         return (
                                             <tr key={idx} className="h-[6.5mm]">
@@ -356,9 +356,15 @@ export default function VisitorLogsPage() {
             </Card>
 
             <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-                <DialogContent className="max-w-2xl bg-white p-6 rounded-xl">
-                    <DialogHeader><DialogTitle className="flex items-center gap-2 text-indigo-800"><Users className="h-5 w-5" /> 来場者記録の入力</DialogTitle></DialogHeader>
-                    <div className="space-y-4 mt-2">
+                <DialogContent className="max-w-2xl bg-white p-0 rounded-xl overflow-hidden flex flex-col h-[90vh] md:h-auto md:max-h-[85vh]">
+                    <DialogHeader className="p-6 border-b bg-slate-50 shrink-0">
+                        <DialogTitle className="flex items-center gap-2 text-indigo-800">
+                            <Users className="h-5 w-5" /> 来場者記録の入力
+                        </DialogTitle>
+                    </DialogHeader>
+
+                    {/* ★修正: 中身のコンテンツ領域に overflow-y-auto と十分な padding を設定し、スマホでスクロールできるようにする */}
+                    <div className="p-6 space-y-5 overflow-y-auto flex-1 custom-scrollbar">
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                             <div className="md:col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">来場日 <span className="text-red-500">*</span></label><Input type="date" value={formData.visit_date} onChange={e => setFormData({ ...formData, visit_date: e.target.value })} className="h-10" /></div>
                             <div><label className="block text-xs font-bold text-slate-500 mb-1">入場時間</label><Input type="time" value={formData.entry_time} onChange={e => setFormData({ ...formData, entry_time: e.target.value })} className="h-10" /></div>
@@ -367,42 +373,42 @@ export default function VisitorLogsPage() {
 
                         <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
                             <div className="md:col-span-6"><label className="block text-xs font-bold text-slate-500 mb-1">来場者名 (会社名など) <span className="text-red-500">*</span></label><Input value={formData.visitor_name} onChange={e => setFormData({ ...formData, visitor_name: e.target.value })} className="h-10 font-bold" placeholder="例: 商工会婦人部" /></div>
-                            <div className="md:col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">人数</label><Input type="number" min="1" value={formData.headcount} onChange={e => setFormData({ ...formData, headcount: e.target.value === "" ? "" : Number(e.target.value) })} className="h-10 text-right" /></div>
+                            <div className="col-span-1 md:col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">人数</label><Input type="number" min="1" value={formData.headcount} onChange={e => setFormData({ ...formData, headcount: e.target.value === "" ? "" : Number(e.target.value) })} className="h-10 text-right" /></div>
                             <div className="md:col-span-4"><label className="block text-xs font-bold text-slate-500 mb-1">随行者</label><Input value={formData.attendant_name} onChange={e => setFormData({ ...formData, attendant_name: e.target.value })} className="h-10" placeholder="例: 梅村施設長" /></div>
                         </div>
 
                         <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
                             <h3 className="text-sm font-bold text-slate-700 mb-3 border-b pb-1">健康チェック</h3>
-                            <div className="grid grid-cols-3 gap-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                                 <div><label className="block text-xs font-bold text-slate-500 mb-1">熱</label>
-                                    <div className="flex bg-white rounded border p-0.5"><button onClick={() => setFormData({ ...formData, fever: '有' })} className={`flex-1 text-xs py-1.5 font-bold rounded-sm ${formData.fever === '有' ? 'bg-red-500 text-white' : 'text-slate-500'}`}>有</button><button onClick={() => setFormData({ ...formData, fever: '無' })} className={`flex-1 text-xs py-1.5 font-bold rounded-sm ${formData.fever === '無' ? 'bg-blue-500 text-white' : 'text-slate-500'}`}>無</button></div>
+                                    <div className="flex bg-white rounded border p-0.5"><button onClick={() => setFormData({ ...formData, fever: '有' })} className={`flex-1 text-sm md:text-xs py-2 md:py-1.5 font-bold rounded-sm ${formData.fever === '有' ? 'bg-red-500 text-white' : 'text-slate-500'}`}>有</button><button onClick={() => setFormData({ ...formData, fever: '無' })} className={`flex-1 text-sm md:text-xs py-2 md:py-1.5 font-bold rounded-sm ${formData.fever === '無' ? 'bg-blue-500 text-white' : 'text-slate-500'}`}>無</button></div>
                                 </div>
                                 <div><label className="block text-xs font-bold text-slate-500 mb-1">吐き気</label>
-                                    <div className="flex bg-white rounded border p-0.5"><button onClick={() => setFormData({ ...formData, nausea: '有' })} className={`flex-1 text-xs py-1.5 font-bold rounded-sm ${formData.nausea === '有' ? 'bg-red-500 text-white' : 'text-slate-500'}`}>有</button><button onClick={() => setFormData({ ...formData, nausea: '無' })} className={`flex-1 text-xs py-1.5 font-bold rounded-sm ${formData.nausea === '無' ? 'bg-blue-500 text-white' : 'text-slate-500'}`}>無</button></div>
+                                    <div className="flex bg-white rounded border p-0.5"><button onClick={() => setFormData({ ...formData, nausea: '有' })} className={`flex-1 text-sm md:text-xs py-2 md:py-1.5 font-bold rounded-sm ${formData.nausea === '有' ? 'bg-red-500 text-white' : 'text-slate-500'}`}>有</button><button onClick={() => setFormData({ ...formData, nausea: '無' })} className={`flex-1 text-sm md:text-xs py-2 md:py-1.5 font-bold rounded-sm ${formData.nausea === '無' ? 'bg-blue-500 text-white' : 'text-slate-500'}`}>無</button></div>
                                 </div>
                                 <div><label className="block text-xs font-bold text-slate-500 mb-1">下痢</label>
-                                    <div className="flex bg-white rounded border p-0.5"><button onClick={() => setFormData({ ...formData, diarrhea: '有' })} className={`flex-1 text-xs py-1.5 font-bold rounded-sm ${formData.diarrhea === '有' ? 'bg-red-500 text-white' : 'text-slate-500'}`}>有</button><button onClick={() => setFormData({ ...formData, diarrhea: '無' })} className={`flex-1 text-xs py-1.5 font-bold rounded-sm ${formData.diarrhea === '無' ? 'bg-blue-500 text-white' : 'text-slate-500'}`}>無</button></div>
+                                    <div className="flex bg-white rounded border p-0.5"><button onClick={() => setFormData({ ...formData, diarrhea: '有' })} className={`flex-1 text-sm md:text-xs py-2 md:py-1.5 font-bold rounded-sm ${formData.diarrhea === '有' ? 'bg-red-500 text-white' : 'text-slate-500'}`}>有</button><button onClick={() => setFormData({ ...formData, diarrhea: '無' })} className={`flex-1 text-sm md:text-xs py-2 md:py-1.5 font-bold rounded-sm ${formData.diarrhea === '無' ? 'bg-blue-500 text-white' : 'text-slate-500'}`}>無</button></div>
                                 </div>
                             </div>
                         </div>
 
                         <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
                             <h3 className="text-sm font-bold text-slate-700 mb-3 border-b pb-1">身だしなみ</h3>
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div><label className="block text-xs font-bold text-slate-500 mb-1">爪</label>
-                                    <div className="flex bg-white rounded border p-0.5"><button onClick={() => setFormData({ ...formData, nails_checked: '良' })} className={`flex-1 text-xs py-1.5 font-bold rounded-sm ${formData.nails_checked === '良' ? 'bg-blue-500 text-white' : 'text-slate-500'}`}>良</button><button onClick={() => setFormData({ ...formData, nails_checked: '不良' })} className={`flex-1 text-xs py-1.5 font-bold rounded-sm ${formData.nails_checked === '不良' ? 'bg-red-500 text-white' : 'text-slate-500'}`}>不良</button></div>
+                                    <div className="flex bg-white rounded border p-0.5"><button onClick={() => setFormData({ ...formData, nails_checked: '良' })} className={`flex-1 text-sm md:text-xs py-2 md:py-1.5 font-bold rounded-sm ${formData.nails_checked === '良' ? 'bg-blue-500 text-white' : 'text-slate-500'}`}>良</button><button onClick={() => setFormData({ ...formData, nails_checked: '不良' })} className={`flex-1 text-sm md:text-xs py-2 md:py-1.5 font-bold rounded-sm ${formData.nails_checked === '不良' ? 'bg-red-500 text-white' : 'text-slate-500'}`}>不良</button></div>
                                 </div>
-                                <div><label className="block text-xs font-bold text-slate-500 mb-1">装飾品</label><Input value={formData.accessories || ""} onChange={e => setFormData({ ...formData, accessories: e.target.value })} className="h-9 bg-white" placeholder="例: 腕時計、無し" /></div>
+                                <div><label className="block text-xs font-bold text-slate-500 mb-1">装飾品</label><Input value={formData.accessories || ""} onChange={e => setFormData({ ...formData, accessories: e.target.value })} className="h-11 md:h-9 bg-white" placeholder="例: 腕時計、無し" /></div>
                             </div>
                         </div>
 
-                        <div><label className="block text-xs font-bold text-slate-500 mb-1">備考</label><Input value={formData.notes || ""} onChange={e => setFormData({ ...formData, notes: e.target.value })} className="h-10" placeholder="特記事項..." /></div>
+                        <div><label className="block text-xs font-bold text-slate-500 mb-1">備考</label><Input value={formData.notes || ""} onChange={e => setFormData({ ...formData, notes: e.target.value })} className="h-11 md:h-10" placeholder="特記事項..." /></div>
                     </div>
-                    <DialogFooter className="mt-4 pt-4 border-t flex gap-2">
-                        <Button variant="outline" onClick={() => setIsModalOpen(false)} className="flex-1">キャンセル</Button>
-                        {/* ★修正: isSaving を使用する */}
-                        <Button onClick={handleSave} disabled={isSaving || !formData.visit_date || !formData.visitor_name} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold">
-                            {isSaving ? <Loader2 className="animate-spin h-4 w-4 mr-2" /> : <Save className="h-4 w-4 mr-2" />} 登録して保存
+
+                    <DialogFooter className="p-4 border-t bg-slate-50 shrink-0 flex flex-row gap-2">
+                        <Button variant="outline" onClick={() => setIsModalOpen(false)} className="flex-1 h-12 md:h-10 font-bold">キャンセル</Button>
+                        <Button onClick={handleSave} disabled={isSaving || !formData.visit_date || !formData.visitor_name} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold h-12 md:h-10">
+                            {isSaving ? <Loader2 className="animate-spin h-5 w-5 md:h-4 md:w-4 mr-2" /> : <Save className="h-5 w-5 md:h-4 md:w-4 mr-2" />} 登録して保存
                         </Button>
                     </DialogFooter>
                 </DialogContent>
