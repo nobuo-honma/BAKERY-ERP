@@ -1,562 +1,867 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Save, Loader2, CalendarDays, Printer, ArrowLeft, Lock, Scale, CheckCircle2, XCircle, MinusCircle } from "lucide-react";
+import { Card } from "@/components/ui/card";
+import { Package, Wheat, Box, Boxes, ClipboardEdit, ArrowRight, Save, Loader2, AlertCircle, CheckCircle2, ListChecks, TrendingUp, TrendingDown, Filter, Lock, Printer, ArrowLeft, Plus } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-import HaccpPrintHeader from "@/components/HaccpPrintHeader";
 
-type ScaleCheck = {
-  check_date: string;
-  check_time: string;
-  status_a: 'ok' | 'ng' | null;
-  status_b: 'ok' | 'ng' | null;
-  status_c: 'ok' | 'ng' | null;
-  d1_weight: number | ""; d1_diff: number | "";
-  d2_weight: number | ""; d2_diff: number | "";
-  d3_weight: number | ""; d3_diff: number | "";
-  d4_weight: number | ""; d4_diff: number | "";
-  d5_weight: number | ""; d5_diff: number | "";
-  checker_name: string;
-  notes: string;
-};
+type ItemStock = { id: string; name: string; item_type: string; unit: string; unit_size: number; unit_price: number; safety_stock: number; current_qty: number; };
+type ProductStock = { id: string; lot_code: string; product_id: string; total_pieces: number; expiry_date: string; products: { name: string; variant_name: string; unit_per_cs: number }; };
+type AdjustmentHistory = { id: string; adjusted_at: string; items?: { name: string }; products?: { name: string }; lot_code?: string; before_qty: number; after_qty: number; diff: number; reason: string; };
 
-const DEFAULT_STATE: ScaleCheck = {
-  check_date: "", check_time: "",
-  status_a: null, status_b: null, status_c: null,
-  d1_weight: "", d1_diff: "", d2_weight: "", d2_diff: "",
-  d3_weight: "", d3_diff: "", d4_weight: "", d4_diff: "",
-  d5_weight: "", d5_diff: "",
-  checker_name: "", notes: ""
-};
-
-// --- 数値を小数点第1位までフォーマットする関数 ---
-const formatDecimal = (val: number | string | null | undefined): string => {
-  if (val === "" || val === null || val === undefined) return "";
-  const num = Number(val);
-  if (isNaN(num)) return "";
-  return num.toFixed(1);
-};
-
-export default function ScaleChecksPage() {
+export default function InventoryPage() {
   const { canEdit } = useAuth();
-  const [loading, setLoading] = useState(false);
-  const [viewMode, setViewMode] = useState<'input' | 'monthly' | 'print'>('input');
 
-  const [checkDate, setCheckDate] = useState("");
-  const [formData, setFormData] = useState<ScaleCheck>(DEFAULT_STATE);
-  const [isSaving, setIsSaving] = useState(false);
+  // viewMode を拡張して、予測類の印刷モードを追加
+  const [viewMode, setViewMode] = useState<'list' | 'print' | 'print_forecast' | 'print_usage'>('list');
 
-  const [calendarMonth, setCalendarMonth] = useState(new Date());
-  const [monthlyData, setMonthlyData] = useState<Record<string, ScaleCheck>>({});
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const today = new Date().toISOString().split('T')[0];
-    setCheckDate(today);
+  const [rawMaterials, setRawMaterials] = useState<ItemStock[]>([]);
+  const [materials, setMaterials] = useState<ItemStock[]>([]);
+  const [productStocks, setProductStocks] = useState<ProductStock[]>([]);
+  const [histories, setHistories] = useState<AdjustmentHistory[]>([]);
+
+  // 予測(MRP)用
+  const [boms, setBoms] = useState<any[]>([]);
+  const [pendingPlans, setPendingPlans] = useState<any[]>([]);
+  const [pendingArrivals, setPendingArrivals] = useState<any[]>([]);
+  const [forecastFilter, setForecastFilter] = useState<'all' | 'raw_material' | 'material'>('all');
+
+  // 棚卸(調整)用
+  const [adjustmentModal, setAdjustmentModal] = useState<{ isOpen: boolean; type: 'item' | 'product'; targetId: string; targetName: string; currentQty: number; unit: string; lotCode?: string; productId?: string }>({ isOpen: false, type: 'item', targetId: '', targetName: '', currentQty: 0, unit: '' });
+  const [actualQty, setActualQty] = useState<number | "">("");
+  const [adjReason, setAdjReason] = useState("定例棚卸");
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  // 一括棚卸用
+  const [isBatchMode, setIsBatchMode] = useState(false);
+  const [batchInputs, setBatchInputs] = useState<Record<string, number | "">>({});
+  const [batchReason, setBatchReason] = useState("月末一斉棚卸");
+
+  // 新規Lot登録用
+  const [newStockModalOpen, setNewStockModalOpen] = useState(false);
+  const [productsList, setProductsList] = useState<{ id: string, name: string, variant: string, unit: number }[]>([]);
+  const [newStockData, setNewStockData] = useState({ lotCode: "", productId: "", expiryDate: "", cs: 0, p: 0 });
+
+  const fetchInventory = useCallback(async () => {
+    setLoading(true);
+    const { data: itemsData } = await supabase.from("items").select(`*, item_stocks ( quantity )`).order('id');
+    const { data: pStocksData } = await supabase.from("product_stocks").select(`*, products ( name, variant_name, unit_per_cs )`).order("expiry_date", { ascending: true });
+    const { data: histData } = await supabase.from("inventory_adjustments").select(`*, items(name), products(name)`).order("adjusted_at", { ascending: false }).limit(50);
+
+    const { data: bData } = await supabase.from("bom").select("*");
+    const { data: plData } = await supabase.from("production_plans").select("*").eq("status", "planned");
+    const { data: aData } = await supabase.from("arrivals").select("*").eq("status", "pending");
+
+    const { data: prData } = await supabase.from("products").select("id, name, variant_name, unit_per_cs");
+
+    if (itemsData) {
+      const formattedItems = itemsData.map((item: any) => {
+        const qty = Array.isArray(item.item_stocks) ? (item.item_stocks[0]?.quantity || 0) : (item.item_stocks?.quantity || 0);
+        return {
+          id: item.id, name: item.name, item_type: item.item_type, unit: item.unit,
+          unit_size: item.unit_size || 1, unit_price: item.unit_price || 0,
+          safety_stock: item.safety_stock, current_qty: qty
+        };
+      });
+      setRawMaterials(formattedItems.filter(i => i.item_type === 'raw_material'));
+      setMaterials(formattedItems.filter(i => i.item_type === 'material'));
+    }
+    if (pStocksData) setProductStocks(pStocksData as any[]);
+    if (histData) setHistories(histData as any[]);
+    if (bData) setBoms(bData);
+    if (plData) setPendingPlans(plData);
+    if (aData) setPendingArrivals(aData);
+    if (prData) setProductsList(prData.map(p => ({ id: p.id, name: p.name, variant: p.variant_name, unit: p.unit_per_cs })));
+
+    setLoading(false);
   }, []);
 
-  useEffect(() => {
-    if (checkDate && viewMode === 'input') fetchDailyData(checkDate);
-  }, [checkDate, viewMode]);
+  useEffect(() => { fetchInventory(); }, [fetchInventory]);
 
-  useEffect(() => {
-    if (viewMode === 'monthly' || viewMode === 'print') fetchMonthlyData(calendarMonth);
-  }, [calendarMonth, viewMode]);
+  const getStockStatus = (current: number, safety: number) => {
+    if (safety === 0) return { label: "設定なし", color: "bg-slate-100 text-slate-600 border-none", icon: null };
+    if (current < safety) return { label: "不足(発注!)", color: "bg-red-500 text-white border-none", icon: <AlertCircle className="w-3 h-3 mr-1" /> };
+    if (current < safety * 1.5) return { label: "注意", color: "bg-amber-400 text-white border-none", icon: <AlertCircle className="w-3 h-3 mr-1" /> };
+    return { label: "充足", color: "bg-green-100 text-green-800 border-none", icon: <CheckCircle2 className="w-3 h-3 mr-1" /> };
+  };
 
-  const fetchDailyData = async (dateStr: string) => {
-    setLoading(true);
-    const { data } = await supabase.from('scale_checks').select('*').eq('check_date', dateStr).maybeSingle();
-    if (data) {
-      setFormData({
-        check_date: data.check_date, check_time: data.check_time || "",
-        status_a: data.status_a, status_b: data.status_b, status_c: data.status_c,
-        d1_weight: data.d1_weight ?? "", d1_diff: data.d1_diff ?? "",
-        d2_weight: data.d2_weight ?? "", d2_diff: data.d2_diff ?? "",
-        d3_weight: data.d3_weight ?? "", d3_diff: data.d3_diff ?? "",
-        d4_weight: data.d4_weight ?? "", d4_diff: data.d4_diff ?? "",
-        d5_weight: data.d5_weight ?? "", d5_diff: data.d5_diff ?? "",
-        checker_name: data.checker_name || "", notes: data.notes || ""
-      });
+  const handleAdjustmentSubmit = async () => {
+    if (actualQty === "" || Number(actualQty) < 0) return;
+    setIsProcessing(true);
+    const { type, targetId, currentQty, lotCode, productId } = adjustmentModal;
+
+    try {
+      if (type === 'item') {
+        await supabase.from("item_stocks").upsert({ item_id: targetId, quantity: Number(actualQty) }, { onConflict: 'item_id' });
+        await supabase.from("inventory_adjustments").insert({ item_id: targetId, before_qty: currentQty, after_qty: Number(actualQty), reason: adjReason });
+      } else {
+        if (Number(actualQty) <= 0) {
+          await supabase.from("product_stocks").delete().eq("id", targetId);
+        } else {
+          await supabase.from("product_stocks").update({ total_pieces: Number(actualQty) }).eq("id", targetId);
+        }
+        await supabase.from("inventory_adjustments").insert({ product_id: productId, lot_code: lotCode, before_qty: currentQty, after_qty: Number(actualQty), reason: adjReason });
+      }
+      setAdjustmentModal({ ...adjustmentModal, isOpen: false }); setActualQty(""); setAdjReason("定例棚卸"); fetchInventory();
+    } catch (e) { alert("エラーが発生しました"); }
+    setIsProcessing(false);
+  };
+
+  const toggleBatchMode = () => {
+    if (isBatchMode) {
+      setIsBatchMode(false); setBatchInputs({});
     } else {
-      setFormData({ ...DEFAULT_STATE, check_date: dateStr });
+      const newInputs: Record<string, number> = {};
+      rawMaterials.forEach(i => newInputs[i.id] = i.current_qty);
+      materials.forEach(i => newInputs[i.id] = i.current_qty);
+      productStocks.forEach(p => newInputs[p.id] = p.total_pieces);
+      setBatchInputs(newInputs); setIsBatchMode(true);
     }
-    setLoading(false);
   };
 
-  const fetchMonthlyData = async (dateObj: Date) => {
-    setLoading(true);
-    const y = dateObj.getFullYear(); const m = String(dateObj.getMonth() + 1).padStart(2, '0');
-    const startDate = `${y}-${m}-01`;
-    const endDate = new Date(y, dateObj.getMonth() + 1, 0).toISOString().split('T')[0];
+  const handleBatchSubmit = async () => {
+    setIsProcessing(true);
+    try {
+      const itemUpdates = []; const productUpdates = []; const productDeletes = []; const historyInserts = [];
 
-    const { data } = await supabase.from('scale_checks').select('*').gte('check_date', startDate).lte('check_date', endDate);
-    if (data) {
-      const dataMap: Record<string, ScaleCheck> = {};
-      data.forEach(row => { dataMap[row.check_date] = row; });
-      setMonthlyData(dataMap);
+      for (const item of [...rawMaterials, ...materials]) {
+        const newVal = batchInputs[item.id];
+        if (newVal !== undefined && newVal !== "" && Number(newVal) !== item.current_qty) {
+          itemUpdates.push({ item_id: item.id, quantity: Number(newVal) });
+          historyInserts.push({ item_id: item.id, before_qty: item.current_qty, after_qty: Number(newVal), reason: batchReason });
+        }
+      }
+
+      for (const stock of productStocks) {
+        const newVal = batchInputs[stock.id];
+        if (newVal !== undefined && newVal !== "" && Number(newVal) !== stock.total_pieces) {
+          if (Number(newVal) <= 0) {
+            productDeletes.push(stock.id);
+          } else {
+            productUpdates.push({ id: stock.id, total_pieces: Number(newVal) });
+          }
+          historyInserts.push({ product_id: stock.product_id, lot_code: stock.lot_code, before_qty: stock.total_pieces, after_qty: Number(newVal), reason: batchReason });
+        }
+      }
+
+      if (itemUpdates.length === 0 && productUpdates.length === 0 && productDeletes.length === 0) {
+        alert("変更された在庫はありません。"); setIsProcessing(false); return;
+      }
+
+      if (!confirm(`合計 ${itemUpdates.length + productUpdates.length + productDeletes.length} 件の在庫を一括で上書き更新しますか？\n(理由は「${batchReason}」として記録されます)`)) {
+        setIsProcessing(false); return;
+      }
+
+      if (itemUpdates.length > 0) await supabase.from('item_stocks').upsert(itemUpdates, { onConflict: 'item_id' });
+      if (productUpdates.length > 0) await supabase.from('product_stocks').upsert(productUpdates, { onConflict: 'id' });
+      if (productDeletes.length > 0) await supabase.from('product_stocks').delete().in('id', productDeletes);
+      if (historyInserts.length > 0) await supabase.from('inventory_adjustments').insert(historyInserts);
+
+      alert(`一括棚卸を完了しました！\n（${itemUpdates.length + productUpdates.length + productDeletes.length} 件の在庫を更新しました）`);
+      setIsBatchMode(false); setBatchInputs({}); fetchInventory();
+    } catch (err: any) { alert("エラー: " + err.message); }
+    setIsProcessing(false);
+  };
+
+  const handleAddNewStock = async () => {
+    if (!newStockData.lotCode || !newStockData.productId || !newStockData.expiryDate) {
+      alert("必須項目を入力してください。"); return;
     }
-    setLoading(false);
+    if (newStockData.cs === 0 && newStockData.p === 0) {
+      alert("在庫数を入力してください。"); return;
+    }
+
+    setIsProcessing(true);
+    try {
+      const selectedProduct = productsList.find(p => p.id === newStockData.productId);
+      const unitPerCs = selectedProduct?.unit || 24;
+      const totalPieces = (newStockData.cs * unitPerCs) + (newStockData.p * 2);
+
+      const { data: existingStock } = await supabase.from('product_stocks').select('id, total_pieces').eq('lot_code', newStockData.lotCode).maybeSingle();
+
+      if (existingStock) {
+        const existingCs = Math.floor(existingStock.total_pieces / unitPerCs);
+        if (!confirm(`Lot番号「${newStockData.lotCode}」は既に存在します。\n現在の在庫(${existingCs}c/s)に、入力した数を追加加算しますか？`)) {
+          setIsProcessing(false); return;
+        }
+        await supabase.from('product_stocks').update({ total_pieces: existingStock.total_pieces + totalPieces }).eq('id', existingStock.id);
+        await supabase.from('inventory_adjustments').insert({ product_id: newStockData.productId, lot_code: newStockData.lotCode, before_qty: existingStock.total_pieces, after_qty: existingStock.total_pieces + totalPieces, reason: `既存Lotへの追加登録` });
+      } else {
+        await supabase.from('product_stocks').insert({ lot_code: newStockData.lotCode, product_id: newStockData.productId, total_pieces: totalPieces, expiry_date: newStockData.expiryDate });
+        await supabase.from('inventory_adjustments').insert({ product_id: newStockData.productId, lot_code: newStockData.lotCode, before_qty: 0, after_qty: totalPieces, reason: `システム導入前在庫の新規登録` });
+      }
+
+      alert("在庫の追加登録が完了しました！");
+      setNewStockModalOpen(false);
+      setNewStockData({ lotCode: "", productId: "", expiryDate: "", cs: 0, p: 0 });
+      fetchInventory();
+    } catch (err: any) {
+      alert("エラーが発生しました: " + err.message);
+    }
+    setIsProcessing(false);
   };
 
-  const handleUpdate = (field: keyof ScaleCheck, value: any) => {
-    if (!canEdit) return;
-    setFormData(prev => ({ ...prev, [field]: value }));
-  };
+  // ==========================================
+  // MRP 計算ロジック
+  // ==========================================
+  const forecastResult = useMemo(() => {
+    // 30日分の日付配列を作成
+    const dates = Array.from({ length: 30 }, (_, i) => { const d = new Date(); d.setDate(d.getDate() + i); return d.toISOString().split('T')[0]; });
+    const todayStr = dates[0];
+    const fData: Record<string, any> = {};
 
-  const toggleStatus = (field: keyof ScaleCheck) => {
-    if (!canEdit) return;
-    setFormData(prev => {
-      const current = prev[field];
-      let next: any = 'ok';
-      if (current === 'ok') next = 'ng';
-      else if (current === 'ng') next = null;
-      return { ...prev, [field]: next };
+    [...rawMaterials, ...materials].forEach(item => {
+      fData[item.id] = { item, days: {} };
+      dates.forEach(date => { fData[item.id].days[date] = { date, inQty: 0, outQty: 0, endQty: 0 }; });
     });
-  };
 
-  const handleSaveDaily = async () => {
-    if (!checkDate) return;
-    setIsSaving(true);
-    const payload = {
-      check_date: checkDate,
-      check_time: formData.check_time || null,
-      status_a: formData.status_a,
-      status_b: formData.status_b,
-      status_c: formData.status_c,
-      d1_weight: formData.d1_weight === "" ? null : formData.d1_weight, d1_diff: formData.d1_diff === "" ? null : formData.d1_diff,
-      d2_weight: formData.d2_weight === "" ? null : formData.d2_weight, d2_diff: formData.d2_diff === "" ? null : formData.d2_diff,
-      d3_weight: formData.d3_weight === "" ? null : formData.d3_weight, d3_diff: formData.d3_diff === "" ? null : formData.d3_diff,
-      d4_weight: formData.d4_weight === "" ? null : formData.d4_weight, d4_diff: formData.d4_diff === "" ? null : formData.d4_diff,
-      d5_weight: formData.d5_weight === "" ? null : formData.d5_weight, d5_diff: formData.d5_diff === "" ? null : formData.d5_diff,
-      checker_name: formData.checker_name,
-      notes: formData.notes,
-      updated_at: new Date().toISOString()
-    };
-    const { error } = await supabase.from('scale_checks').upsert(payload, { onConflict: 'check_date' });
-    setIsSaving(false);
-    if (error) alert("保存に失敗しました: " + error.message);
-    else alert("電子はかり点検記録を保存しました！");
-  };
+    // 入荷予定の加算
+    pendingArrivals.forEach(arr => {
+      const itemF = fData[arr.item_id];
+      if (itemF) {
+        let targetDate = arr.expected_date < todayStr ? todayStr : arr.expected_date;
+        if (itemF.days[targetDate]) itemF.days[targetDate].inQty += arr.quantity;
+      }
+    });
 
-  const renderOkNg = (val: any) => {
-    if (val === 'ok') return '〇';
-    if (val === 'ng') return '×';
-    return '';
-  };
+    // 消費予定の減算
+    pendingPlans.forEach(plan => {
+      let targetDate = plan.production_date < todayStr ? todayStr : plan.production_date;
+      const productBoms = boms.filter(b => b.product_id === plan.product_id);
+      productBoms.forEach(bom => {
+        const itemF = fData[bom.item_id];
+        if (itemF && itemF.days[targetDate]) {
+          const outQty = bom.basis_type === 'production_qty' ? plan.production_kg * bom.usage_rate : plan.planned_cs * bom.usage_rate;
+          itemF.days[targetDate].outQty += outQty;
+        }
+      });
+    });
 
-  // =======================================================================
-  // 印刷（PDF帳票）ビュー - 小数点1桁フォーマットを適用
-  // =======================================================================
-  if (viewMode === 'print') {
-    const y = calendarMonth.getFullYear();
-    const m = calendarMonth.getMonth() + 1;
-    const daysInMonth = new Date(y, m, 0).getDate();
+    // 日ごとの残数計算
+    Object.values(fData).forEach((itemF: any) => {
+      let current = itemF.item.current_qty;
+      dates.forEach(date => {
+        const day = itemF.days[date];
+        current = current + day.inQty - day.outQty;
+        day.endQty = current;
+      });
+    });
 
-    const daysTop = Array.from({ length: 16 }, (_, i) => i + 1);
-    const daysBottom = Array.from({ length: 15 }, (_, i) => i + 17);
+    return { dates, fData };
+  }, [rawMaterials, materials, boms, pendingPlans, pendingArrivals]);
 
-    const renderTable = (daysArr: number[], isTop: boolean) => (
-      <table className="w-full border-collapse border-[3px] border-black text-[10px] table-fixed mb-0 bg-white">
-        <thead>
-          <tr className="h-6">
-            {isTop ? (
-              <th colSpan={2} rowSpan={2} className="border border-black font-black text-2xl w-[8%] tracking-widest bg-white pb-2 relative">
-                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
-                  計量
-                </div>
-              </th>
-            ) : (
-              <th colSpan={2} rowSpan={2} className="border border-black bg-white w-[8%]"></th>
-            )}
-            {daysArr.map(day => {
-              if (day > daysInMonth) return <th key={`header-${day}`} className="border border-black bg-white w-[5.4%]"></th>;
-              const dateObj = new Date(y, m - 1, day);
-              const dow = ["日", "月", "火", "水", "木", "金", "土"][dateObj.getDay()];
+  const filteredForecastData = useMemo(() => {
+    const allData = Object.values(forecastResult.fData) as any[];
+    // 使用予測・在庫予測のどちらでも、表示する品目をフィルター
+    if (forecastFilter === 'all') return allData;
+    return allData.filter((f) => f.item.item_type === forecastFilter);
+  }, [forecastResult.fData, forecastFilter]);
+
+
+  // ==========================================
+  // レンダー関数
+  // ==========================================
+  const renderItemTab = (itemList: ItemStock[]) => (
+    <>
+      <div className="hidden md:block bg-white border rounded-lg overflow-x-auto shadow-sm">
+        <Table className="min-w-[1000px]">
+          <TableHeader className="bg-slate-50">
+            <TableRow>
+              <TableHead className="w-24 pl-4">品目ID</TableHead>
+              <TableHead>品目名</TableHead>
+              <TableHead className="text-right w-28">現在庫 {isBatchMode && <span className="text-xs text-blue-600 ml-1">※実数入力</span>}</TableHead>
+              <TableHead className="text-center w-16">規格</TableHead>
+              <TableHead className="text-right w-24">規格数</TableHead>
+              <TableHead className="text-right w-24">単価(円)</TableHead>
+              <TableHead className="text-right w-28">在庫金額</TableHead>
+              <TableHead className="w-28 text-center">ステータス</TableHead>
+              <TableHead className="w-28 text-center pr-4">アクション</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {itemList.map((item) => {
+              const status = getStockStatus(item.current_qty, item.safety_stock);
+              const isChanged = isBatchMode && batchInputs[item.id] !== undefined && Number(batchInputs[item.id]) !== item.current_qty;
+
+              const displayQty = isBatchMode && batchInputs[item.id] !== undefined ? Number(batchInputs[item.id]) : item.current_qty;
+              const specCount = displayQty / item.unit_size;
+              const totalPrice = displayQty * item.unit_price;
+
               return (
-                <th key={`date-${day}`} className="border border-black font-bold leading-tight py-0.5">
-                  {m}月{day}日<br />({dow})
-                </th>
+                <TableRow key={item.id} className={isChanged ? "bg-amber-50/70" : "hover:bg-slate-50"}>
+                  <TableCell className="font-medium text-blue-600 pl-4">{item.id}</TableCell>
+                  <TableCell className="font-bold text-slate-800">{item.name}</TableCell>
+                  <TableCell className="text-right font-black text-xl text-slate-700">
+                    {isBatchMode ? (
+                      <div className="flex justify-end items-center gap-2">
+                        <Input type="number" inputMode="decimal" min="0" step="0.1" value={batchInputs[item.id] !== undefined ? batchInputs[item.id] : ""} onChange={e => setBatchInputs({ ...batchInputs, [item.id]: e.target.value === "" ? "" : Number(e.target.value) })} className={`w-28 text-right font-bold h-9 ${isChanged ? 'border-amber-400 bg-white ring-2 ring-amber-200' : 'border-blue-300 shadow-sm'}`} />
+                        {isChanged && <span className="text-xs text-amber-600 font-bold ml-1 w-6 block bg-amber-100 rounded px-1">変更</span>}
+                      </div>
+                    ) : item.current_qty.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+                  </TableCell>
+                  <TableCell className="text-center text-slate-500 font-bold bg-slate-50">
+                    {item.unit_size}<span className="text-[10px] font-normal ml-0.5">{item.unit}</span>
+                  </TableCell>
+                  <TableCell className="text-right font-bold text-emerald-700 bg-emerald-50/50">
+                    {specCount.toLocaleString(undefined, { maximumFractionDigits: 2 })}<span className="text-[10px] font-normal text-emerald-600 ml-0.5">規格</span>
+                  </TableCell>
+                  <TableCell className="text-right font-bold text-slate-600">
+                    ¥{item.unit_price.toLocaleString()}
+                    <div className="text-[10px] font-normal text-slate-400">/ {item.unit}</div>
+                  </TableCell>
+                  <TableCell className="text-right font-black text-blue-700 bg-blue-50/50">
+                    ¥{Math.floor(totalPrice).toLocaleString()}
+                  </TableCell>
+                  <TableCell className="text-center"><Badge className={`px-2 py-1 shadow-sm ${status.color}`}>{status.icon} {status.label}</Badge></TableCell>
+                  <TableCell className="text-center pr-4">
+                    {canEdit && <Button disabled={isBatchMode} variant="outline" size="sm" onClick={() => setAdjustmentModal({ isOpen: true, type: 'item', targetId: item.id, targetName: item.name, currentQty: item.current_qty, unit: item.unit })} className="gap-1 border-blue-200 text-blue-700 hover:bg-blue-50"><ClipboardEdit className="w-3 h-3" /> 個別棚卸</Button>}
+                  </TableCell>
+                </TableRow>
               );
             })}
-          </tr>
-          <tr className="h-4">
-            {daysArr.map(day => {
-              if (day > daysInMonth) return <th key={`time-${day}`} className="border border-black bg-white"></th>;
-              const dStr = `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-              return <th key={`time-${day}`} className="border border-black font-medium text-[9px]">：{monthlyData[dStr]?.check_time || "　"}</th>;
-            })}
-          </tr>
-        </thead>
-        <tbody>
-          <tr className="h-[22px]">
-            <th className="border border-black font-medium text-left px-1 text-xs">設置状態の<br />確認</th>
-            <th className="border border-black text-center font-medium w-[2%]">A</th>
-            {daysArr.map(d => d > daysInMonth ? <td key={`A-${d}`} className="border border-black bg-white"></td> : <td key={`A-${d}`} className="border border-black text-center font-bold text-xs">{renderOkNg(monthlyData[`${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`]?.status_a)}</td>)}
-          </tr>
-          <tr className="h-[22px]">
-            <th className="border border-black font-medium text-center"></th>
-            <th className="border border-black text-center font-medium">B</th>
-            {daysArr.map(d => d > daysInMonth ? <td key={`B-${d}`} className="border border-black bg-white"></td> : <td key={`B-${d}`} className="border border-black text-center font-bold text-xs">{renderOkNg(monthlyData[`${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`]?.status_b)}</td>)}
-          </tr>
-          <tr className="h-[22px]">
-            <th className="border border-black font-medium text-left px-1 text-xs">ゼロ点の確<br />認</th>
-            <th className="border border-black text-center font-medium">C</th>
-            {daysArr.map(d => d > daysInMonth ? <td key={`C-${d}`} className="border border-black bg-white"></td> : <td key={`C-${d}`} className="border border-black text-center font-bold text-xs">{renderOkNg(monthlyData[`${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`]?.status_c)}</td>)}
-          </tr>
+          </TableBody>
+        </Table>
+      </div>
 
-          <tr className="h-[22px]">
-            <th rowSpan={10} className="border border-black bg-white p-0 relative align-top overflow-hidden">
-              <div className="text-[10px] font-bold w-full text-left pl-1 pt-1 leading-tight tracking-wider">重量表示の<br />確認</div>
-              <div className="mt-2 text-[8px] font-bold w-full text-left pl-1">※5点測定箇<br />所</div>
-              <div className="mx-auto mt-1 w-[70px] h-[45px] border-2 border-black relative bg-white shrink-0">
-                <div className="absolute top-0 left-0 bg-white border-b-2 border-r-2 border-black text-[7px] font-bold px-1 py-0.5 z-10">デジタル表示</div>
-                <div className="absolute top-5 left-1 text-[10px] font-bold w-4 h-4 rounded-full border border-black flex items-center justify-center bg-white">1</div>
-                <div className="absolute top-5 left-1/2 -translate-x-1/2 text-[10px] font-bold w-4 h-4 rounded-full border border-black flex items-center justify-center bg-white">3</div>
-                <div className="absolute top-5 right-1 text-[10px] font-bold w-4 h-4 rounded-full border border-black flex items-center justify-center bg-white">2</div>
-                <div className="absolute bottom-1 left-1 text-[10px] font-bold w-4 h-4 rounded-full border border-black flex items-center justify-center bg-white">4</div>
-                <div className="absolute bottom-1 right-1 text-[10px] font-bold w-4 h-4 rounded-full border border-black flex items-center justify-center bg-white">5</div>
+      {/* スマホ表示 */}
+      <div className="block md:hidden space-y-3 pb-24">
+        {itemList.map((item) => {
+          const status = getStockStatus(item.current_qty, item.safety_stock);
+          const isChanged = isBatchMode && batchInputs[item.id] !== undefined && Number(batchInputs[item.id]) !== item.current_qty;
+
+          const displayQty = isBatchMode && batchInputs[item.id] !== undefined ? Number(batchInputs[item.id]) : item.current_qty;
+          const specCount = displayQty / item.unit_size;
+          const totalPrice = displayQty * item.unit_price;
+
+          return (
+            <Card key={item.id} className={`p-4 shadow-sm border-2 ${isChanged ? 'bg-amber-50 border-amber-400' : 'border-slate-200'}`}>
+              <div className="flex justify-between items-start mb-1">
+                <div className="font-bold text-lg text-slate-800 leading-tight pr-2">{item.name}</div>
+                <Badge className={`shrink-0 ${status.color} px-1.5 py-0.5 text-[10px]`}>{status.label}</Badge>
               </div>
-            </th>
-            <th className="border border-black font-bold px-1 text-xs">D①</th>
-            {daysArr.map(d => {
-              if (d > daysInMonth) return <td key={`D1-${d}`} className="border border-black bg-white"></td>;
-              const dStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-              return <td key={`D1-${d}`} className="border border-black text-center font-bold text-xs">{formatDecimal(monthlyData[dStr]?.d1_weight)}</td>;
-            })}
-          </tr>
-          <tr className="h-[22px]">
-            <th className="border border-black font-medium px-1 text-[9px]">(差)</th>
-            {daysArr.map(d => {
-              if (d > daysInMonth) return <td key={`Diff1-${d}`} className="border border-black bg-white"></td>;
-              const dStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-              return <td key={`Diff1-${d}`} className="border border-black text-center text-[10px] text-slate-600">{formatDecimal(monthlyData[dStr]?.d1_diff)}</td>;
-            })}
-          </tr>
+              <div className="text-xs text-slate-500 mb-3 flex gap-3"><span>ID: {item.id}</span><span>安全在庫: {item.safety_stock}</span></div>
 
-          {[2, 3, 4, 5].map((num) => (
-            <React.Fragment key={`group-${num}`}>
-              <tr className="h-[22px]">
-                <th className="border border-black font-bold px-1 text-xs">D{num}</th>
-                {daysArr.map(d => {
-                  if (d > daysInMonth) return <td key={`D${num}-${d}`} className="border border-black bg-white"></td>;
-                  const dStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-                  return <td key={`D${num}-${d}`} className="border border-black text-center font-bold text-xs">{formatDecimal(monthlyData[dStr]?.[`d${num}_weight` as keyof ScaleCheck])}</td>;
-                })}
-              </tr>
-              <tr className="h-[22px]">
-                <th className="border border-black font-medium px-1 text-[9px]">(差)</th>
-                {daysArr.map(d => {
-                  if (d > daysInMonth) return <td key={`Diff${num}-${d}`} className="border border-black bg-white"></td>;
-                  const dStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-                  return <td key={`Diff${num}-${d}`} className="border border-black text-center text-[10px] text-slate-600">{formatDecimal(monthlyData[dStr]?.[`d${num}_diff` as keyof ScaleCheck])}</td>;
-                })}
-              </tr>
-            </React.Fragment>
-          ))}
+              {isBatchMode ? (
+                <div className="bg-white p-3 rounded-lg border shadow-inner flex flex-col gap-2">
+                  <div className="flex justify-between items-center text-sm font-bold text-slate-600"><span>実数入力 (現在: {item.current_qty})</span>{isChanged && <span className="text-xs text-amber-700 bg-amber-100 px-2 py-0.5 rounded font-black">変更あり</span>}</div>
+                  <div className="flex items-center gap-2">
+                    <Input type="number" inputMode="decimal" min="0" step="0.1" value={batchInputs[item.id] !== undefined ? batchInputs[item.id] : ""} onChange={e => setBatchInputs({ ...batchInputs, [item.id]: e.target.value === "" ? "" : Number(e.target.value) })} className={`flex-1 text-right font-black text-2xl h-14 ${isChanged ? 'border-amber-400 bg-amber-50 focus-visible:ring-amber-500' : 'border-blue-300'}`} />
+                    <span className="font-bold text-slate-500 text-lg w-8">{item.unit}</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex justify-between items-end mt-2 pt-2 border-t">
+                  <div className="font-black text-3xl text-blue-900">{item.current_qty.toLocaleString(undefined, { maximumFractionDigits: 1 })} <span className="text-base font-normal text-slate-500">({item.unit})</span></div>
+                  {canEdit && <Button variant="outline" size="sm" onClick={() => setAdjustmentModal({ isOpen: true, type: 'item', targetId: item.id, targetName: item.name, currentQty: item.current_qty, unit: item.unit })} className="border-blue-300 text-blue-700 bg-blue-50 shadow-sm"><ClipboardEdit className="w-4 h-4 mr-1" /> 棚卸</Button>}
+                </div>
+              )}
 
-          <tr className="h-[28px]">
-            <th className="border border-black text-center font-bold text-xs" colSpan={2}>確認者</th>
-            {daysArr.map(d => {
-              if (d > daysInMonth) return <td key={`chk-${d}`} className="border border-black bg-white"></td>;
-              const checker = monthlyData[`${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`]?.checker_name;
-              return <td key={`chk-${d}`} className="border border-black text-center p-0">{checker ? <div className="text-[10px] truncate max-w-[24px] mx-auto font-bold">{checker.slice(0, 2)}</div> : ""}</td>;
-            })}
-          </tr>
-        </tbody>
-      </table>
-    );
+              <div className="flex justify-between items-start mt-3 pt-3 border-t border-slate-100">
+                <div className="text-[10px] text-slate-500 space-y-1 font-bold">
+                  <div>規格: {item.unit_size}{item.unit}</div>
+                  <div>単価: ¥{item.unit_price.toLocaleString()} / {item.unit}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-xs font-bold text-emerald-700 mb-0.5">規格数: {specCount.toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>
+                  <div className="text-sm font-black text-blue-700 bg-blue-50 px-2 py-0.5 rounded">総額: ¥{Math.floor(totalPrice).toLocaleString()}</div>
+                </div>
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+    </>
+  );
+
+  // ==========================================
+  // 実地棚卸票 PDF (在庫一覧)
+  // ==========================================
+  if (viewMode === 'print') {
+    const todayStr = new Date().toLocaleDateString('ja-JP');
+
+    const printItems = [
+      ...rawMaterials.map(i => ({ id: i.id, category: '原材料', name: i.name, qty: `${i.current_qty.toLocaleString(undefined, { maximumFractionDigits: 1 })} ${i.unit}`, rawQty: i.current_qty, expiry: undefined })),
+      ...materials.map(i => ({ id: i.id, category: '資材', name: i.name, qty: `${i.current_qty.toLocaleString()} ${i.unit}`, rawQty: i.current_qty, expiry: undefined })),
+      ...productStocks.map(p => {
+        const u = p.products.unit_per_cs || 24;
+        const cs = Math.floor(p.total_pieces / u);
+        const pc = Math.floor((p.total_pieces % u) / 2);
+        return {
+          id: p.lot_code, category: '製品 (Lot別)',
+          name: `${p.products.name} (${p.products.variant_name})`,
+          qty: `${cs} c/s${pc > 0 ? ` ${pc} p` : ''}`,
+          rawQty: p.total_pieces,
+          expiry: new Date(p.expiry_date).toLocaleDateString()
+        };
+      })
+    ];
+
+    const chunkedItems = [];
+    for (let i = 0; i < printItems.length; i += 35) {
+      chunkedItems.push(printItems.slice(i, i + 35));
+    }
 
     return (
       <div className="bg-slate-200 min-h-screen py-8 print:p-0 print:bg-white flex flex-col items-center">
-        <style dangerouslySetInnerHTML={{
-          __html: `
-                    @media print {
-                        header, nav { display: none !important; }
-                        main { padding: 0 !important; margin: 0 !important; max-width: 100% !important; background: white !important; }
-                        /* A4横 (Landscape)で余白を調整 */
-                        @page { size: A4 landscape; margin: 8mm 12mm; }
-                        body { background-color: white !important; color: black !important; }
-                        .print-hide { display: none !important; }
-                    }
-                `}} />
-
-        <div className="w-[297mm] print:w-full flex justify-between mb-4 print-hide">
-          <Button variant="outline" onClick={() => setViewMode('monthly')} className="bg-white text-slate-700 font-bold border-slate-300">
-            <ArrowLeft className="h-4 w-4 mr-2" /> 戻る
-          </Button>
-          <Button onClick={() => window.print()} className="bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-lg">
-            <Printer className="h-5 w-5 mr-2" /> 印刷する (PDF)
-          </Button>
+        <style dangerouslySetInnerHTML={{ __html: `@media print { header, nav { display: none !important; } main { padding: 0 !important; margin: 0 !important; max-width: 100% !important; background: white !important; } @page { size: A4 portrait; margin: 10mm; } body { background-color: white !important; color: black !important; } .print-hide { display: none !important; } .page-break { page-break-after: always; } }` }} />
+        <div className="w-[210mm] print:w-full flex justify-between mb-4 print-hide">
+          <Button variant="outline" onClick={() => setViewMode('list')} className="bg-white text-slate-700 font-bold border-slate-300"><ArrowLeft className="h-4 w-4 mr-2" /> 戻る</Button>
+          <Button onClick={() => window.print()} className="bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-lg"><Printer className="h-5 w-5 mr-2" /> 印刷する</Button>
         </div>
 
-        <div className="w-[297mm] h-[210mm] bg-white py-6 px-10 print:p-0 shadow-xl print:shadow-none text-black font-sans box-border flex flex-col justify-between overflow-hidden">
-
-          <div className="flex justify-between items-end mb-2 shrink-0 relative">
-            <div className="flex items-end gap-2 relative z-10 top-2">
-              <h1 className="text-3xl font-black tracking-widest leading-none">電子はかり 日常点検データシート</h1>
+        {chunkedItems.length === 0 ? (
+          <div className="w-[210mm] bg-white p-8 text-center text-slate-500 font-bold shadow-xl">データがありません</div>
+        ) : (
+          chunkedItems.map((chunk, pageIdx) => (
+            <div key={pageIdx} className={`w-[210mm] min-h-[297mm] bg-white p-10 print:p-0 shadow-xl print:shadow-none text-black font-sans box-border flex flex-col ${pageIdx < chunkedItems.length - 1 ? 'page-break mb-8 print:mb-0' : ''}`}>
+              <div className="flex justify-between items-end mb-4 border-b-2 border-black pb-2">
+                <h1 className="text-2xl font-bold tracking-widest">在庫一覧 兼 実地棚卸表</h1>
+                <div className="text-sm font-medium">作成日: {todayStr}　({pageIdx + 1} / {chunkedItems.length} ページ)</div>
+              </div>
+              <table className="w-full border-collapse border-2 border-black text-sm flex-1">
+                <thead><tr className="bg-gray-100"><th className="border border-black py-1.5 w-[15%] font-medium">ID / Lot</th><th className="border border-black py-1.5 w-[12%] font-medium">区分</th><th className="border border-black py-1.5 w-[33%] font-medium">品目名 / 製品名</th><th className="border border-black py-1.5 w-[20%] font-medium">システム在庫</th><th className="border border-black py-1.5 w-[20%] font-medium">実数記入欄</th></tr></thead>
+                <tbody>
+                  {chunk.map((item, idx) => (
+                    <tr key={idx} className="h-7 text-[13px]">
+                      <td className="border border-black px-2 text-center font-mono">{item.id}</td><td className="border border-black px-2 text-center text-xs">{item.category}</td>
+                      <td className="border border-black px-2 font-bold">{item.name}{item.expiry && <span className="text-[10px] font-normal ml-2 text-gray-500">(期限: {item.expiry})</span>}</td>
+                      <td className="border border-black px-2 text-right font-medium">{item.qty}</td><td className="border border-black px-2 bg-gray-50/50"></td>
+                    </tr>
+                  ))}
+                  {Array.from({ length: Math.max(0, 35 - chunk.length) }).map((_, idx) => (
+                    <tr key={`empty-${idx}`} className="h-7"><td className="border border-black"></td><td className="border border-black"></td><td className="border border-black"></td><td className="border border-black"></td><td className="border border-black"></td></tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="mt-4 flex justify-end gap-4 text-sm font-medium">
+                <div className="border border-black w-48 h-20 flex flex-col"><div className="border-b border-black text-center py-0.5 bg-gray-100">棚卸 担当者</div></div>
+                <div className="border border-black w-48 h-20 flex flex-col"><div className="border-b border-black text-center py-0.5 bg-gray-100">システム入力 担当者</div></div>
+              </div>
             </div>
-            <div className="absolute bottom-0 left-0 text-lg font-black tracking-widest mt-2">{y} <span className="text-sm font-bold">年</span></div>
+          ))
+        )}
+      </div>
+    );
+  }
 
-            <table className="border-collapse border-[3px] border-black text-[12px] text-center leading-none w-[280px]">
-              <tbody>
-                <tr className="h-6">
-                  <th className="border border-black font-medium w-24">文章No.</th>
-                  <td className="border border-black font-bold w-24">YO-15</td>
-                  <th className="border border-black font-medium w-20">施設長</th>
-                  <th className="border border-black font-medium w-20">担当者</th>
-                </tr>
-                <tr className="h-6">
-                  <th className="border border-black font-medium">制定日</th>
-                  <td className="border border-black font-bold">2021/4/1</td>
-                  <td className="border border-black h-[70px]" rowSpan={3}></td>
-                  <td className="border border-black h-[70px]" rowSpan={3}></td>
-                </tr>
-                <tr className="h-6">
-                  <th className="border border-black font-medium">改定日</th>
-                  <td className="border border-black font-bold"></td>
-                </tr>
-                <tr>
-                  <td className="border border-black font-medium py-1 text-[10px]" colSpan={2}>ワークセンター・やまびこ</td>
-                </tr>
-              </tbody>
-            </table>
+  // ==========================================
+  // 在庫推移予測 PDF (A4横)
+  // ==========================================
+  if (viewMode === 'print_forecast') {
+    return (
+      <div className="bg-slate-200 min-h-screen py-8 print:p-0 print:bg-white flex flex-col items-center">
+        <style dangerouslySetInnerHTML={{ __html: `@media print { header, nav { display: none !important; } main { padding: 0 !important; margin: 0 !important; max-width: 100% !important; background: white !important; } @page { size: A4 landscape; margin: 10mm; } body { background-color: white !important; color: black !important; } .print-hide { display: none !important; } }` }} />
+        <div className="w-[297mm] print:w-full flex justify-between mb-4 print-hide">
+          <Button variant="outline" onClick={() => setViewMode('list')} className="bg-white text-slate-700 font-bold border-slate-300"><ArrowLeft className="h-4 w-4 mr-2" /> 戻る</Button>
+          <Button onClick={() => window.print()} className="bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-lg"><Printer className="h-5 w-5 mr-2" /> 印刷する</Button>
+        </div>
+
+        <div className="w-[297mm] h-[210mm] bg-white pt-8 pb-6 px-10 print:p-0 shadow-xl print:shadow-none text-black font-sans box-border flex flex-col justify-between">
+          <div className="flex justify-between items-end mb-4 border-b-2 border-black pb-2">
+            <h1 className="text-2xl font-bold tracking-widest">在庫推移予測 (MRPカレンダー)</h1>
+            <div className="text-sm font-medium">作成日: {new Date().toLocaleDateString('ja-JP')}</div>
           </div>
 
-          <div className="flex-1 flex flex-col justify-between mt-2 gap-4">
-            {renderTable(daysTop, true)}
-            {renderTable(daysBottom, false)}
+          <table className="w-full border-collapse border-2 border-black text-[9px] flex-1 table-fixed">
+            <thead>
+              <tr className="bg-gray-100">
+                <th className="border border-black py-1 w-[12%] font-bold">品目名</th>
+                <th className="border border-black py-1 w-[4%] font-bold text-[8px]">現在庫</th>
+                {forecastResult.dates.map(date => {
+                  const d = new Date(date);
+                  return <th key={date} className="border border-black py-0.5 leading-tight font-medium w-[2.8%]">{d.getMonth() + 1}/{d.getDate()}</th>;
+                })}
+              </tr>
+            </thead>
+            <tbody>
+              {filteredForecastData.map((f: any) => (
+                <tr key={f.item.id} className="h-7 border-b border-black">
+                  <td className="border-r border-black px-1 font-bold truncate overflow-hidden whitespace-nowrap">{f.item.name}</td>
+                  <td className="border-r border-black text-right pr-0.5 font-bold bg-gray-50">{f.item.current_qty}</td>
+                  {forecastResult.dates.map(date => {
+                    const day = f.days[date];
+                    const isShort = day.endQty < 0;
+                    return (
+                      <td key={date} className={`border-r border-black p-0 text-center relative ${isShort ? 'bg-red-100' : ''}`}>
+                        {/* 値の増減がある場合は小さく印字。基本は月末残のみ大きく表示 */}
+                        {(day.inQty > 0 || day.outQty > 0) && (
+                          <div className="absolute top-0 w-full flex justify-between px-0.5 text-[7px] font-bold">
+                            <span className="text-blue-700">{day.inQty > 0 ? `+${day.inQty}` : ''}</span>
+                            <span className="text-red-600">{day.outQty > 0 ? `-${day.outQty}` : ''}</span>
+                          </div>
+                        )}
+                        <div className={`absolute bottom-0 w-full text-center font-black ${isShort ? 'text-red-700' : ''}`}>
+                          {day.endQty}
+                        </div>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="mt-2 text-[9px] text-slate-700 flex gap-4">
+            <div>※ <span className="text-blue-700 font-bold">+</span> は入荷予定</div>
+            <div>※ <span className="text-red-600 font-bold">-</span> は製造消費予定</div>
+            <div>※ 網掛けは在庫不足(マイナス)の警告</div>
           </div>
-
         </div>
       </div>
     );
   }
 
-  // =======================================================================
-  // 通常画面 (日次入力 / 月次一覧)
-  // =======================================================================
+  // ==========================================
+  // 使用予定(消費予定のみ) PDF (A4横)
+  // ==========================================
+  if (viewMode === 'print_usage') {
+    return (
+      <div className="bg-slate-200 min-h-screen py-8 print:p-0 print:bg-white flex flex-col items-center">
+        <style dangerouslySetInnerHTML={{ __html: `@media print { header, nav { display: none !important; } main { padding: 0 !important; margin: 0 !important; max-width: 100% !important; background: white !important; } @page { size: A4 landscape; margin: 10mm; } body { background-color: white !important; color: black !important; } .print-hide { display: none !important; } }` }} />
+        <div className="w-[297mm] print:w-full flex justify-between mb-4 print-hide">
+          <Button variant="outline" onClick={() => setViewMode('list')} className="bg-white text-slate-700 font-bold border-slate-300"><ArrowLeft className="h-4 w-4 mr-2" /> 戻る</Button>
+          <Button onClick={() => window.print()} className="bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-lg"><Printer className="h-5 w-5 mr-2" /> 印刷する</Button>
+        </div>
+
+        <div className="w-[297mm] h-[210mm] bg-white pt-8 pb-6 px-10 print:p-0 shadow-xl print:shadow-none text-black font-sans box-border flex flex-col justify-between">
+          <div className="flex justify-between items-end mb-4 border-b-2 border-black pb-2">
+            <h1 className="text-2xl font-bold tracking-widest">使用予測カレンダー (原料・資材 消費予定)</h1>
+            <div className="text-sm font-medium">作成日: {new Date().toLocaleDateString('ja-JP')}</div>
+          </div>
+
+          <table className="w-full border-collapse border-2 border-black text-[10px] flex-1 table-fixed">
+            <thead>
+              <tr className="bg-gray-100 h-8">
+                <th className="border border-black py-1 w-[14%] font-bold text-sm">品目名</th>
+                <th className="border border-black py-1 w-[4%] font-bold text-[8px] bg-white">単位</th>
+                {forecastResult.dates.map(date => {
+                  const d = new Date(date);
+                  const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+                  return <th key={date} className={`border border-black py-0.5 leading-tight font-bold w-[2.7%] ${isWeekend ? 'bg-red-50 text-red-600' : ''}`}>{d.getMonth() + 1}/{d.getDate()}</th>;
+                })}
+              </tr>
+            </thead>
+            <tbody>
+              {/* 消費が1回でも発生する品目だけをフィルタして表示する */}
+              {filteredForecastData.filter((f: any) => {
+                return forecastResult.dates.some(date => f.days[date].outQty > 0);
+              }).map((f: any) => (
+                <tr key={f.item.id} className="h-8 border-b border-black">
+                  <td className="border-r border-black px-2 font-bold truncate overflow-hidden whitespace-nowrap text-[11px]">{f.item.name}</td>
+                  <td className="border-r border-black text-center text-[9px] text-slate-500 bg-gray-50">{f.item.unit}</td>
+                  {forecastResult.dates.map(date => {
+                    const outQty = f.days[date].outQty;
+                    return (
+                      <td key={date} className="border-r border-black text-center font-black text-[11px]">
+                        {outQty > 0 ? <span className="text-red-700">{outQty}</span> : ""}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="mt-2 text-[10px] text-slate-700">※ この表には、製造計画に基づいて「消費（使用）」される数量だけが印字されています。</div>
+        </div>
+      </div>
+    );
+  }
+
+  // ==========================================
+  // 通常の画面レンダリング
+  // ==========================================
+  if (loading) return <div className="flex justify-center items-center h-64"><Loader2 className="animate-spin h-8 w-8 text-slate-500" /></div>;
+
   return (
-    <div className="bg-transparent">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+    <div className="bg-slate-50 min-h-screen md:bg-transparent -mx-4 px-4 md:mx-0 md:px-0 pt-4 md:pt-0">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4 md:mb-6">
         <div className="flex items-center gap-4">
-          <h1 className="text-2xl font-bold flex items-center gap-2 text-slate-800">
-            <Scale className="h-6 w-6 text-teal-600" />
-            電子はかり 日常点検シート (YO-15)
-          </h1>
+          <h1 className="text-xl md:text-2xl font-black flex items-center gap-2 text-slate-800"><Package className="h-6 w-6 text-blue-600" /> 在庫管理・棚卸</h1>
           {!canEdit && <Badge variant="outline" className="bg-slate-100 text-slate-500 border-slate-300 px-3 py-1 shadow-sm hidden md:flex"><Lock className="w-3 h-3 mr-1" /> 閲覧モード</Badge>}
         </div>
-        {viewMode === 'monthly' && (
-          <Button onClick={() => setViewMode('print')} className="bg-slate-800 hover:bg-slate-900 text-white font-bold shadow-sm h-10 w-full sm:w-auto">
-            <Printer className="h-4 w-4 mr-2" /> PDF帳票を出力
+        <div className="flex gap-2 w-full md:w-auto">
+          {canEdit && (
+            <Button onClick={() => setNewStockModalOpen(true)} className="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-sm h-12 md:h-10">
+              <Plus className="h-4 w-4 mr-2" /> 既存Lotの追加登録
+            </Button>
+          )}
+          <Button onClick={() => setViewMode('print')} className="w-full md:w-auto bg-slate-800 hover:bg-slate-900 text-white font-bold shadow-sm h-12 md:h-10">
+            <Printer className="h-4 w-4 mr-2" /> 在庫表(PDF)を印刷
           </Button>
-        )}
+        </div>
       </div>
 
-      <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as any)} className="w-full">
-        <TabsList className="mb-6 bg-slate-200/80 p-1.5 rounded-xl">
-          <TabsTrigger value="input" className="font-bold py-2.5 px-6 rounded-lg data-[state=active]:bg-white data-[state=active]:text-teal-700 data-[state=active]:shadow-sm">日次チェック (現場入力用)</TabsTrigger>
-          <TabsTrigger value="monthly" className="font-bold py-2.5 px-6 rounded-lg data-[state=active]:bg-white data-[state=active]:text-teal-700 data-[state=active]:shadow-sm">月間一覧 (管理者・監査用)</TabsTrigger>
-        </TabsList>
+      <Tabs defaultValue="product" className="w-full">
+        <div className="flex flex-col mb-4 md:mb-6 gap-3">
+          <div className="overflow-x-auto pb-1 -mx-4 px-4 md:mx-0 md:px-0 hide-scrollbar">
+            <TabsList className="bg-slate-200/80 flex w-max h-auto p-1.5 rounded-xl">
+              <TabsTrigger value="product" className="font-bold py-2.5 px-4 md:px-6 text-sm md:text-md rounded-lg data-[state=active]:bg-white data-[state=active]:text-blue-700 data-[state=active]:shadow-sm"><Boxes className="w-4 h-4 mr-1.5" /> 製品(Lot別)</TabsTrigger>
+              <TabsTrigger value="raw" className="font-bold py-2.5 px-4 md:px-6 text-sm md:text-md rounded-lg data-[state=active]:bg-white data-[state=active]:text-blue-700 data-[state=active]:shadow-sm"><Wheat className="w-4 h-4 mr-1.5" /> 原材料</TabsTrigger>
+              <TabsTrigger value="material" className="font-bold py-2.5 px-4 md:px-6 text-sm md:text-md rounded-lg data-[state=active]:bg-white data-[state=active]:text-blue-700 data-[state=active]:shadow-sm"><Box className="w-4 h-4 mr-1.5" /> 資材</TabsTrigger>
+              <TabsTrigger value="forecast" className="font-bold py-2.5 px-4 md:px-6 text-sm md:text-md rounded-lg data-[state=active]:bg-white data-[state=active]:text-blue-700 data-[state=active]:shadow-sm bg-blue-100 text-blue-800 ml-2"><TrendingUp className="w-4 h-4 mr-1.5" /> 予測カレンダー</TabsTrigger>
+              <TabsTrigger value="history" className="font-bold py-2.5 px-4 md:px-6 text-sm md:text-md rounded-lg data-[state=active]:bg-white data-[state=active]:text-slate-700 data-[state=active]:shadow-sm ml-auto"><ClipboardEdit className="w-4 h-4 mr-1.5" /> 履歴</TabsTrigger>
+            </TabsList>
+          </div>
 
-        <TabsContent value="input">
-          <div className="flex flex-col lg:flex-row gap-6">
-            <div className="w-full lg:w-1/3 space-y-6">
-              <Card className="shadow-sm border-slate-200">
-                <CardHeader className="bg-teal-50/50 border-b pb-4">
-                  <CardTitle className="text-lg text-teal-900 flex items-center gap-2">
-                    <CalendarDays className="h-5 w-5 text-teal-600" />点検日の選択
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="pt-6 space-y-4">
-                  <div><label className="block text-sm font-bold mb-1 text-slate-700">対象日付</label><Input type="date" value={checkDate} onChange={(e) => setCheckDate(e.target.value)} className="h-12 text-lg font-bold bg-white border-teal-300 shadow-sm" /></div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div><label className="block text-sm font-bold mb-1 text-slate-700">点検時間</label><Input type="time" value={formData.check_time} onChange={(e) => handleUpdate('check_time', e.target.value)} className="h-12 text-lg font-bold bg-white" /></div>
-                    <div><label className="block text-sm font-bold mb-1 text-slate-700">担当者</label><Input value={formData.checker_name} onChange={(e) => handleUpdate('checker_name', e.target.value)} disabled={!canEdit} className="h-12 font-bold bg-white" placeholder="サイン..." /></div>
+          {canEdit && (
+            <div className={`flex flex-col sm:flex-row items-center gap-2 bg-white p-2 md:p-3 rounded-xl border-2 shadow-sm sticky top-16 z-40 transition-colors ${isBatchMode ? 'border-amber-400 bg-amber-50' : 'border-blue-100'}`}>
+              {isBatchMode ? (
+                <div className="flex flex-col sm:flex-row w-full items-center gap-2">
+                  <div className="flex items-center justify-between w-full sm:w-auto"><span className="text-sm font-black text-amber-700 animate-pulse flex items-center"><ListChecks className="w-4 h-4 mr-1" />一括入力モード (変更箇所は黄色)</span></div>
+                  <select value={batchReason} onChange={e => setBatchReason(e.target.value)} className="border rounded p-1.5 text-sm font-bold bg-white shadow-sm"><option value="月末一斉棚卸">月末一斉棚卸</option><option value="期末棚卸">期末棚卸</option><option value="定例棚卸">定例棚卸</option><option value="一括補正">一括補正</option></select>
+                  <div className="flex w-full sm:w-auto gap-2 mt-2 sm:mt-0 ml-auto">
+                    <Button onClick={toggleBatchMode} variant="outline" className="flex-1 sm:flex-none border-slate-300 text-slate-600 bg-white">キャンセル</Button>
+                    <Button onClick={handleBatchSubmit} disabled={isProcessing} className="flex-1 sm:flex-none bg-amber-600 hover:bg-amber-700 text-white font-bold shadow-md">{isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4 mr-1" />} 一括で上書き保存</Button>
                   </div>
-                </CardContent>
-              </Card>
-
-              <Card className="shadow-sm border-slate-200">
-                <CardHeader className="bg-slate-100 border-b py-3"><CardTitle className="text-base font-bold text-slate-700">基本状態の確認</CardTitle></CardHeader>
-                <CardContent className="p-0 divide-y divide-slate-100">
-                  {[
-                    { id: 'status_a', label: 'A: 水平が取れている事', sub: '水準器で確認' },
-                    { id: 'status_b', label: 'B: 汚れ・異物付着の無き事', sub: '目視で確認' },
-                    { id: 'status_c', label: 'C: ゼロ点の設定', sub: '分銅を3回測定し0gに戻る事' },
-                  ].map(item => {
-                    const val = formData[item.id as keyof ScaleCheck];
-                    const isOk = val === 'ok'; const isNg = val === 'ng';
-                    return (
-                      <div key={item.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                        <div><div className="font-bold text-slate-800">{item.label}</div><div className="text-xs text-slate-500">{item.sub}</div></div>
-                        <button onClick={() => toggleStatus(item.id as keyof ScaleCheck)} disabled={!canEdit} className={`w-full sm:w-32 h-12 rounded-xl flex items-center justify-center gap-2 font-black transition-all shadow-sm border-2 ${isOk ? 'bg-teal-500 border-teal-600 text-white' : isNg ? 'bg-red-500 border-red-600 text-white' : 'bg-slate-100 border-slate-300 text-slate-400 hover:bg-slate-200'}`}>{isOk && <><CheckCircle2 className="w-5 h-5" /> 良</>}{isNg && <><XCircle className="w-5 h-5" /> 不良</>}{!isOk && !isNg && <><MinusCircle className="w-5 h-5" /> -</>}</button>
-                      </div>
-                    )
-                  })}
-                </CardContent>
-              </Card>
-
-              {canEdit ? (
-                <Button onClick={handleSaveDaily} disabled={isSaving || loading} className="w-full bg-teal-600 hover:bg-teal-700 text-white font-bold h-14 text-lg shadow-md">
-                  {isSaving ? <Loader2 className="w-6 h-6 mr-2 animate-spin" /> : <Save className="w-6 h-6 mr-2" />} この日の記録を保存
-                </Button>
-              ) : (<div className="text-center text-sm font-bold text-slate-500 bg-slate-50 py-4 rounded-md border border-slate-200"><Lock className="w-4 h-4 inline mr-1" /> 閲覧モードのため保存不可</div>)}
+                </div>
+              ) : (
+                <Button onClick={toggleBatchMode} className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-sm h-10"><ListChecks className="w-5 h-5 mr-2" /> 一括棚卸を開始する</Button>
+              )}
             </div>
+          )}
+        </div>
 
-            <div className="w-full lg:w-2/3">
-              <Card className="shadow-sm border-slate-200">
-                <CardHeader className="bg-white border-b pb-4">
-                  <div className="flex justify-between items-end">
+        <TabsContent value="raw" className="mt-0">{renderItemTab(rawMaterials)}</TabsContent>
+        <TabsContent value="material" className="mt-0">{renderItemTab(materials)}</TabsContent>
+
+        <TabsContent value="product" className="mt-0">
+          <div className="hidden md:block bg-white border rounded-lg overflow-x-auto shadow-sm">
+            <Table className="min-w-[1000px]">
+              <TableHeader className="bg-slate-50"><TableRow>
+                <TableHead className="pl-4">Lot番号</TableHead><TableHead>製品名 / 味</TableHead><TableHead>賞味期限</TableHead>
+                <TableHead className="text-right">在庫 (c/s) {isBatchMode && <span className="text-xs text-blue-600 ml-1">※実数入力</span>}</TableHead>
+                <TableHead className="text-right">端数 (p) {isBatchMode && <span className="text-xs text-blue-600 ml-1">※実数入力</span>}</TableHead>
+                <TableHead className="w-32 text-center pr-4">アクション</TableHead>
+              </TableRow></TableHeader>
+              <TableBody>
+                {productStocks.map((stock) => {
+                  const unit_per_cs = stock.products.unit_per_cs || 24; const isExpired = new Date(stock.expiry_date) < new Date();
+
+                  const displayTotal = isBatchMode && batchInputs[stock.id] !== undefined ? Number(batchInputs[stock.id]) : stock.total_pieces;
+                  const cs = Math.floor(displayTotal / unit_per_cs);
+                  const piece = Math.floor((displayTotal % unit_per_cs) / 2);
+                  const isChanged = isBatchMode && batchInputs[stock.id] !== undefined && Number(batchInputs[stock.id]) !== stock.total_pieces;
+
+                  return (
+                    <TableRow key={stock.id} className={isChanged ? "bg-amber-50/70" : isExpired ? 'bg-red-50' : 'hover:bg-slate-50'}>
+                      <TableCell className="font-black text-blue-700 pl-4 text-base tracking-wider">{stock.lot_code}</TableCell>
+                      <TableCell><div className="font-bold text-slate-800">{stock.products.name}</div><div className="text-xs text-slate-500">{stock.products.variant_name}</div></TableCell>
+                      <TableCell><div className={`font-bold ${isExpired ? 'text-red-600' : 'text-slate-700'}`}>{new Date(stock.expiry_date).toLocaleDateString()}</div>{isExpired && <Badge className="bg-red-500 text-white mt-1 border-none text-[10px] px-1 py-0 shadow-sm">期限切れ</Badge>}</TableCell>
+                      <TableCell className="text-right">
+                        {isBatchMode ? (
+                          <div className="flex items-center justify-end gap-1">
+                            {isChanged && <span className="text-xs text-amber-600 font-bold mr-2 bg-amber-100 rounded px-1">変更</span>}
+                            <Input type="number" inputMode="numeric" min="0" value={cs} onChange={e => setBatchInputs({ ...batchInputs, [stock.id]: (Number(e.target.value === "" ? 0 : e.target.value) * unit_per_cs) + (piece * 2) })} className={`w-20 text-right font-bold h-9 ${isChanged ? 'border-amber-400 bg-white ring-2 ring-amber-200' : 'border-blue-300'}`} />
+                            <span className="text-xs text-slate-500 font-bold">c/s</span>
+                          </div>
+                        ) : <span className="font-black text-2xl text-blue-900">{cs.toLocaleString()} <span className="text-sm font-normal text-slate-500">c/s</span></span>}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {isBatchMode ? (
+                          <div className="flex items-center justify-end gap-1">
+                            <Input type="number" inputMode="numeric" min="0" max={(unit_per_cs / 2) - 1} value={piece} onChange={e => setBatchInputs({ ...batchInputs, [stock.id]: (cs * unit_per_cs) + (Number(e.target.value === "" ? 0 : e.target.value) * 2) })} className={`w-16 text-right font-bold h-9 ${isChanged ? 'border-amber-400 bg-white ring-2 ring-amber-200' : 'border-blue-300'}`} />
+                            <span className="text-xs text-slate-500 font-bold">p</span>
+                          </div>
+                        ) : <span className="font-bold text-lg text-slate-600">{piece} <span className="text-xs font-normal text-slate-400">p</span></span>}
+                      </TableCell>
+                      <TableCell className="text-center pr-4">
+                        {canEdit && <Button disabled={isBatchMode} variant="outline" size="sm" onClick={() => setAdjustmentModal({ isOpen: true, type: 'product', targetId: stock.id, targetName: `${stock.products.name} (${stock.lot_code})`, currentQty: stock.total_pieces, unit: '個(総数)', lotCode: stock.lot_code, productId: stock.product_id })} className="gap-1 border-blue-200 text-blue-700 hover:bg-blue-50"><ClipboardEdit className="w-3 h-3" /> 個別棚卸</Button>}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+          <div className="block md:hidden space-y-3 pb-24">
+            {productStocks.map((stock) => {
+              const unit_per_cs = stock.products.unit_per_cs || 24; const isExpired = new Date(stock.expiry_date) < new Date();
+
+              const displayTotal = isBatchMode && batchInputs[stock.id] !== undefined ? Number(batchInputs[stock.id]) : stock.total_pieces;
+              const cs = Math.floor(displayTotal / unit_per_cs);
+              const piece = Math.floor((displayTotal % unit_per_cs) / 2);
+              const isChanged = isBatchMode && batchInputs[stock.id] !== undefined && Number(batchInputs[stock.id]) !== stock.total_pieces;
+
+              return (
+                <Card key={stock.id} className={`p-4 shadow-sm border-2 ${isChanged ? 'bg-amber-50 border-amber-400' : isExpired ? 'bg-red-50/50 border-red-200' : 'border-slate-200'}`}>
+                  <div className="flex justify-between items-start mb-2">
                     <div>
-                      <CardTitle className="text-lg text-slate-800">D: 重量表示の確認</CardTitle>
-                      <p className="text-xs text-slate-500 mt-1 font-bold">100gの標準分銅を載せて誤差±0.2g以内である事。(5点で確認)</p>
+                      <div className="font-black text-xl text-blue-800 tracking-wider leading-none mb-1">{stock.lot_code}</div>
+                      <div className="font-bold text-slate-800 leading-tight">{stock.products.name} <span className="text-xs font-normal text-slate-500">({stock.products.variant_name})</span></div>
                     </div>
-                    <div className="w-24 h-20 border-2 border-slate-300 rounded-lg relative bg-slate-50 shadow-inner shrink-0">
-                      <div className="absolute top-0 left-0 bg-white border-b border-r border-slate-300 text-[8px] px-1 font-bold text-slate-500 rounded-tl-md">デジタル表示</div>
-                      <div className="absolute top-5 left-2 w-4 h-4 bg-teal-100 text-teal-700 rounded-full flex items-center justify-center text-xs font-black shadow-sm">1</div>
-                      <div className="absolute top-5 right-2 w-4 h-4 bg-teal-100 text-teal-700 rounded-full flex items-center justify-center text-xs font-black shadow-sm">2</div>
-                      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 bg-teal-100 text-teal-700 rounded-full flex items-center justify-center text-xs font-black shadow-sm">3</div>
-                      <div className="absolute bottom-2 left-2 w-4 h-4 bg-teal-100 text-teal-700 rounded-full flex items-center justify-center text-xs font-black shadow-sm">4</div>
-                      <div className="absolute bottom-2 right-2 w-4 h-4 bg-teal-100 text-teal-700 rounded-full flex items-center justify-center text-xs font-black shadow-sm">5</div>
-                    </div>
+                    {isExpired && <Badge className="bg-red-500 text-white shadow-sm shrink-0">期限切れ</Badge>}
                   </div>
-                </CardHeader>
-                <CardContent className="p-0">
-                  {loading ? <div className="flex justify-center items-center h-64"><Loader2 className="animate-spin h-8 w-8 text-teal-500" /></div> : (
-                    <Table className="w-full text-sm">
-                      <TableHeader className="bg-slate-100">
-                        <TableRow>
-                          <TableHead className="w-20 text-center font-bold">測定箇所</TableHead>
-                          <TableHead className="w-1/2 text-center font-bold">重量表示 (g)</TableHead>
-                          <TableHead className="w-1/2 text-center font-bold">差 (g) ※自動</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody className="bg-white">
-                        {[1, 2, 3, 4, 5].map(num => {
-                          const wField = `d${num}_weight` as keyof ScaleCheck;
-                          const dField = `d${num}_diff` as keyof ScaleCheck;
-                          const wVal = formData[wField];
-                          const dVal = formData[dField];
-
-                          // ±0.2gの判定
-                          const isWarning = typeof dVal === 'number' && Math.abs(dVal) > 0.2;
-
-                          return (
-                            <TableRow key={num} className="h-16">
-                              <TableCell className="text-center">
-                                <div className="w-8 h-8 mx-auto bg-teal-100 text-teal-800 rounded-full flex items-center justify-center font-black text-lg shadow-sm border border-teal-200">
-                                  {num}
-                                </div>
-                              </TableCell>
-                              <TableCell className="px-6">
-                                {/* 入力時も小数点1桁フォーマットを適用するかどうかは操作感に影響するため、フォーカスが外れたとき等に整えるのが理想だが、ここではシンプルな value 制御を行う */}
-                                <Input
-                                  type="number" step="0.1"
-                                  value={wVal as any}
-                                  onChange={e => {
-                                    const val = e.target.value === "" ? "" : Number(e.target.value);
-                                    handleUpdate(wField, val);
-                                    if (val !== "") {
-                                      handleUpdate(dField, Number((val - 100).toFixed(1)));
-                                    } else {
-                                      handleUpdate(dField, "");
-                                    }
-                                  }}
-                                  disabled={!canEdit}
-                                  className="h-12 text-xl font-bold text-center border-teal-300 shadow-sm focus-visible:ring-teal-500"
-                                  placeholder="100.0"
-                                />
-                              </TableCell>
-                              <TableCell className="px-6">
-                                {/* 差分も .toFixed(1) のフォーマットで表示 */}
-                                <Input
-                                  type="text"
-                                  value={formatDecimal(dVal)}
-                                  readOnly
-                                  disabled={!canEdit}
-                                  className={`h-12 text-xl font-bold text-center shadow-sm ${isWarning ? 'bg-red-50 text-red-600 border-red-400' : 'bg-slate-50 text-slate-600 border-slate-200'}`}
-                                />
-                                {isWarning && <p className="text-[10px] text-red-600 font-bold text-center mt-1">※±0.2gの誤差を超えています</p>}
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
-                      </TableBody>
-                    </Table>
+                  <div className={`text-xs mb-3 font-bold ${isExpired ? 'text-red-600' : 'text-slate-500'}`}>賞味期限: {new Date(stock.expiry_date).toLocaleDateString()}</div>
+                  {isBatchMode ? (
+                    <div className="bg-white p-3 rounded-lg border shadow-inner flex flex-col gap-2">
+                      <div className="flex justify-between items-center text-sm font-bold text-slate-600"><span>実数入力</span>{isChanged && <span className="text-xs text-amber-700 bg-amber-100 px-2 py-0.5 rounded font-black">変更あり</span>}</div>
+                      <div className="flex items-center gap-3">
+                        <Input type="number" inputMode="numeric" min="0" value={cs} onChange={e => setBatchInputs({ ...batchInputs, [stock.id]: (Number(e.target.value === "" ? 0 : e.target.value) * unit_per_cs) + (piece * 2) })} className={`flex-1 text-right font-black text-2xl h-14 ${isChanged ? 'border-amber-400 bg-amber-50 focus-visible:ring-amber-500' : 'border-blue-300'}`} />
+                        <span className="font-bold text-slate-500 text-lg w-8">c/s</span>
+                        <Input type="number" inputMode="numeric" min="0" max={(unit_per_cs / 2) - 1} value={piece} onChange={e => setBatchInputs({ ...batchInputs, [stock.id]: (cs * unit_per_cs) + (Number(e.target.value === "" ? 0 : e.target.value) * 2) })} className={`flex-1 text-right font-black text-2xl h-14 ${isChanged ? 'border-amber-400 bg-amber-50 focus-visible:ring-amber-500' : 'border-blue-300'}`} />
+                        <span className="font-bold text-slate-500 text-lg w-4">p</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex justify-between items-end mt-2 pt-2 border-t">
+                      <div className="font-black text-3xl text-blue-900">{cs} <span className="text-sm font-normal text-slate-500">c/s</span> <span className="text-xl text-slate-700 ml-1">{piece}</span><span className="text-xs font-normal text-slate-400">p</span></div>
+                      {canEdit && <Button variant="outline" size="sm" onClick={() => setAdjustmentModal({ isOpen: true, type: 'product', targetId: stock.id, targetName: `${stock.products.name} (${stock.lot_code})`, currentQty: stock.total_pieces, unit: '個(総数)', lotCode: stock.lot_code, productId: stock.product_id })} className="border-blue-300 text-blue-700 bg-blue-50 shadow-sm"><ClipboardEdit className="w-4 h-4 mr-1" /> 棚卸</Button>}
+                    </div>
                   )}
-                </CardContent>
-              </Card>
-            </div>
+                </Card>
+              );
+            })}
           </div>
         </TabsContent>
 
-        <TabsContent value="monthly">
-          <Card className="shadow-sm border-slate-200">
-            <CardHeader className="bg-slate-50 border-b flex flex-row items-center justify-between py-4">
-              <CardTitle className="text-lg text-slate-800">月間 記録マトリックス</CardTitle>
-              <Input type="month" value={`${calendarMonth.getFullYear()}-${String(calendarMonth.getMonth() + 1).padStart(2, '0')}`} onChange={(e) => { if (e.target.value) setCalendarMonth(new Date(e.target.value + "-01")); }} className="w-40 bg-white font-bold" />
-            </CardHeader>
-            <CardContent className="p-0">
-              <div className="overflow-x-auto">
-                <Table className="w-full table-fixed min-w-[1200px] border-collapse text-xs">
-                  <TableHeader className="bg-slate-100 sticky top-0 z-10 shadow-sm">
-                    <TableRow>
-                      <TableHead className="w-32 border-r font-bold text-slate-700 bg-slate-100 sticky left-0 z-20 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">点検項目</TableHead>
-                      {Array.from({ length: new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 0).getDate() }, (_, i) => i + 1).map(day => (
-                        <TableHead key={day} className="w-8 text-center border-r p-0.5 font-bold text-slate-600">{day}</TableHead>
-                      ))}
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {loading ? <TableRow><TableCell colSpan={32} className="h-64 text-center"><Loader2 className="animate-spin h-8 w-8 text-slate-400 mx-auto" /></TableCell></TableRow> : (
-                      <>
-                        {['A (水平)', 'B (汚れ)', 'C (ゼロ点)'].map((label, idx) => {
-                          const field = idx === 0 ? 'status_a' : idx === 1 ? 'status_b' : 'status_c';
-                          return (
-                            <TableRow key={label} className="hover:bg-slate-50 border-b">
-                              <TableCell className="border-r font-bold text-slate-800 bg-white sticky left-0 z-10 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">{label}</TableCell>
-                              {Array.from({ length: new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 0).getDate() }, (_, i) => i + 1).map(day => {
-                                const dStr = `${calendarMonth.getFullYear()}-${String(calendarMonth.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                                const res = monthlyData[dStr]?.[field as keyof ScaleCheck];
-                                return <TableCell key={day} className={`border-r text-center p-0 ${res === 'ng' ? 'bg-red-50 text-red-600 font-black' : res === 'ok' ? 'text-teal-600 font-bold' : 'text-slate-200'}`}>{renderOkNg(res) || "-"}</TableCell>;
-                              })}
-                            </TableRow>
-                          );
-                        })}
-                        {[1, 2, 3, 4, 5].map(num => (
-                          <TableRow key={`w-${num}`} className="hover:bg-slate-50 border-b">
-                            <TableCell className="border-r font-bold text-slate-600 bg-white sticky left-0 z-10 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">D{num} (重量)</TableCell>
-                            {Array.from({ length: new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 0).getDate() }, (_, i) => i + 1).map(day => {
-                              const dStr = `${calendarMonth.getFullYear()}-${String(calendarMonth.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                              const w = monthlyData[dStr]?.[`d${num}_weight` as keyof ScaleCheck];
-                              // ▼ 月間マトリックス一覧も小数点1桁でフォーマット ▼
-                              return <TableCell key={day} className="border-r text-center p-0 text-[10px] font-mono font-bold text-slate-600">{formatDecimal(w)}</TableCell>;
-                            })}
-                          </TableRow>
-                        ))}
-                        <TableRow className="bg-slate-50">
-                          <TableCell className="border-r font-bold text-slate-600 sticky left-0 z-10">担当者</TableCell>
-                          {Array.from({ length: new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 0).getDate() }, (_, i) => i + 1).map(day => {
-                            const dStr = `${calendarMonth.getFullYear()}-${String(calendarMonth.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                            const checker = monthlyData[dStr]?.checker_name;
-                            return <TableCell key={`checker-${day}`} className="border-r text-center p-0.5">{checker ? <div className="text-[8px] truncate max-w-[28px] mx-auto text-slate-700">{checker.slice(0, 2)}</div> : ""}</TableCell>;
+        {/* --- 予測タブ内に「使用予定」のタブボタン群を追加 --- */}
+        <TabsContent value="forecast" className="mt-0">
+          <div className="bg-white border rounded-lg shadow-sm">
+            <div className="p-4 border-b bg-blue-50/30 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <h2 className="font-bold text-blue-900 flex items-center gap-2"><TrendingUp className="w-5 h-5 text-blue-600" /> 原料・資材カレンダー</h2>
+                <p className="text-xs text-slate-600 mt-1">製造計画(未着手)と入荷予定から、将来の推移を自動シミュレーションします。</p>
+              </div>
+              <div className="flex flex-col sm:flex-row gap-3">
+                <div className="flex bg-white rounded-lg border p-1 shadow-sm w-fit shrink-0"><button onClick={() => setForecastFilter('all')} className={`px-4 py-2 text-sm font-bold rounded-md transition-colors flex items-center gap-1 ${forecastFilter === 'all' ? 'bg-blue-100 text-blue-800' : 'text-slate-500 hover:bg-slate-50'}`}><Filter className="w-3 h-3" />すべて</button><button onClick={() => setForecastFilter('raw_material')} className={`px-4 py-2 text-sm font-bold rounded-md transition-colors ${forecastFilter === 'raw_material' ? 'bg-blue-100 text-blue-800' : 'text-slate-500 hover:bg-slate-50'}`}>原材料のみ</button><button onClick={() => setForecastFilter('material')} className={`px-4 py-2 text-sm font-bold rounded-md transition-colors ${forecastFilter === 'material' ? 'bg-blue-100 text-blue-800' : 'text-slate-500 hover:bg-slate-50'}`}>資材のみ</button></div>
+                <div className="flex gap-2 w-full justify-end">
+                  <Button onClick={() => setViewMode('print_forecast')} variant="outline" className="border-blue-200 text-blue-700 hover:bg-blue-50 bg-white shadow-sm font-bold"><Printer className="w-4 h-4 mr-2" /> 在庫推移を印刷</Button>
+                  <Button onClick={() => setViewMode('print_usage')} variant="outline" className="border-red-200 text-red-700 hover:bg-red-50 bg-white shadow-sm font-bold"><TrendingDown className="w-4 h-4 mr-2" /> 使用予定を印刷</Button>
+                </div>
+              </div>
+            </div>
+
+            <Tabs defaultValue="inventory_flow" className="w-full">
+              <div className="px-4 pt-3">
+                <TabsList className="bg-slate-100">
+                  <TabsTrigger value="inventory_flow" className="font-bold px-6">在庫推移 (プラス/マイナス)</TabsTrigger>
+                  <TabsTrigger value="usage_only" className="font-bold px-6 text-red-600">使用予定のみ (消費量)</TabsTrigger>
+                </TabsList>
+              </div>
+
+              {/* サブタブ: 在庫推移 */}
+              <TabsContent value="inventory_flow" className="p-0 border-none mt-2">
+                <div className="overflow-x-auto max-h-[60vh]">
+                  <Table className="min-w-max border-collapse">
+                    <TableHeader className="bg-slate-100 sticky top-0 z-20 shadow-sm"><TableRow><TableHead className="sticky left-0 bg-slate-100 border-r z-30 w-48 shadow-[2px_0_5px_rgba(0,0,0,0.05)] text-slate-700 font-bold">品目名</TableHead><TableHead className="w-24 text-right bg-slate-100 border-r z-20 text-slate-700 font-bold">現在庫</TableHead>{forecastResult.dates.map(date => { const d = new Date(date); const isWeekend = d.getDay() === 0 || d.getDay() === 6; return (<TableHead key={date} className={`text-center min-w-[80px] border-r px-2 py-1.5 leading-tight ${isWeekend ? 'text-red-600 bg-red-50/50' : 'text-slate-700'}`}><div className="font-bold">{d.getMonth() + 1}/{d.getDate()}</div><div className="text-[10px] font-normal">{['日', '月', '火', '水', '木', '金', '土'][d.getDay()]}</div></TableHead>); })}</TableRow></TableHeader>
+                    <TableBody>
+                      {filteredForecastData.map((f: any) => (
+                        <TableRow key={f.item.id} className="hover:bg-slate-50"><TableCell className="sticky left-0 bg-white font-bold text-slate-800 border-r z-10 shadow-[2px_0_5px_rgba(0,0,0,0.05)] truncate max-w-[200px]" title={f.item.name}>{f.item.name} <span className="text-[10px] font-normal text-slate-500 block">({f.item.unit})</span></TableCell><TableCell className="text-right font-black text-slate-700 border-r bg-slate-50">{f.item.current_qty.toLocaleString(undefined, { maximumFractionDigits: 1 })}</TableCell>
+                          {forecastResult.dates.map(date => {
+                            const day = f.days[date]; const isShort = day.endQty < 0; const isWarning = !isShort && f.item.safety_stock > 0 && day.endQty < f.item.safety_stock;
+                            return (<TableCell key={date} className={`border-r p-1 align-top ${isShort ? 'bg-red-50 border-red-200' : isWarning ? 'bg-amber-50/50' : ''}`}><div className="flex flex-col justify-between h-full min-h-12"><div className="flex justify-between w-full text-[10px] px-1 font-bold"><span className="text-blue-600">{day.inQty > 0 ? `+${day.inQty.toLocaleString(undefined, { maximumFractionDigits: 1 })}` : ''}</span><span className="text-red-500">{day.outQty > 0 ? `-${day.outQty.toLocaleString(undefined, { maximumFractionDigits: 1 })}` : ''}</span></div><div className={`text-right font-black text-sm px-1 mt-1 ${isShort ? 'text-red-700' : 'text-slate-800'}`}>{day.endQty.toLocaleString(undefined, { maximumFractionDigits: 1 })}</div></div></TableCell>);
                           })}
                         </TableRow>
-                      </>
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            </CardContent>
-          </Card>
+                      ))}
+                      {filteredForecastData.length === 0 && <TableRow><TableCell colSpan={32} className="text-center py-12 text-slate-500">該当する品目データがありません</TableCell></TableRow>}
+                    </TableBody>
+                  </Table>
+                </div>
+                <div className="p-4 bg-slate-50 border-t flex flex-wrap gap-4 text-xs text-slate-600"><div className="flex items-center gap-1.5"><span className="w-4 h-4 bg-red-50 border border-red-200 rounded-sm inline-block"></span>在庫がマイナス (欠品)</div><div className="flex items-center gap-1.5"><span className="w-4 h-4 bg-amber-50/80 border border-amber-200 rounded-sm inline-block"></span>安全在庫割れ</div><div className="flex items-center gap-1.5"><span className="text-blue-600 font-bold">+数値</span>入荷予定</div><div className="flex items-center gap-1.5"><span className="text-red-500 font-bold">-数値</span>消費予定</div></div>
+              </TabsContent>
+
+              {/* サブタブ: 使用予定のみ */}
+              <TabsContent value="usage_only" className="p-0 border-none mt-2">
+                <div className="overflow-x-auto max-h-[60vh]">
+                  <Table className="min-w-max border-collapse">
+                    <TableHeader className="bg-slate-100 sticky top-0 z-20 shadow-sm"><TableRow><TableHead className="sticky left-0 bg-slate-100 border-r z-30 w-48 shadow-[2px_0_5px_rgba(0,0,0,0.05)] text-slate-700 font-bold">品目名</TableHead><TableHead className="w-16 text-center bg-slate-100 border-r z-20 text-slate-700 font-bold">単位</TableHead>{forecastResult.dates.map(date => { const d = new Date(date); const isWeekend = d.getDay() === 0 || d.getDay() === 6; return (<TableHead key={date} className={`text-center min-w-[60px] border-r px-2 py-1.5 leading-tight ${isWeekend ? 'text-red-600 bg-red-50/50' : 'text-slate-700'}`}><div className="font-bold">{d.getMonth() + 1}/{d.getDate()}</div><div className="text-[10px] font-normal">{['日', '月', '火', '水', '木', '金', '土'][d.getDay()]}</div></TableHead>); })}</TableRow></TableHeader>
+                    <TableBody>
+                      {/* 消費が1回でも発生する品目だけを表示 */}
+                      {filteredForecastData.filter((f: any) => forecastResult.dates.some(date => f.days[date].outQty > 0)).map((f: any) => (
+                        <TableRow key={f.item.id} className="hover:bg-slate-50">
+                          <TableCell className="sticky left-0 bg-white font-bold text-slate-800 border-r z-10 shadow-[2px_0_5px_rgba(0,0,0,0.05)] truncate max-w-[200px]" title={f.item.name}>{f.item.name}</TableCell>
+                          <TableCell className="text-center font-bold text-slate-500 border-r bg-slate-50 text-xs">{f.item.unit}</TableCell>
+                          {forecastResult.dates.map(date => {
+                            const outQty = f.days[date].outQty;
+                            return (
+                              <TableCell key={date} className={`border-r p-2 text-center align-middle ${outQty > 0 ? 'bg-red-50/30' : ''}`}>
+                                {outQty > 0 ? <span className="text-red-700 font-black text-sm">{outQty.toLocaleString(undefined, { maximumFractionDigits: 1 })}</span> : <span className="text-slate-200">-</span>}
+                              </TableCell>
+                            );
+                          })}
+                        </TableRow>
+                      ))}
+                      {filteredForecastData.filter((f: any) => forecastResult.dates.some(date => f.days[date].outQty > 0)).length === 0 && <TableRow><TableCell colSpan={32} className="text-center py-12 text-slate-500">直近で使用される予定の品目はありません</TableCell></TableRow>}
+                    </TableBody>
+                  </Table>
+                </div>
+                <div className="p-4 bg-slate-50 border-t text-xs text-slate-600">※ この表には、製造計画に基づいて消費（使用）される数量だけが表示されています。</div>
+              </TabsContent>
+            </Tabs>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="history" className="mt-0">
+          <div className="bg-white border rounded-lg overflow-x-auto shadow-sm pb-10">
+            <Table className="min-w-[600px] text-sm"><TableHeader className="bg-slate-50"><TableRow><TableHead className="pl-4 w-32">日時</TableHead><TableHead>対象</TableHead><TableHead className="text-right">前</TableHead><TableHead></TableHead><TableHead className="text-right">後</TableHead><TableHead className="text-right">差異</TableHead><TableHead className="pr-4">理由</TableHead></TableRow></TableHeader><TableBody>{histories.map((hist) => { const targetName = hist.items?.name || (hist.products ? `${hist.products.name} (${hist.lot_code})` : '不明'); const diffColor = hist.diff > 0 ? 'text-green-600' : hist.diff < 0 ? 'text-red-600' : 'text-slate-400'; return (<TableRow key={hist.id} className="hover:bg-slate-50"><TableCell className="text-slate-500 pl-4 text-xs">{new Date(hist.adjusted_at).toLocaleDateString()}<br />{new Date(hist.adjusted_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</TableCell><TableCell className="font-bold text-slate-800 max-w-[150px] truncate" title={targetName}>{targetName}</TableCell><TableCell className="text-right text-slate-500">{hist.before_qty.toLocaleString(undefined, { maximumFractionDigits: 1 })}</TableCell><TableCell className="text-center text-slate-300"><ArrowRight className="w-3 h-3 mx-auto" /></TableCell><TableCell className="text-right font-bold text-slate-800">{hist.after_qty.toLocaleString(undefined, { maximumFractionDigits: 1 })}</TableCell><TableCell className={`text-right font-black ${diffColor}`}>{hist.diff > 0 ? '+' : ''}{hist.diff.toLocaleString(undefined, { maximumFractionDigits: 1 })}</TableCell><TableCell className="text-slate-500 text-xs pr-4">{hist.reason}</TableCell></TableRow>); })}</TableBody></Table>
+          </div>
         </TabsContent>
       </Tabs>
+
+      {/* --- 既存Lotの新規登録用モーダル --- */}
+      <Dialog open={newStockModalOpen} onOpenChange={setNewStockModalOpen}>
+        <DialogContent className="max-w-md bg-white p-6 rounded-xl">
+          <DialogHeader><DialogTitle className="flex items-center gap-2 text-blue-800"><Plus className="w-5 h-5" /> 既存(過去)Lotの新規登録</DialogTitle></DialogHeader>
+          <div className="space-y-4 mt-2">
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">製品</label>
+              <select value={newStockData.productId} onChange={e => setNewStockData({ ...newStockData, productId: e.target.value })} className="w-full border-2 border-slate-200 rounded-lg p-2.5 bg-white font-bold text-slate-700">
+                <option value="">選択してください</option>
+                {productsList.map(p => <option key={p.id} value={p.id}>{p.name} ({p.variant})</option>)}
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div><label className="block text-xs font-bold text-slate-500 mb-1">Lot番号</label><Input value={newStockData.lotCode} onChange={e => setNewStockData({ ...newStockData, lotCode: e.target.value })} placeholder="例: スB26SB" className="font-bold h-10" /></div>
+              <div><label className="block text-xs font-bold text-slate-500 mb-1">賞味期限</label><Input type="date" value={newStockData.expiryDate} onChange={e => setNewStockData({ ...newStockData, expiryDate: e.target.value })} className="h-10" /></div>
+            </div>
+
+            <div className="bg-slate-50 p-4 rounded-lg border">
+              <label className="block text-sm font-bold text-blue-800 mb-2">現在の在庫数</label>
+              <div className="flex items-center gap-2">
+                <Input type="number" inputMode="numeric" min="0" value={newStockData.cs || ""} onChange={e => setNewStockData({ ...newStockData, cs: Number(e.target.value) })} className="w-24 text-right font-black text-2xl h-12" />
+                <span className="font-bold text-slate-500">c/s</span>
+                <Input type="number" inputMode="numeric" min="0" value={newStockData.p || ""} onChange={e => setNewStockData({ ...newStockData, p: Number(e.target.value) })} className="w-20 text-right font-black text-xl h-12 ml-2" />
+                <span className="font-bold text-slate-500">p</span>
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="mt-4 pt-4 border-t flex gap-2">
+            <Button variant="outline" onClick={() => setNewStockModalOpen(false)} className="flex-1">キャンセル</Button>
+            <Button onClick={handleAddNewStock} disabled={isProcessing || !newStockData.productId || !newStockData.lotCode} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold">
+              {isProcessing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />} 登録する
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* --- 個別棚卸入力モーダル --- */}
+      <Dialog open={adjustmentModal.isOpen} onOpenChange={(open) => !open && setAdjustmentModal({ ...adjustmentModal, isOpen: false })}>
+        <DialogContent className="w-[95vw] max-w-md bg-white p-4 md:p-6 rounded-xl">
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><ClipboardEdit className="w-5 h-5 text-blue-600" /> 実地棚卸の入力</DialogTitle></DialogHeader>
+          <div className="space-y-6 mt-2">
+            <div className="bg-slate-50 p-3 md:p-4 rounded-lg border text-center"><div className="text-xs font-bold text-slate-500 mb-1">対象品目</div><div className="text-base md:text-lg font-bold text-blue-900 leading-tight">{adjustmentModal.targetName}</div></div>
+            <div className="flex items-center justify-between px-2">
+              <div className="text-center"><div className="text-[10px] md:text-xs font-bold text-slate-500 mb-1">システム在庫</div><div className="text-xl md:text-2xl font-black text-slate-700">{adjustmentModal.currentQty.toLocaleString(undefined, { maximumFractionDigits: 1 })} <span className="text-xs font-normal text-slate-500">{adjustmentModal.unit}</span></div></div>
+              <ArrowRight className="w-6 h-6 md:w-8 md:h-8 text-slate-300 mx-1" />
+              <div className="text-center"><div className="text-[10px] md:text-xs font-bold text-blue-600 mb-1">実際の数 (入力)</div><div className="flex items-end gap-1"><Input type="number" inputMode="decimal" min="0" autoFocus value={actualQty} onChange={e => setActualQty(e.target.value === "" ? "" : Number(e.target.value))} className="w-20 md:w-24 h-12 text-2xl font-bold text-right border-blue-400 focus-visible:ring-blue-500" /><span className="text-[10px] md:text-xs font-bold text-slate-500 pb-2">{adjustmentModal.unit}</span></div></div>
+            </div>
+            {actualQty !== "" && (<div className={`text-center font-bold p-2 md:p-3 rounded-lg ${Number(actualQty) - adjustmentModal.currentQty === 0 ? "bg-slate-100 text-slate-500" : Number(actualQty) - adjustmentModal.currentQty > 0 ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>差異: {Number(actualQty) - adjustmentModal.currentQty > 0 ? "+" : ""}{(Number(actualQty) - adjustmentModal.currentQty).toLocaleString(undefined, { maximumFractionDigits: 1 })} {adjustmentModal.unit}</div>)}
+            <div><label className="block text-xs font-bold text-slate-500 mb-2">調整理由</label><select value={adjReason} onChange={e => setAdjReason(e.target.value)} className="w-full border-2 border-slate-200 rounded-lg p-3 bg-white font-bold text-slate-700 focus:border-blue-400 focus:ring-0"><option value="定例棚卸">定例棚卸</option><option value="ロス・廃棄">ロス・廃棄による減算</option><option value="入力もれ補正">入力もれ補正</option><option value="その他">その他</option></select></div>
+          </div>
+          <DialogFooter className="mt-4 md:mt-6 border-t pt-4">
+            <Button variant="outline" onClick={() => setAdjustmentModal({ ...adjustmentModal, isOpen: false })} className="w-full md:w-auto h-12 md:h-10 mb-2 md:mb-0 font-bold">キャンセル</Button>
+            <Button onClick={handleAdjustmentSubmit} disabled={isProcessing || actualQty === ""} className="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white font-bold h-12 md:h-10 text-lg md:text-base">{isProcessing ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <Save className="w-5 h-5 mr-2" />} 確定する</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
