@@ -8,6 +8,7 @@ import {
   ArrowDownToLine, ShoppingCart, Edit, ShieldCheck, LineChart, Search, Bug
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import document from "next/document";
 
 // ─────────────────────────────────────────────
 type TabKey = "user" | "tech";

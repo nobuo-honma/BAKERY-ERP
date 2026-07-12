@@ -9,7 +9,6 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-// ▼ 修正: PackageOpen をインポートリストに追加しました ▼
 import { FileText, Plus, ExternalLink, Edit, Trash2, Loader2, Save, Lock, Search, ShieldCheck, ClipboardCheck, Building2, Wrench, Sparkles, ShieldAlert, ArrowRight, Trash, Eye, PackageOpen, Box, LineChart, GitMerge } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import Link from "next/link";
@@ -66,19 +65,29 @@ export default function HaccpPortalPage() {
     };
 
     const handleSave = async () => {
-        if (!formData.title || !formData.file_url) { alert("資料名とURLは必須です。"); return; }
+        if (!formData.title || !formData.file_url) {
+            if (typeof window !== "undefined") {
+                window.alert("資料名とURLは必須です。");
+            }
+            return;
+        }
         setIsProcessing(true);
         const docData = { title: formData.title, category: formData.category, file_url: formData.file_url, version: formData.version, notes: formData.notes, updated_at: new Date().toISOString() };
         try {
             if (editingDoc) await supabase.from("haccp_documents").update(docData).eq("id", editingDoc.id);
             else await supabase.from("haccp_documents").insert(docData);
             setModalOpen(false); fetchDocuments();
-        } catch (err: any) { alert("エラーが発生しました: " + err.message); }
+        } catch (err: any) {
+            if (typeof window !== "undefined") {
+                window.alert("エラーが発生しました: " + err.message);
+            }
+        }
         setIsProcessing(false);
     };
 
     const handleDelete = async () => {
-        if (!editingDoc || !confirm("この資料データを削除しますか？\n（※リンク先のファイル自体は削除されません）")) return;
+        if (typeof window === "undefined") return;
+        if (!editingDoc || !window.confirm("この資料データを削除しますか？\n（※リンク先のファイル自体は削除されません）")) return;
         setIsProcessing(true);
         await supabase.from("haccp_documents").delete().eq("id", editingDoc.id);
         setModalOpen(false); fetchDocuments();
@@ -104,7 +113,7 @@ export default function HaccpPortalPage() {
                 <TableCell className="w-28 text-slate-400 text-xs text-right hidden lg:table-cell">{new Date(doc.updated_at).toLocaleDateString()}</TableCell>
                 <TableCell className="w-48 text-right pr-4">
                     <div className="flex justify-end gap-2">
-                        <Button onClick={() => window.open(doc.file_url, "_blank")} className="bg-slate-800 hover:bg-slate-900 text-white font-bold shadow-sm h-8 px-3 text-xs"><ExternalLink className="h-3 w-3 mr-1" /> 開く</Button>
+                        <Button onClick={() => { if (typeof window !== "undefined") window.open(doc.file_url, "_blank"); }} className="bg-slate-800 hover:bg-slate-900 text-white font-bold shadow-sm h-8 px-3 text-xs"><ExternalLink className="h-3 w-3 mr-1" /> 開く</Button>
                         {canEdit && <Button variant="outline" onClick={() => openModal(doc)} className="h-8 px-2 border-slate-300 text-slate-600 hover:bg-slate-100 opacity-0 group-hover:opacity-100 transition-opacity focus:opacity-100"><Edit className="h-4 w-4" /></Button>}
                     </div>
                 </TableCell>
@@ -390,7 +399,7 @@ export default function HaccpPortalPage() {
                             </div>
                             <div className="relative shrink-0 md:w-64">
                                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                                <Input placeholder="資料名や備考で検索..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-9 bg-white border-slate-300 shadow-sm h-10 w-full" />
+                                <Input placeholder="資料名や備考で検索..." value={searchQuery} onChange={(e) => setSearchQuery(e.currentTarget.value)} className="pl-9 bg-white border-slate-300 shadow-sm h-10 w-full" />
                             </div>
                             {canEdit && (
                                 <Button onClick={() => openModal()} className="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white shadow-sm font-bold h-10 shrink-0">
@@ -437,15 +446,15 @@ export default function HaccpPortalPage() {
                 <DialogContent className="w-[95vw] max-w-md bg-white p-4 md:p-6 rounded-xl">
                     <DialogHeader><DialogTitle className="flex items-center gap-2 text-slate-800"><FileText className="h-5 w-5 text-blue-600" /> {editingDoc ? "資料情報の編集" : "新規資料の登録"}</DialogTitle></DialogHeader>
                     <div className="space-y-4 mt-2">
-                        <div><label className="block text-xs font-bold text-slate-500 mb-1">資料名 (必須)</label><Input value={formData.title} onChange={e => setFormData({ ...formData, title: e.target.value })} placeholder="例: 製品説明書 (チョコパン)" className="font-bold h-10 md:h-9" /></div>
+                        <div><label className="block text-xs font-bold text-slate-500 mb-1">資料名 (必須)</label><Input value={formData.title} onChange={e => setFormData({ ...formData, title: e.currentTarget.value })} placeholder="例: 製品説明書 (チョコパン)" className="font-bold h-10 md:h-9" /></div>
                         <div><label className="block text-xs font-bold text-slate-500 mb-1">カテゴリ</label>
-                            <select value={formData.category} onChange={e => setFormData({ ...formData, category: e.target.value })} className="w-full border-2 border-slate-200 rounded-lg md:rounded-md p-2.5 bg-white font-bold text-slate-700 h-12 md:h-10">
+                            <select value={formData.category} onChange={e => setFormData({ ...formData, category: e.currentTarget.value })} className="w-full border-2 border-slate-200 rounded-lg md:rounded-md p-2.5 bg-white font-bold text-slate-700 h-12 md:h-10">
                                 {CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
                             </select>
                         </div>
-                        <div><label className="block text-xs font-bold text-slate-500 mb-1">ファイルURL (必須)</label><Input value={formData.file_url} onChange={e => setFormData({ ...formData, file_url: e.target.value })} placeholder="https://drive.google.com/..." className="text-sm font-mono bg-slate-50 h-10 md:h-9" /><p className="text-[10px] text-slate-500 mt-1">※Googleドライブ等の共有リンクURLを貼り付けてください。</p></div>
-                        <div className="grid grid-cols-2 gap-4"><div><label className="block text-xs font-bold text-slate-500 mb-1">バージョン</label><Input value={formData.version} onChange={e => setFormData({ ...formData, version: e.target.value })} placeholder="1.0" className="h-10 md:h-9" /></div></div>
-                        <div><label className="block text-xs font-bold text-slate-500 mb-1">備考・改訂内容</label><textarea value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.target.value })} className="w-full p-3 md:p-2 border border-slate-200 rounded-lg md:rounded-md text-sm resize-none h-24 md:h-20 bg-slate-50" placeholder="改訂の理由など..." /></div>
+                        <div><label className="block text-xs font-bold text-slate-500 mb-1">ファイルURL (必須)</label><Input value={formData.file_url} onChange={e => setFormData({ ...formData, file_url: e.currentTarget.value })} placeholder="https://drive.google.com/..." className="text-sm font-mono bg-slate-50 h-10 md:h-9" /><p className="text-[10px] text-slate-500 mt-1">※Googleドライブ等の共有リンクURLを貼り付けてください。</p></div>
+                        <div className="grid grid-cols-2 gap-4"><div><label className="block text-xs font-bold text-slate-500 mb-1">バージョン</label><Input value={formData.version} onChange={e => setFormData({ ...formData, version: e.currentTarget.value })} placeholder="1.0" className="h-10 md:h-9" /></div></div>
+                        <div><label className="block text-xs font-bold text-slate-500 mb-1">備考・改訂内容</label><textarea value={formData.notes} onChange={e => setFormData({ ...formData, notes: e.currentTarget.value })} className="w-full p-3 md:p-2 border border-slate-200 rounded-lg md:rounded-md text-sm resize-none h-24 md:h-20 bg-slate-50" placeholder="改訂の理由など..." /></div>
                     </div>
                     <DialogFooter className="mt-6 border-t pt-4 flex flex-col sm:flex-row gap-2 sm:justify-between">
                         {editingDoc ? <Button onClick={handleDelete} disabled={isProcessing} variant="outline" className="w-full sm:w-auto border-red-200 text-red-600 hover:bg-red-50"><Trash2 className="h-4 w-4 mr-2" />削除</Button> : <div className="hidden sm:block"></div>}
