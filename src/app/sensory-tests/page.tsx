@@ -95,10 +95,13 @@ export default function SensoryTestsPage() {
             .eq('production_date', dateStr);
 
         if (data) {
-            const lots = data.map((d: { lot_code: string; products?: { name?: string | null; variant_name?: string | null } | null }) => ({
-                lot_code: d.lot_code,
-                product_name: `${d.products?.name ?? ""} (${d.products?.variant_name ?? ""})`
-            }));
+            const lots = data.map((d: any) => {
+                const prod = Array.isArray(d.products) ? d.products[0] : d.products;
+                return {
+                    lot_code: d.lot_code,
+                    product_name: `${prod?.name ?? ""} (${prod?.variant_name ?? ""})`
+                };
+            });
             setAvailableLots(lots);
         } else {
             setAvailableLots([]);
