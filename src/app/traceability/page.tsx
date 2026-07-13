@@ -106,13 +106,15 @@ export default function TraceabilityPage() {
                 return;
             }
 
-            const sProduct = stockData?.products as { name?: string | null; variant_name?: string | null; unit_per_cs?: number | null } | null;
-            const pProduct = planData?.products as { name?: string | null; variant_name?: string | null; unit_per_cs?: number | null } | null;
+            const rawSProduct = stockData?.products;
+            const sProduct = (Array.isArray(rawSProduct) ? rawSProduct[0] : rawSProduct) as { name?: string | null; variant_name?: string | null; unit_per_cs?: number | null } | null;
+            const rawPProduct = planData?.products;
+            const pProduct = (Array.isArray(rawPProduct) ? rawPProduct[0] : rawPProduct) as { name?: string | null; variant_name?: string | null; unit_per_cs?: number | null } | null;
 
             const productId = stockData?.product_id || planData?.product_id;
-            const productName = stockData ? `${sProduct.name} (${sProduct.variant_name})` : `${pProduct.name} (${pProduct.variant_name})`;
+            const productName = stockData ? `${sProduct?.name ?? ""} (${sProduct?.variant_name ?? ""})` : `${pProduct?.name ?? ""} (${pProduct?.variant_name ?? ""})`;
             const expiryDate = stockData?.expiry_date || "-";
-            const unitPerCs = (stockData ? sProduct.unit_per_cs : pProduct.unit_per_cs) || 24;
+            const unitPerCs = (stockData ? sProduct?.unit_per_cs : pProduct?.unit_per_cs) || 24;
 
             // 製造数の算出 (実績があれば実績、なければ計画数)
             let totalProduced = 0;
