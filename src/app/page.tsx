@@ -14,11 +14,6 @@ type InventoryItem = {
   item_stocks?: Array<{ quantity: number | null }> | { quantity: number | null } | null;
 };
 
-type ProductionPlanRow = {
-  planned_cs: number;
-  products?: { name?: string | null } | null;
-};
-
 type OrderRow = {
   id: string;
   planned_ship_date: string;
@@ -26,16 +21,22 @@ type OrderRow = {
   status: string;
   quantity: number;
   customer_order_no: string;
-  customers?: { name?: string | null } | null;
-  products?: { name?: string | null; variant_name?: string | null; unit_per_cs?: number | null } | null;
+  customers?: { name?: string | null } | Array<{ name?: string | null }> | null;
+  products?: { name?: string | null; variant_name?: string | null; unit_per_cs?: number | null } | Array<{ name?: string | null; variant_name?: string | null; unit_per_cs?: number | null }> | null;
   production_plans?: Array<{ production_date: string; planned_cs: number; status: string }> | null;
+  progressPercent?: number;
+  completedCs?: number;
+  completionDateStr?: string;
+  shipAvailableDateStr?: string;
+  shipAvailableDateObj?: Date | null;
+  isFullyPlanned?: boolean;
 };
 
 type ProductStockRow = {
   lot_code: string;
   total_pieces: number;
   expiry_date: string;
-  products?: { name?: string | null; unit_per_cs?: number | null } | null;
+  products?: { name?: string | null; unit_per_cs?: number | null } | Array<{ name?: string | null; unit_per_cs?: number | null }> | null;
 };
 
 type KeepSampleRow = {
@@ -43,7 +44,7 @@ type KeepSampleRow = {
   saved_quantity: number;
   used_quantity: number;
   expiry_date: string;
-  products?: { name?: string | null } | null;
+  products?: { name?: string | null } | Array<{ name?: string | null }> | null;
 };
 
 type OrderGroup = {
@@ -63,6 +64,24 @@ type OrderGroup = {
   shipAvailableDateStr: string;
 };
 
+// ==========================================================
+// ESLintおよびTypeScriptの不整合を回避するための
+// 戻り値の型を厳密に保証したデータ抽出ヘルパー
+// ==========================================================
+const getSingleProduct = (
+  p: { name?: string | null; variant_name?: string | null; unit_per_cs?: number | null } | Array<{ name?: string | null; variant_name?: string | null; unit_per_cs?: number | null }> | null | undefined
+): { name?: string | null; variant_name?: string | null; unit_per_cs?: number | null } | null => {
+  if (!p) return null;
+  return Array.isArray(p) ? p[0] : p;
+};
+
+const getSingleCustomer = (
+  c: { name?: string | null } | Array<{ name?: string | null }> | null | undefined
+): { name?: string | null } | null => {
+  if (!c) return null;
+  return Array.isArray(c) ? c[0] : c;
+};
+
 export default function Dashboard() {
   const { canEdit } = useAuth();
   const [loading, setLoading] = useState(true);
@@ -72,7 +91,7 @@ export default function Dashboard() {
   const [todayShip, setTodayShip] = useState<{ totalCs: number; detail: string }>({ totalCs: 0, detail: "予定なし" });
   const [ongoingGroups, setOngoingGroups] = useState<OrderGroup[]>([]);
 
-  // ★追加: アラート用State
+  // アラート用State
   const [expiringProducts, setExpiringProducts] = useState<ProductStockRow[]>([]); // 賞味期限間近
   const [expiredSamples, setExpiredSamples] = useState<KeepSampleRow[]>([]); // 廃棄対象サンプル
   const [missingHaccp, setMissingHaccp] = useState<string[]>([]); // 未入力のHACCP記録
@@ -98,10 +117,21 @@ export default function Dashboard() {
       setAlerts({ shortages, warnings, total: shortages.length + warnings.length });
 
       // 2. 本日の製造
-      const { data: prodData } = await supabase.from("production_plans").select("planned_cs, products(name)").eq("production_date", todayStr);
+      const { data: prodData } = await supabase.from("production_plans").select("planned_cs, products(name)");
       if (prodData && prodData.length > 0) {
-        const totalCs = prodData.reduce((sum: number, p: ProductionPlanRow) => sum + p.planned_cs, 0);
-        const names = Array.from(new Set(prodData.map((p: ProductionPlanRow) => p.products?.name)));
+        const typedProdData = prodData as unknown as Array<{ planned_cs: number; products: { name?: string | null } | Array<{ name?: string | null }> | null }>;
+        const totalCs = typedProdData.reduce((sum: number, p) => sum + (p.planned_cs || 0), 0);
+        
+        // リレーションの配列/オブジェクト両対応を考慮して製品名を取得します
+        const names = Array.from(
+          new Set(
+            typedProdData.map((p) => {
+              const singleProd = getSingleCustomer(p.products);
+              return singleProd?.name;
+            }).filter((name): name is string => typeof name === "string")
+          )
+        );
+        
         const detail = names.slice(0, 2).join(", ") + (names.length > 2 ? " 他" : "");
         setTodayProd({ totalCs, detail });
       }
@@ -109,8 +139,21 @@ export default function Dashboard() {
       // 3. 本日の出荷
       const { data: shipData } = await supabase.from("orders").select("quantity, customers(name), products(unit_per_cs)").eq("planned_ship_date", todayStr).neq("status", "shipped");
       if (shipData && shipData.length > 0) {
-        const totalCs = shipData.reduce((sum: number, o: OrderRow) => sum + Math.floor(o.quantity / (o.products?.unit_per_cs || 24)), 0);
-        const names = Array.from(new Set(shipData.map((o: OrderRow) => o.customers?.name)));
+        const typedShipData = shipData as unknown as OrderRow[];
+        const totalCs = typedShipData.reduce((sum: number, o) => {
+          const prod = getSingleProduct(o.products);
+          const unit = prod?.unit_per_cs || 24;
+          return sum + Math.floor((o.quantity || 0) / unit);
+        }, 0);
+
+        const names = Array.from(
+          new Set(
+            typedShipData.map((o) => {
+              const cust = getSingleCustomer(o.customers);
+              return cust?.name;
+            }).filter((name): name is string => typeof name === "string")
+          )
+        );
         const detail = names.slice(0, 2).join("様, ") + "様" + (names.length > 2 ? " 他" : " 宛");
         setTodayShip({ totalCs, detail });
       }
@@ -119,9 +162,14 @@ export default function Dashboard() {
       const { data: ordersData } = await supabase.from("orders").select("id, planned_ship_date, desired_ship_date, status, quantity, customer_order_no, customers(name), products(name, variant_name, unit_per_cs), production_plans(production_date, planned_cs, status)").in("status", ["received", "in_production"]).order("planned_ship_date", { ascending: true });
       if (ordersData) {
         const groups: Record<string, OrderGroup> = {};
-        ordersData.forEach((order: OrderRow) => {
+        const typedOrdersData = ordersData as unknown as OrderRow[];
+
+        typedOrdersData.forEach((order) => {
           const parts = order.id.split('-'); const gId = parts.length > 3 ? parts.slice(0, 3).join('-') : order.id;
-          const plans = order.production_plans || []; const unitPerCs = order.products?.unit_per_cs || 24;
+          const plans = order.production_plans || []; 
+          const prod = getSingleProduct(order.products);
+          const unitPerCs = prod?.unit_per_cs || 24;
+
           const completedPieces = plans.filter((p) => p.status === 'completed').reduce((sum: number, p) => sum + (p.planned_cs * unitPerCs), 0);
           const plannedPieces = plans.reduce((sum: number, p) => sum + (p.planned_cs * unitPerCs), 0);
           const progressPercent = Math.min(100, Math.floor((completedPieces / order.quantity) * 100));
@@ -138,18 +186,48 @@ export default function Dashboard() {
               shipAvailableDateObj = shipAvailable;
             } else { completionDateStr = "一部未計画"; }
           }
-          const processedOrder = { ...order, progressPercent, completedCs: Math.floor(completedPieces / unitPerCs), completionDateStr, shipAvailableDateStr, shipAvailableDateObj, isFullyPlanned };
+          
+          const completedCs = Math.floor(completedPieces / unitPerCs);
+          const processedOrder: OrderRow = { 
+            ...order, 
+            progressPercent, 
+            completedCs, 
+            completionDateStr, 
+            shipAvailableDateStr, 
+            shipAvailableDateObj, 
+            isFullyPlanned 
+          };
+
+          const cust = getSingleCustomer(order.customers);
+          const customerName = cust?.name || "不明な顧客";
 
           if (!groups[gId]) {
-            groups[gId] = { groupId: gId, customerName: order.customers?.name, customerOrderNo: order.customer_order_no, plannedShipDate: order.planned_ship_date, desiredShipDate: order.desired_ship_date, status: order.status, items: [], totalProgress: 0, totalCompletedCs: 0, totalQuantityCs: 0, isLate: new Date(order.planned_ship_date) < new Date(todayStr), shipWarning: false, completionDateStr: "-", shipAvailableDateStr: "-" };
+            groups[gId] = { 
+              groupId: gId, 
+              customerName: customerName, 
+              customerOrderNo: order.customer_order_no, 
+              plannedShipDate: order.planned_ship_date, 
+              desiredShipDate: order.desired_ship_date, 
+              status: order.status, 
+              items: [], 
+              totalProgress: 0, 
+              totalCompletedCs: 0, 
+              totalQuantityCs: 0, 
+              isLate: new Date(order.planned_ship_date) < new Date(todayStr), 
+              shipWarning: false, 
+              completionDateStr: "-", 
+              shipAvailableDateStr: "-" 
+            };
           }
           groups[gId].items.push(processedOrder);
         });
 
         Object.values(groups).forEach(g => {
           let totalPieces = 0; let totalCompletedPieces = 0; let latestCompletionTime = 0; let allPlanned = true;
-          g.items.forEach(item => {
-            const unit = item.products?.unit_per_cs || 24;
+          g.items.forEach((item) => {
+            const prod = getSingleProduct(item.products);
+            const unit = prod?.unit_per_cs || 24;
+            
             totalPieces += item.quantity; totalCompletedPieces += (item.completedCs || 0) * unit;
             g.totalQuantityCs += Math.floor(item.quantity / unit); g.totalCompletedCs += (item.completedCs || 0);
             if (!item.isFullyPlanned) allPlanned = false;
@@ -161,25 +239,40 @@ export default function Dashboard() {
           g.totalProgress = totalPieces > 0 ? Math.min(100, Math.floor((totalCompletedPieces / totalPieces) * 100)) : 0;
           if (!allPlanned) g.completionDateStr = "一部未計画";
           if (latestCompletionTime > 0 && new Date(latestCompletionTime) > new Date(g.plannedShipDate)) g.shipWarning = true;
-          if (g.items.some(i => i.status === 'in_production')) g.status = 'in_production';
+          if (g.items.some((i) => i.status === 'in_production')) g.status = 'in_production';
         });
         setOngoingGroups(Object.values(groups).slice(0, 10));
       }
 
-      // ★追加 5. 賞味期限間近の製品 (3ヶ月以内)
+      // 5. 賞味期限間近の製品 (3ヶ月以内)
       const threeMonthsLater = new Date(); threeMonthsLater.setMonth(threeMonthsLater.getMonth() + 3);
       const limitStr = threeMonthsLater.toISOString().split('T')[0];
       const { data: expProducts } = await supabase.from("product_stocks").select("lot_code, total_pieces, expiry_date, products(name, unit_per_cs)").lte("expiry_date", limitStr).gt("total_pieces", 0).order("expiry_date", { ascending: true });
-      if (expProducts) setExpiringProducts(expProducts);
+      if (expProducts) {
+        const formattedExpProducts = (expProducts as unknown as ProductStockRow[]).map((p) => ({
+          lot_code: p.lot_code,
+          total_pieces: p.total_pieces,
+          expiry_date: p.expiry_date,
+          products: getSingleProduct(p.products)
+        }));
+        setExpiringProducts(formattedExpProducts);
+      }
 
-      // ★追加 6. 廃棄対象のキープサンプル (期限切れ かつ 残数あり)
+      // 6. 廃棄対象のキープサンプル (期限切れ かつ 残数あり)
       const { data: expSamples } = await supabase.from("keep_samples").select("management_no, saved_quantity, used_quantity, expiry_date, products(name)").lt("expiry_date", todayStr).order("expiry_date", { ascending: true });
       if (expSamples) {
-        const toDiscard = expSamples.filter((s: KeepSampleRow) => (s.saved_quantity - s.used_quantity) > 0);
+        const formattedExpSamples = (expSamples as unknown as KeepSampleRow[]).map((s) => ({
+          management_no: s.management_no,
+          saved_quantity: s.saved_quantity,
+          used_quantity: s.used_quantity,
+          expiry_date: s.expiry_date,
+          products: getSingleCustomer(s.products)
+        }));
+        const toDiscard = formattedExpSamples.filter((s) => (s.saved_quantity - s.used_quantity) > 0);
         setExpiredSamples(toDiscard);
       }
 
-      // ★追加 7. HACCP記録の未入力チェック
+      // 7. HACCP記録の未入力チェック
       const haccpCheck = [];
       const [yo21, yo22, yo26, yo41] = await Promise.all([
         supabase.from("area_cleaning_checks").select("id").eq("check_date", todayStr).maybeSingle(),
@@ -224,7 +317,7 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        {/* ★追加: HACCP未入力アラート */}
+        {/* HACCP未入力アラート */}
         <Link href="/haccp" className="block cursor-pointer">
           <Card className={`${missingHaccp.length > 0 ? 'border-orange-300 bg-orange-50 hover:bg-orange-100' : 'border-emerald-200 bg-emerald-50 hover:bg-emerald-100'} shadow-sm transition-colors h-full`}>
             <CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className={`text-sm font-bold ${missingHaccp.length > 0 ? 'text-orange-800' : 'text-emerald-800'}`}>本日のHACCP記録</CardTitle><ClipboardCheck className={`h-5 w-5 ${missingHaccp.length > 0 ? 'text-orange-600' : 'text-emerald-600'}`} /></CardHeader>
@@ -287,7 +380,7 @@ export default function Dashboard() {
                           )}
                         </div>
                         <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden shadow-inner">
-                          <div className={`h-full transition-all duration-500 ${group.totalProgress === 100 ? 'bg-green-500' : 'bg-blue-500'}`} style={{ width: `${group.totalProgress}%` }}></div>
+                          <div className={`h-full transition-all duration-500 ${group.totalProgress === 100 ? 'bg-green-500' : 'bg-blue-50'}`} style={{ width: `${group.totalProgress}%` }}></div>
                         </div>
                       </div>
                     </div>
