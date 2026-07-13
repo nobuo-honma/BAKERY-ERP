@@ -173,9 +173,9 @@ export default function SensoryTestsPage() {
         // DBに保存されているJSONから、チェック項目と「その他」のテキストを復元
         Object.keys(recResults).forEach(key => {
             if (key.endsWith('_other_text')) {
-                parsedOthers[key.replace('_other_text', '')] = recResults[key];
+                parsedOthers[key.replace('_other_text', '')] = recResults[key] as string;
             } else {
-                parsedResults[key] = Array.isArray(recResults[key]) ? recResults[key] : [recResults[key]];
+                parsedResults[key] = Array.isArray(recResults[key]) ? recResults[key] as string[] : [recResults[key] as string];
             }
         });
         setResults(parsedResults);
