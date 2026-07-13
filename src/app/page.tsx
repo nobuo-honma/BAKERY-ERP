@@ -36,7 +36,7 @@ type ProductStockRow = {
   lot_code: string;
   total_pieces: number;
   expiry_date: string;
-  products?: { name?: string | null; unit_per_cs?: number | null } | Array<{ name?: string | null; unit_per_cs?: number | null }> | null;
+  products?: { name?: string | null; unit_per_cs?: number | null } | null;
 };
 
 type KeepSampleRow = {
@@ -44,7 +44,7 @@ type KeepSampleRow = {
   saved_quantity: number;
   used_quantity: number;
   expiry_date: string;
-  products?: { name?: string | null } | Array<{ name?: string | null }> | null;
+  products?: { name?: string | null } | null;
 };
 
 type OrderGroup = {
