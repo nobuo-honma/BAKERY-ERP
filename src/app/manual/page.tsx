@@ -282,8 +282,14 @@ export default function ManualPage() {
   }, [tab]);
 
   const scrollTo = (id: string) => {
-    const el = document.getElementById(id);
-    if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 80, behavior: "smooth" });
+    if (typeof window === "undefined") return; // サーバーサイド実行時のエラーを完全に防ぎます
+    const el = (window as any).document.getElementById(id);
+    if (el) {
+      (window as any).scrollTo({
+        top: el.getBoundingClientRect().top + (window as any).scrollY - 80,
+        behavior: "smooth" // 元のコードの指定に合わせて記述してください
+      });
+    }
     setMobileTocOpen(false);
     setActiveSection(id);
   };
