@@ -265,7 +265,8 @@ export default function ManualPage() {
     const handleScroll = () => {
       const tocItems = tab === "user" ? USER_TOC : [];
       for (const item of [...tocItems].reverse()) {
-        const el = document.getElementById(item.id);
+        // window経由で安全にdocumentを取得し、コンパイルエラーを回避します
+        const el = typeof window !== "undefined" ? (window as any).document.getElementById(item.id) : null;
         if (el) {
           const rect = el.getBoundingClientRect();
           if (rect.top <= 120) {
