@@ -155,7 +155,7 @@ export default function TraceabilityPage() {
                 productName,
                 expiryDate,
                 totalProduced,
-                shipments: shipments || [],
+                shipments: (shipments as any) || [],
                 productionPlan: planData || null,
                 fujiSteamyLogs: fujiLogs || [],
                 sensoryTest: sensory || null,
