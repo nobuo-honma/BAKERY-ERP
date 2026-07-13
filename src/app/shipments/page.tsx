@@ -12,7 +12,7 @@ import { useAuth } from "@/contexts/AuthContext";
 
 type Order = {
   id: string; order_date: string; planned_ship_date: string; desired_ship_date: string;
-  quantity: number; status: string; product_id: string; customer_order_no?: string;
+  quantity: number; status: string; product_id: string; customer_id: string; customer_order_no?: string;
   customers?: { name: string };
   products?: { name: string; variant_name: string; unit_per_cs: number };
 };
