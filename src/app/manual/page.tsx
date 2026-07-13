@@ -8,7 +8,6 @@ import {
   ArrowDownToLine, ShoppingCart, Edit, ShieldCheck, LineChart, Search, Bug
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import document from "next/document";
 
 // ─────────────────────────────────────────────
 type TabKey = "user" | "tech";
@@ -265,8 +264,7 @@ export default function ManualPage() {
     const handleScroll = () => {
       const tocItems = tab === "user" ? USER_TOC : [];
       for (const item of [...tocItems].reverse()) {
-        // window経由で安全にdocumentを取得し、コンパイルエラーを回避します
-        const el = typeof window !== "undefined" ? (window as any).document.getElementById(item.id) : null;
+        const el = document.getElementById(item.id);
         if (el) {
           const rect = el.getBoundingClientRect();
           if (rect.top <= 120) {
@@ -282,14 +280,8 @@ export default function ManualPage() {
   }, [tab]);
 
   const scrollTo = (id: string) => {
-    if (typeof window === "undefined") return; // サーバーサイド実行時のエラーを完全に防ぎます
-    const el = (window as any).document.getElementById(id);
-    if (el) {
-      (window as any).scrollTo({
-        top: el.getBoundingClientRect().top + (window as any).scrollY - 80,
-        behavior: "smooth" // 元のコードの指定に合わせて記述してください
-      });
-    }
+    const el = document.getElementById(id);
+    if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 80, behavior: "smooth" });
     setMobileTocOpen(false);
     setActiveSection(id);
   };
@@ -488,7 +480,7 @@ export default function ManualPage() {
                     <NoteBox type="info">
                       <p className="font-bold mb-1">BOM（部品表）シミュレーションアラートの動作</p>
                       数量を入力した瞬間、裏側で必要となる原材料・外箱・缶・ラベルなどの「必要量」が自動計算され、現在の倉庫在庫と比較されます。
-                      <strong>不足する原材料・資材がある場合、不足数が赤い文字で警告表示されます。</strong> この状態でも受注登録自体は可能ですが、速やかに「入荷管理（発注）」を計画してください。
+                      <strong>不足する原材料・資材在庫がある場合、不足数が赤い文字で警告表示されます。</strong> この状態でも受注登録自体は可能ですが、速やかに「入荷管理（発注）」を計画してください。
                     </NoteBox>
                   </Step>
                   <Step n={4} title="「受注を確定する」ボタンで保存">
@@ -516,7 +508,7 @@ export default function ManualPage() {
                     <p>入荷管理画面の左側の登録パネルで、発注日、入荷予定日、品目、数量を入力します。この時点のステータスは「発注済」となり、在庫にはまだ加算されません（MRPカレンダー上の「入荷予定数」として組み込まれます）。</p>
                   </Step>
                   <Step n={2} title="発注書 PDF の自動出力と送付">
-                    <p>右上の「発注書（PDF）作成」ボタンを押すと、登録されたデータに基づきメーカー・取引先別の正式な発注書フォーマットがレイアウトされます。ブラウザの印刷ダイアログから紙に印刷、またはPDF保存してFAX・メールで送信します。</p>
+                    <p>右上の「発注書（PDF）作成」ボタンを押すと、登録されたデータに基づきメーカー・取引先別の正式な発注書フォーマットがレイアウトされます。ブラウザ的の印刷ダイアログから紙に印刷、またはPDF保存してFAX・メールで送信します。</p>
                     <p className="text-xs text-slate-500 mt-1">※大槻食材への発注は専用ボタンから別サイトを開いて行います。</p>
                   </Step>
 
