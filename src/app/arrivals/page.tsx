@@ -370,7 +370,7 @@ export default function ArrivalsPage() {
                 // まず今日のHACCPデータを取得
                 const { data: existingHaccp } = await supabase.from('material_receiving_checks').select('*').eq('check_date', todayStr).maybeSingle();
 
-                let currentResults = existingHaccp?.results || {};
+                const currentResults = existingHaccp?.results || {};
 
                 // 今回の入荷分をマージ
                 currentResults[matchedItem.id] = {
@@ -397,9 +397,10 @@ export default function ArrivalsPage() {
             await fetchData();
             alert(`入荷処理が完了し、在庫に加算されました！\n${matchedItem ? "（HACCP受入台帳にも自動記録しました）" : "（※この品目はHACCP受入台帳の対象外です）"}`);
 
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error(err);
-            alert("入荷処理中にエラーが発生しました: " + err.message);
+            const message = err instanceof Error ? err.message : String(err);
+            alert("入荷処理中にエラーが発生しました: " + message);
         } finally {
             setIsProcessing(false);
         }

@@ -1,16 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { CheckCircle2, XCircle, MinusCircle, Save, Loader2, CalendarDays, Printer, ArrowLeft, Eye, Lock, Edit, Trash2, Plus, Box } from "lucide-react";
+import { CheckCircle2, XCircle, MinusCircle, Save, Loader2, CalendarDays, Printer, ArrowLeft, Lock, Edit, Trash2, Plus, Box } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import HaccpPrintHeader from "@/components/HaccpPrintHeader";
 
 // YO-4 のチェック内容定義
@@ -25,6 +23,20 @@ const CHECK_ITEMS = [
 
 type PlanOption = { lot_code: string; product_name: string; planned_units: number; unit_per_cs: number };
 type CheckResult = 'ok' | 'ng' | null;
+type EcopackCheckRow = {
+    id: string;
+    check_date: string;
+    lot_code: string;
+    product_name: string;
+    planned_qty: number;
+    seal_checked: number | null;
+    seal_ng: number | null;
+    oxygen_level: number | null;
+    checker_name: string;
+    results?: Record<string, CheckResult>;
+    defective_qty: number | null;
+    notes: string;
+};
 
 export default function EcopackChecksPage() {
     const { canEdit } = useAuth();
@@ -33,7 +45,7 @@ export default function EcopackChecksPage() {
     const [viewMode, setViewMode] = useState<'input' | 'list' | 'print'>('list');
 
     // 日次入力用State
-    const [testDate, setTestDate] = useState("");
+    const [testDate, setTestDate] = useState(() => new Date().toISOString().split('T')[0]);
     const [lotCode, setLotCode] = useState("");
     const [productName, setProductName] = useState("");
     const [plannedQty, setPlannedQty] = useState<number | "">(""); // ピース数
@@ -53,44 +65,52 @@ export default function EcopackChecksPage() {
     const [availableLots, setAvailableLots] = useState<PlanOption[]>([]);
 
     // 一覧用・印刷用State
-    const [testRecords, setTestRecords] = useState<any[]>([]);
+    const [testRecords, setTestRecords] = useState<EcopackCheckRow[]>([]);
     const [printMonth, setPrintMonth] = useState(new Date());
 
-    useEffect(() => {
-        const today = new Date().toISOString().split('T')[0];
-        setTestDate(today);
-        fetchRecords();
+    const fetchRecords = useCallback(async () => {
+        setLoading(true);
+        const { data } = await supabase.from('ecopack_checks').select('*').order('check_date', { ascending: false }).limit(50);
+        const rows = (data as EcopackCheckRow[] | null) ?? [];
+        setTestRecords(rows);
+        setLoading(false);
     }, []);
 
-    useEffect(() => {
-        if (viewMode === 'input' && testDate) fetchAvailableLots(testDate);
-    }, [testDate, viewMode]);
-
-    const fetchRecords = async () => {
-        setLoading(true);
-        // 通常の一覧画面では最新のものが上に来るように降順(desc)で取得します
-        const { data } = await supabase.from('ecopack_checks').select('*').order('check_date', { ascending: false }).limit(50);
-        if (data) setTestRecords(data);
-        setLoading(false);
-    };
-
-    const fetchAvailableLots = async (dateStr: string) => {
+    const fetchAvailableLots = useCallback(async (dateStr: string) => {
         const { data } = await supabase.from('production_plans')
             .select('lot_code, planned_units, products(name, variant_name, unit_per_cs)')
             .eq('production_date', dateStr);
 
         if (data) {
-            const lots = data.map((d: any) => ({
-                lot_code: d.lot_code,
-                product_name: `${d.products?.name} (${d.products?.variant_name})`,
-                planned_units: d.planned_units || (d.planned_cs * (d.products?.unit_per_cs || 24) * 2), // ピース数換算
-                unit_per_cs: d.products?.unit_per_cs || 24
+            const lots: PlanOption[] = data.map((d: Record<string, unknown>) => ({
+                lot_code: String(d.lot_code ?? ""),
+                product_name: `${String((d.products as Record<string, unknown> | undefined)?.name ?? "") } (${String((d.products as Record<string, unknown> | undefined)?.variant_name ?? "")})`,
+                planned_units: Number(d.planned_units ?? 0),
+                unit_per_cs: Number((d.products as Record<string, unknown> | undefined)?.unit_per_cs ?? 24)
             }));
             setAvailableLots(lots);
         } else {
             setAvailableLots([]);
         }
-    };
+    }, []);
+
+    useEffect(() => {
+        const timeoutId = window.setTimeout(() => {
+            void fetchRecords();
+        }, 0);
+
+        return () => window.clearTimeout(timeoutId);
+    }, [fetchRecords]);
+
+    useEffect(() => {
+        if (viewMode !== 'input' || !testDate) return;
+
+        const timeoutId = window.setTimeout(() => {
+            void fetchAvailableLots(testDate);
+        }, 0);
+
+        return () => window.clearTimeout(timeoutId);
+    }, [fetchAvailableLots, testDate, viewMode]);
 
     const handleLotSelect = (selectedLot: string) => {
         setLotCode(selectedLot);
@@ -120,7 +140,7 @@ export default function EcopackChecksPage() {
         setViewMode('input');
     };
 
-    const handleEdit = (record: any) => {
+    const handleEdit = (record: EcopackCheckRow) => {
         setTestDate(record.check_date); setLotCode(record.lot_code); setProductName(record.product_name);
         setPlannedQty(record.planned_qty);
         setUnitPerCs(24);
@@ -159,7 +179,7 @@ export default function EcopackChecksPage() {
         else { alert("製品チェック記録を保存しました！"); setViewMode('list'); fetchRecords(); }
     };
 
-    const handleDelete = async (record: any) => {
+    const handleDelete = async (record: EcopackCheckRow) => {
         if (!confirm(`Lot: ${record.lot_code} の検査記録を削除しますか？`)) return;
         const { error } = await supabase.from('ecopack_checks').delete().eq('id', record.id);
         if (error) alert("削除エラー: " + error.message);
@@ -170,6 +190,8 @@ export default function EcopackChecksPage() {
     // 月間一覧・印刷（PDF帳票）ビュー
     // A4 縦サイズ
     // =======================================================================
+
+    type PrintRow = EcopackCheckRow | { id: string; isEmpty: true };
 
     const printRecords = testRecords
         .filter(r => {
@@ -182,7 +204,7 @@ export default function EcopackChecksPage() {
         const y = printMonth.getFullYear();
         const m = String(printMonth.getMonth() + 1).padStart(2, '0');
 
-        const displayRows = [...printRecords];
+        const displayRows: PrintRow[] = [...printRecords];
         while (displayRows.length < 26) {
             displayRows.push({ id: `empty-${displayRows.length}`, isEmpty: true });
         }
@@ -246,7 +268,7 @@ export default function EcopackChecksPage() {
                         </thead>
                         <tbody>
                             {displayRows.map((row, idx) => {
-                                if (row.isEmpty) {
+                                if ("isEmpty" in row) {
                                     return (
                                         <tr key={idx} className="h-[7mm]">
                                             <td className="border border-black text-center text-[11px]"> / </td>
@@ -267,9 +289,10 @@ export default function EcopackChecksPage() {
                                     );
                                 }
 
-                                const d = new Date(row.check_date);
+                                const record = row as EcopackCheckRow;
+                                const d = new Date(record.check_date);
                                 const dateStr = `${d.getMonth() + 1}/${d.getDate()}`;
-                                const res = row.results || {};
+                                const res = record.results || {};
                                 const getOkNg = (id: string) => {
                                     if (res[id] === 'ok') return <><span className="font-bold text-black border border-black rounded-full w-3 h-3 flex items-center justify-center">良</span> <span className="text-slate-300">不</span></>;
                                     if (res[id] === 'ng') return <><span className="text-slate-300">良</span> <span className="font-bold text-black border border-black rounded-full w-3 h-3 flex items-center justify-center">不</span></>;
@@ -277,30 +300,30 @@ export default function EcopackChecksPage() {
                                 };
 
                                 // ★修正: 個数を2で割ってパック数にし、さらにunit_per_csで割ってケース数を出す
-                                const rowCs = Math.floor((row.planned_qty / 2) / 24);
+                                const rowCs = Math.floor((record.planned_qty / 2) / 24);
 
                                 return (
                                     <tr key={row.id} className="h-[7mm]">
                                         <td className="border border-black text-center text-xs tracking-wider font-bold">{dateStr}</td>
                                         <td className="border border-black relative p-0 text-[9px] font-bold">
-                                            <div className="h-1/2 border-b border-dashed border-black/50 px-1 truncate leading-tight flex items-end pb-0.5">{row.product_name}</div>
-                                            <div className="h-1/2 px-1 truncate leading-tight flex items-start pt-0.5">{row.lot_code}</div>
+                                            <div className="h-1/2 border-b border-dashed border-black/50 px-1 truncate leading-tight flex items-end pb-0.5">{record.product_name}</div>
+                                            <div className="h-1/2 px-1 truncate leading-tight flex items-start pt-0.5">{record.lot_code}</div>
                                         </td>
                                         <td className="border border-black p-0 text-xs font-bold text-right pr-0.5">
                                             <div className="h-1/2 border-b border-dashed border-black/50 flex items-end justify-end pb-0.5">{rowCs} <span className="text-[8px] font-normal ml-0.5">c/s</span></div>
-                                            <div className="h-1/2 flex items-end justify-end">{row.planned_qty} <span className="text-[8px] font-normal ml-0.5">個</span></div>
+                                            <div className="h-1/2 flex items-end justify-end">{record.planned_qty} <span className="text-[8px] font-normal ml-0.5">個</span></div>
                                         </td>
-                                        <td className="border border-black text-center text-[10px]">{row.seal_ng !== null ? `${row.seal_ng} / ${row.seal_checked}` : ""}</td>
-                                        <td className="border border-black text-center text-[11px] font-bold">{row.oxygen_level !== null ? row.oxygen_level : ""}</td>
-                                        <td className="border border-black text-center text-[9px] truncate px-0.5">{row.checker_name}</td>
+                                        <td className="border border-black text-center text-[10px]">{record.seal_ng !== null ? `${record.seal_ng} / ${record.seal_checked}` : ""}</td>
+                                        <td className="border border-black text-center text-[11px] font-bold">{record.oxygen_level !== null ? record.oxygen_level : ""}</td>
+                                        <td className="border border-black text-center text-[9px] truncate px-0.5">{record.checker_name}</td>
                                         <td className="border border-black p-0">
                                             <div className="flex w-full h-full divide-x divide-black text-[8px] items-center text-center">
                                                 <div className="flex-1 flex justify-center gap-0.5">{getOkNg('c1')}</div><div className="flex-1 flex justify-center gap-0.5">{getOkNg('c2')}</div><div className="flex-1 flex justify-center gap-0.5">{getOkNg('c3')}</div>
                                                 <div className="flex-1 flex justify-center gap-0.5">{getOkNg('c4')}</div><div className="flex-1 flex justify-center gap-0.5">{getOkNg('c5')}</div><div className="flex-1 flex justify-center gap-0.5">{getOkNg('c6')}</div>
                                             </div>
                                         </td>
-                                        <td className="border border-black text-center font-bold text-xs">{row.defective_qty !== null ? row.defective_qty : ""}</td>
-                                        <td className="border border-black text-[8px] px-0.5 truncate">{row.notes}</td>
+                                        <td className="border border-black text-center font-bold text-xs">{record.defective_qty !== null ? record.defective_qty : ""}</td>
+                                        <td className="border border-black text-[8px] px-0.5 truncate">{record.notes}</td>
                                     </tr>
                                 );
                             })}

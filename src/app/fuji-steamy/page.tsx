@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,27 @@ type ParsedData = {
 
 type Config = { timeCol: string; flagCol: string; centerTempCol: string; chamberTempCol: string; };
 type Product = { id: string; name: string; variant_name: string; };
+type ViewMode = 'input' | 'list' | 'print';
+type RecordRow = {
+    id: string;
+    work_date: string;
+    batch_name?: string | null;
+    product_name?: string | null;
+    quantity?: number | null;
+    discard_qty?: number | null;
+    start_time?: string;
+    end_time?: string;
+    reach_80_time?: string | null;
+    max_temp?: number | null;
+    avg_temp?: number | null;
+    checker_name?: string | null;
+};
+type EditValues = {
+    productName: string;
+    quantity: number | "";
+    discardQty: number | "";
+    checkerName: string;
+};
 
 const DEFAULT_CONFIG: Config = {
     timeCol: "Group1",
@@ -60,8 +81,18 @@ const getFiscalYear = (date: Date) => {
 export default function FujiSteamyPage() {
     const { canEdit } = useAuth();
     const [loading, setLoading] = useState(false);
-    const [viewMode, setViewMode] = useState<'input' | 'list' | 'print'>('input');
-    const [config, setConfig] = useState<Config>(DEFAULT_CONFIG);
+    const [viewMode, setViewMode] = useState<ViewMode>('input');
+    const [config, setConfig] = useState<Config>(() => {
+        if (typeof window === 'undefined') return DEFAULT_CONFIG;
+        const savedConfig = window.localStorage.getItem("fuji_steamy_config");
+        if (!savedConfig) return DEFAULT_CONFIG;
+
+        try {
+            return JSON.parse(savedConfig) as Config;
+        } catch {
+            return DEFAULT_CONFIG;
+        }
+    });
     const [configModalOpen, setConfigModalOpen] = useState(false);
 
     // 解析用State
@@ -72,22 +103,16 @@ export default function FujiSteamyPage() {
 
     // マスタ情報・一覧用State
     const [products, setProducts] = useState<Product[]>([]);
-    const [records, setRecords] = useState<any[]>([]);
+    const [records, setRecords] = useState<RecordRow[]>([]);
     const [displayMonth, setDisplayMonth] = useState(new Date());
 
     // 既存データのインライン編集用State
     const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
-    const [editValues, setEditValues] = useState<{ productName: string; quantity: number | ""; discardQty: number | ""; checkerName: string }>({
+    const [editValues, setEditValues] = useState<EditValues>({
         productName: "", quantity: "", discardQty: "", checkerName: ""
     });
 
-    useEffect(() => {
-        fetchRecords();
-        const savedConfig = localStorage.getItem("fuji_steamy_config");
-        if (savedConfig) setConfig(JSON.parse(savedConfig));
-    }, []);
-
-    const fetchRecords = async () => {
+    const fetchRecords = useCallback(async () => {
         setLoading(true);
         const [logsRes, productsRes] = await Promise.all([
             supabase.from('fuji_steamy_logs')
@@ -98,13 +123,21 @@ export default function FujiSteamyPage() {
         ]);
 
         if (logsRes.data) {
-            const filteredRecords = logsRes.data.filter((r: any) => r.product_name !== 'ならし運転');
+            const filteredRecords = logsRes.data.filter((record: RecordRow) => record.product_name !== 'ならし運転');
             setRecords(filteredRecords);
         }
         if (productsRes.data) setProducts(productsRes.data as Product[]);
 
         setLoading(false);
-    };
+    }, []);
+
+    useEffect(() => {
+        const timeoutId = window.setTimeout(() => {
+            void fetchRecords();
+        }, 0);
+
+        return () => window.clearTimeout(timeoutId);
+    }, [fetchRecords]);
 
     const handleSaveConfig = () => {
         localStorage.setItem("fuji_steamy_config", JSON.stringify(config));
@@ -216,9 +249,9 @@ export default function FujiSteamyPage() {
         setLoading(false);
     };
 
-    const handleUpdateParsed = (idx: number, field: keyof ParsedData, value: any) => {
+    const handleUpdateParsed = (idx: number, field: keyof ParsedData, value: ParsedData[keyof ParsedData]) => {
         const updated = [...parsedList];
-        updated[idx] = { ...updated[idx], [field]: value };
+        updated[idx] = { ...updated[idx], [field]: value } as ParsedData;
 
         if (field === 'quantity') {
             const qty = Number(value);
@@ -302,13 +335,13 @@ export default function FujiSteamyPage() {
     };
 
     // ================= 既存データのインライン編集ロジック =================
-    const startEditing = (record: any) => {
+    const startEditing = (record: RecordRow) => {
         setEditingRecordId(record.id);
         setEditValues({
-            productName: record.product_name || "",
-            quantity: record.quantity || "",
-            discardQty: record.discard_qty !== null ? record.discard_qty : "",
-            checkerName: record.checker_name || ""
+            productName: record.product_name ?? "",
+            quantity: record.quantity ?? "",
+            discardQty: record.discard_qty ?? "",
+            checkerName: record.checker_name ?? ""
         });
     };
 
@@ -316,7 +349,7 @@ export default function FujiSteamyPage() {
         setEditingRecordId(null);
     };
 
-    const handleEditValueChange = (field: keyof typeof editValues, value: any) => {
+    const handleEditValueChange = (field: keyof typeof editValues, value: EditValues[keyof EditValues]) => {
         setEditValues(prev => {
             const updated = { ...prev, [field]: value };
             if (field === 'quantity') {
@@ -354,7 +387,11 @@ export default function FujiSteamyPage() {
     const targetRecords = records.filter(r => {
         const d = new Date(r.work_date);
         return d.getFullYear() === displayMonth.getFullYear() && d.getMonth() === displayMonth.getMonth();
-    }).sort((a, b) => new Date(a.work_date).getTime() - new Date(b.work_date).getTime() || a.start_time.localeCompare(b.start_time));
+    }).sort((a, b) => {
+        const byDate = new Date(a.work_date).getTime() - new Date(b.work_date).getTime();
+        if (byDate !== 0) return byDate;
+        return (a.start_time ?? "").localeCompare(b.start_time ?? "");
+    });
 
     // ================= 印刷ビュー =================
     if (viewMode === 'print') {
@@ -438,9 +475,9 @@ export default function FujiSteamyPage() {
                             </thead>
                             <tbody>
                                 {chunk.map((r) => {
-                                    const sTime = formatTimeHHmm(r.start_time);
-                                    const eTime = formatTimeHHmm(r.end_time);
-                                    const r80Time = r.reach_80_time !== "-" ? formatTimeHHmm(r.reach_80_time) : "未達";
+                                    const sTime = formatTimeHHmm(r.start_time ?? "");
+                                    const eTime = formatTimeHHmm(r.end_time ?? "");
+                                    const r80Time = r.reach_80_time && r.reach_80_time !== "-" ? formatTimeHHmm(r.reach_80_time) : "未達";
                                     const dObj = new Date(r.work_date);
                                     const dateStr = `${dObj.getMonth() + 1}/${dObj.getDate()}`;
 
@@ -498,7 +535,11 @@ export default function FujiSteamyPage() {
                 </Button>
             </div>
 
-            <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as any)} className="w-full">
+            <Tabs value={viewMode} onValueChange={(value) => {
+                if (value === 'input' || value === 'list' || value === 'print') {
+                    setViewMode(value);
+                }
+            }} className="w-full">
                 <TabsList className="mb-6 bg-slate-200/80 p-1.5 rounded-xl">
                     <TabsTrigger value="input" className="font-bold py-2.5 px-6 rounded-lg data-[state=active]:bg-white data-[state=active]:text-indigo-700 data-[state=active]:shadow-sm">CSVアップロード ＆ 解析</TabsTrigger>
                     <TabsTrigger value="list" className="font-bold py-2.5 px-6 rounded-lg data-[state=active]:bg-white data-[state=active]:text-indigo-700 data-[state=active]:shadow-sm">記録一覧 (PDF出力)</TabsTrigger>
@@ -658,9 +699,9 @@ export default function FujiSteamyPage() {
                                 </TableHeader>
                                 <TableBody>
                                     {targetRecords.map(rec => {
-                                        const sTime = formatTimeHHmm(rec.start_time);
-                                        const eTime = formatTimeHHmm(rec.end_time);
-                                        const r80Time = rec.reach_80_time !== "-" ? formatTimeHHmm(rec.reach_80_time) : "未達";
+                                        const sTime = formatTimeHHmm(rec.start_time ?? "");
+                                        const eTime = formatTimeHHmm(rec.end_time ?? "");
+                                        const r80Time = rec.reach_80_time && rec.reach_80_time !== "-" ? formatTimeHHmm(rec.reach_80_time) : "未達";
 
                                         return (
                                             <TableRow key={rec.id} className="hover:bg-slate-50">
@@ -737,7 +778,7 @@ export default function FujiSteamyPage() {
                                                                     setEditValues({
                                                                         productName: rec.product_name || "",
                                                                         quantity: rec.quantity || "",
-                                                                        discardQty: rec.discard_qty !== null ? rec.discard_qty : "",
+                                                                        discardQty: rec.discard_qty ?? "",
                                                                         checkerName: rec.checker_name || ""
                                                                     });
                                                                 }
@@ -749,7 +790,7 @@ export default function FujiSteamyPage() {
                                                             {canEdit && <Edit2 className="h-3 w-3 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />}
                                                         </div>
                                                     )}
-                                                    <div className="text-[9px] text-slate-400 truncate max-w-[120px] mt-0.5" title={rec.batch_name}>{rec.batch_name}</div>
+                                                    <div className="text-[9px] text-slate-400 truncate max-w-[120px] mt-0.5" title={rec.batch_name ?? undefined}>{rec.batch_name ?? ""}</div>
                                                 </TableCell>
 
                                                 <TableCell className="text-center">

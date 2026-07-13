@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,15 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Save, Loader2, CalendarDays, Printer, ArrowLeft, Lock, Scale, CheckCircle2, XCircle, MinusCircle } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 
-type ScaleCheck = {
+type ScaleCheckField =
+  | 'check_date' | 'check_time'
+  | 'status_a' | 'status_b' | 'status_c'
+  | 'd1_weight' | 'd1_diff' | 'd2_weight' | 'd2_diff'
+  | 'd3_weight' | 'd3_diff' | 'd4_weight' | 'd4_diff'
+  | 'd5_weight' | 'd5_diff'
+  | 'checker_name' | 'notes';
+
+type ScaleCheck = Record<ScaleCheckField, string | number | null> & {
   check_date: string;
   check_time: string;
   status_a: 'ok' | 'ng' | null;
@@ -24,6 +32,25 @@ type ScaleCheck = {
   d5_weight: number | ""; d5_diff: number | "";
   checker_name: string;
   notes: string;
+};
+type ScaleCheckViewMode = 'input' | 'monthly' | 'print';
+type ScaleCheckRow = ScaleCheck & {
+  check_time?: string | null;
+  status_a?: 'ok' | 'ng' | null;
+  status_b?: 'ok' | 'ng' | null;
+  status_c?: 'ok' | 'ng' | null;
+  d1_weight?: number | null;
+  d1_diff?: number | null;
+  d2_weight?: number | null;
+  d2_diff?: number | null;
+  d3_weight?: number | null;
+  d3_diff?: number | null;
+  d4_weight?: number | null;
+  d4_diff?: number | null;
+  d5_weight?: number | null;
+  d5_diff?: number | null;
+  checker_name?: string | null;
+  notes?: string | null;
 };
 
 const DEFAULT_STATE: ScaleCheck = {
@@ -38,73 +65,102 @@ const DEFAULT_STATE: ScaleCheck = {
 export default function ScaleChecksPage() {
   const { canEdit } = useAuth();
   const [loading, setLoading] = useState(false);
-  const [viewMode, setViewMode] = useState<'input' | 'monthly' | 'print'>('input');
+  const [viewMode, setViewMode] = useState<ScaleCheckViewMode>('input');
 
-  const [checkDate, setCheckDate] = useState("");
+  const [checkDate, setCheckDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [formData, setFormData] = useState<ScaleCheck>(DEFAULT_STATE);
   const [isSaving, setIsSaving] = useState(false);
 
   const [calendarMonth, setCalendarMonth] = useState(new Date());
   const [monthlyData, setMonthlyData] = useState<Record<string, ScaleCheck>>({});
 
-  useEffect(() => {
-    const today = new Date().toISOString().split('T')[0];
-    setCheckDate(today);
-  }, []);
-
-  useEffect(() => {
-    if (checkDate && viewMode === 'input') fetchDailyData(checkDate);
-  }, [checkDate, viewMode]);
-
-  useEffect(() => {
-    if (viewMode === 'monthly' || viewMode === 'print') fetchMonthlyData(calendarMonth);
-  }, [calendarMonth, viewMode]);
-
-  const fetchDailyData = async (dateStr: string) => {
+  const fetchDailyData = useCallback(async (dateStr: string) => {
     setLoading(true);
     const { data } = await supabase.from('scale_checks').select('*').eq('check_date', dateStr).maybeSingle();
-    if (data) {
+    const row = data as ScaleCheckRow | null;
+    if (row) {
       setFormData({
-        check_date: data.check_date, check_time: data.check_time || "",
-        status_a: data.status_a, status_b: data.status_b, status_c: data.status_c,
-        d1_weight: data.d1_weight ?? "", d1_diff: data.d1_diff ?? "",
-        d2_weight: data.d2_weight ?? "", d2_diff: data.d2_diff ?? "",
-        d3_weight: data.d3_weight ?? "", d3_diff: data.d3_diff ?? "",
-        d4_weight: data.d4_weight ?? "", d4_diff: data.d4_diff ?? "",
-        d5_weight: data.d5_weight ?? "", d5_diff: data.d5_diff ?? "",
-        checker_name: data.checker_name || "", notes: data.notes || ""
+        check_date: row.check_date, check_time: row.check_time || "",
+        status_a: row.status_a ?? null, status_b: row.status_b ?? null, status_c: row.status_c ?? null,
+        d1_weight: row.d1_weight ?? "", d1_diff: row.d1_diff ?? "",
+        d2_weight: row.d2_weight ?? "", d2_diff: row.d2_diff ?? "",
+        d3_weight: row.d3_weight ?? "", d3_diff: row.d3_diff ?? "",
+        d4_weight: row.d4_weight ?? "", d4_diff: row.d4_diff ?? "",
+        d5_weight: row.d5_weight ?? "", d5_diff: row.d5_diff ?? "",
+        checker_name: row.checker_name || "", notes: row.notes || ""
       });
     } else {
       setFormData({ ...DEFAULT_STATE, check_date: dateStr });
     }
     setLoading(false);
-  };
+  }, []);
 
-  const fetchMonthlyData = async (dateObj: Date) => {
+  const fetchMonthlyData = useCallback(async (dateObj: Date) => {
     setLoading(true);
     const y = dateObj.getFullYear(); const m = String(dateObj.getMonth() + 1).padStart(2, '0');
     const startDate = `${y}-${m}-01`;
     const endDate = new Date(y, dateObj.getMonth() + 1, 0).toISOString().split('T')[0];
 
     const { data } = await supabase.from('scale_checks').select('*').gte('check_date', startDate).lte('check_date', endDate);
-    if (data) {
+    const rows = (data as ScaleCheckRow[] | null) ?? [];
+    if (rows.length > 0) {
       const dataMap: Record<string, ScaleCheck> = {};
-      data.forEach(row => { dataMap[row.check_date] = row; });
+      rows.forEach(row => { dataMap[row.check_date] = {
+        check_date: row.check_date,
+        check_time: row.check_time || "",
+        status_a: row.status_a ?? null,
+        status_b: row.status_b ?? null,
+        status_c: row.status_c ?? null,
+        d1_weight: row.d1_weight ?? "",
+        d1_diff: row.d1_diff ?? "",
+        d2_weight: row.d2_weight ?? "",
+        d2_diff: row.d2_diff ?? "",
+        d3_weight: row.d3_weight ?? "",
+        d3_diff: row.d3_diff ?? "",
+        d4_weight: row.d4_weight ?? "",
+        d4_diff: row.d4_diff ?? "",
+        d5_weight: row.d5_weight ?? "",
+        d5_diff: row.d5_diff ?? "",
+        checker_name: row.checker_name || "",
+        notes: row.notes || ""
+      }; });
       setMonthlyData(dataMap);
+    } else {
+      setMonthlyData({});
     }
     setLoading(false);
-  };
+  }, []);
 
-  const handleUpdate = (field: keyof ScaleCheck, value: any) => {
+  useEffect(() => {
+    if (checkDate && viewMode === 'input') {
+      const timer = window.setTimeout(() => {
+        void fetchDailyData(checkDate);
+      }, 0);
+
+      return () => window.clearTimeout(timer);
+    }
+  }, [checkDate, viewMode, fetchDailyData]);
+
+  useEffect(() => {
+    if (viewMode === 'monthly' || viewMode === 'print') {
+      const timer = window.setTimeout(() => {
+        void fetchMonthlyData(calendarMonth);
+      }, 0);
+
+      return () => window.clearTimeout(timer);
+    }
+  }, [calendarMonth, viewMode, fetchMonthlyData]);
+
+  const handleUpdate = (field: ScaleCheckField, value: number | string | null) => {
     if (!canEdit) return;
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
-  const toggleStatus = (field: keyof ScaleCheck) => {
+  const toggleStatus = (field: 'status_a' | 'status_b' | 'status_c') => {
     if (!canEdit) return;
     setFormData(prev => {
       const current = prev[field];
-      let next: any = 'ok';
+      let next: 'ok' | 'ng' | null = 'ok';
       if (current === 'ok') next = 'ng';
       else if (current === 'ng') next = null;
       return { ...prev, [field]: next };
@@ -135,7 +191,7 @@ export default function ScaleChecksPage() {
     else alert("電子はかり点検記録を保存しました！");
   };
 
-  const renderOkNg = (val: any) => {
+  const renderOkNg = (val: 'ok' | 'ng' | null | undefined) => {
     if (val === 'ok') return '〇';
     if (val === 'ng') return '×';
     return '';
@@ -349,7 +405,7 @@ export default function ScaleChecksPage() {
         )}
       </div>
 
-      <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as any)} className="w-full">
+      <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as ScaleCheckViewMode)} className="w-full">
         <TabsList className="mb-6 bg-slate-200/80 p-1.5 rounded-xl">
           <TabsTrigger value="input" className="font-bold py-2.5 px-6 rounded-lg data-[state=active]:bg-white data-[state=active]:text-teal-700 data-[state=active]:shadow-sm">日次チェック (現場入力用)</TabsTrigger>
           <TabsTrigger value="monthly" className="font-bold py-2.5 px-6 rounded-lg data-[state=active]:bg-white data-[state=active]:text-teal-700 data-[state=active]:shadow-sm">月間一覧 (管理者・監査用)</TabsTrigger>
@@ -377,16 +433,16 @@ export default function ScaleChecksPage() {
                 <CardHeader className="bg-slate-100 border-b py-3"><CardTitle className="text-base font-bold text-slate-700">基本状態の確認</CardTitle></CardHeader>
                 <CardContent className="p-0 divide-y divide-slate-100">
                   {[
-                    { id: 'status_a', label: 'A: 水平が取れている事', sub: '水準器で確認' },
-                    { id: 'status_b', label: 'B: 汚れ・異物付着の無き事', sub: '目視で確認' },
-                    { id: 'status_c', label: 'C: ゼロ点の設定', sub: '分銅を3回測定し0gに戻る事' },
+                    { id: 'status_a' as const, label: 'A: 水平が取れている事', sub: '水準器で確認' },
+                    { id: 'status_b' as const, label: 'B: 汚れ・異物付着の無き事', sub: '目視で確認' },
+                    { id: 'status_c' as const, label: 'C: ゼロ点の設定', sub: '分銅を3回測定し0gに戻る事' },
                   ].map(item => {
-                    const val = formData[item.id as keyof ScaleCheck];
+                    const val = formData[item.id];
                     const isOk = val === 'ok'; const isNg = val === 'ng';
                     return (
                       <div key={item.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                         <div><div className="font-bold text-slate-800">{item.label}</div><div className="text-xs text-slate-500">{item.sub}</div></div>
-                        <button onClick={() => toggleStatus(item.id as keyof ScaleCheck)} disabled={!canEdit} className={`w-full sm:w-32 h-12 rounded-xl flex items-center justify-center gap-2 font-black transition-all shadow-sm border-2 ${isOk ? 'bg-teal-500 border-teal-600 text-white' : isNg ? 'bg-red-500 border-red-600 text-white' : 'bg-slate-100 border-slate-300 text-slate-400 hover:bg-slate-200'}`}>{isOk && <><CheckCircle2 className="w-5 h-5" /> 良</>}{isNg && <><XCircle className="w-5 h-5" /> 不良</>}{!isOk && !isNg && <><MinusCircle className="w-5 h-5" /> -</>}</button>
+                        <button onClick={() => toggleStatus(item.id)} disabled={!canEdit} className={`w-full sm:w-32 h-12 rounded-xl flex items-center justify-center gap-2 font-black transition-all shadow-sm border-2 ${isOk ? 'bg-teal-500 border-teal-600 text-white' : isNg ? 'bg-red-500 border-red-600 text-white' : 'bg-slate-100 border-slate-300 text-slate-400 hover:bg-slate-200'}`}>{isOk && <><CheckCircle2 className="w-5 h-5" /> 良</>}{isNg && <><XCircle className="w-5 h-5" /> 不良</>}{!isOk && !isNg && <><MinusCircle className="w-5 h-5" /> -</>}</button>
                       </div>
                     )
                   })}
@@ -430,8 +486,8 @@ export default function ScaleChecksPage() {
                       </TableHeader>
                       <TableBody className="bg-white">
                         {[1, 2, 3, 4, 5].map(num => {
-                          const wField = `d${num}_weight` as keyof ScaleCheck;
-                          const dField = `d${num}_diff` as keyof ScaleCheck;
+                          const wField = `d${num}_weight` as 'd1_weight' | 'd2_weight' | 'd3_weight' | 'd4_weight' | 'd5_weight';
+                          const dField = `d${num}_diff` as 'd1_diff' | 'd2_diff' | 'd3_diff' | 'd4_diff' | 'd5_diff';
                           const wVal = formData[wField];
                           const dVal = formData[dField];
 
@@ -448,7 +504,7 @@ export default function ScaleChecksPage() {
                               <TableCell className="px-6">
                                 <Input
                                   type="number" step="0.1"
-                                  value={wVal as any}
+                                  value={wVal ?? ""}
                                   onChange={e => {
                                     const val = e.target.value === "" ? "" : Number(e.target.value);
                                     handleUpdate(wField, val);
@@ -467,7 +523,7 @@ export default function ScaleChecksPage() {
                               <TableCell className="px-6">
                                 <Input
                                   type="number" step="0.1"
-                                  value={dVal as any}
+                                  value={dVal ?? ""}
                                   onChange={e => handleUpdate(dField, e.target.value === "" ? "" : Number(e.target.value))}
                                   disabled={!canEdit}
                                   className={`h-12 text-xl font-bold text-center shadow-sm ${isWarning ? 'bg-red-50 text-red-600 border-red-400' : 'bg-slate-50 text-slate-600 border-slate-200'}`}
@@ -514,7 +570,7 @@ export default function ScaleChecksPage() {
                               {Array.from({ length: new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 0).getDate() }, (_, i) => i + 1).map(day => {
                                 const dStr = `${calendarMonth.getFullYear()}-${String(calendarMonth.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
                                 const res = monthlyData[dStr]?.[field as keyof ScaleCheck];
-                                return <TableCell key={day} className={`border-r text-center p-0 ${res === 'ng' ? 'bg-red-50 text-red-600 font-black' : res === 'ok' ? 'text-teal-600 font-bold' : 'text-slate-200'}`}>{renderOkNg(res) || "-"}</TableCell>;
+                                return <TableCell key={day} className={`border-r text-center p-0 ${res === 'ng' ? 'bg-red-50 text-red-600 font-black' : res === 'ok' ? 'text-teal-600 font-bold' : 'text-slate-200'}`}>{renderOkNg(res as 'ok' | 'ng' | null | undefined) || "-"}</TableCell>;
                               })}
                             </TableRow>
                           );

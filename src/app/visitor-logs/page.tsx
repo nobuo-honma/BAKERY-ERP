@@ -1,17 +1,15 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Save, Loader2, CalendarDays, Printer, ArrowLeft, Lock, Users, Trash2, Edit2, Plus } from "lucide-react";
+import { Save, Loader2, Printer, ArrowLeft, Lock, Users, Trash2, Edit2, Plus } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import HaccpPrintHeader from "@/components/HaccpPrintHeader";
 
 type VisitorLog = {
     id: string;
@@ -50,13 +48,7 @@ export default function VisitorLogsPage() {
     const [formData, setFormData] = useState<Partial<VisitorLog>>(DEFAULT_STATE);
     const [isSaving, setIsSaving] = useState(false);
 
-    useEffect(() => {
-        if (viewMode === 'list' || viewMode === 'monthly' || viewMode === 'print') {
-            fetchMonthlyData(calendarMonth);
-        }
-    }, [calendarMonth, viewMode]);
-
-    const fetchMonthlyData = async (dateObj: Date) => {
+    const fetchMonthlyData = useCallback(async (dateObj: Date) => {
         setLoading(true);
         const y = dateObj.getFullYear(); const m = String(dateObj.getMonth() + 1).padStart(2, '0');
         const startDate = `${y}-${m}-01`;
@@ -69,7 +61,17 @@ export default function VisitorLogsPage() {
 
         if (data) setMonthlyLogs(data as VisitorLog[]);
         setLoading(false);
-    };
+    }, []);
+
+    useEffect(() => {
+        if (viewMode === 'list' || viewMode === 'monthly' || viewMode === 'print') {
+            const timer = window.setTimeout(() => {
+                void fetchMonthlyData(calendarMonth);
+            }, 0);
+
+            return () => window.clearTimeout(timer);
+        }
+    }, [calendarMonth, viewMode, fetchMonthlyData]);
 
     const openModal = (log?: VisitorLog) => {
         if (log) {

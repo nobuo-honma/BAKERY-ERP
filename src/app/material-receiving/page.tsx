@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { CheckCircle2, XCircle, Save, Loader2, CalendarDays, Printer, ArrowLeft, PackageOpen, Lock, ChevronDown, ChevronUp } from "lucide-react";
+import { CheckCircle2, Save, Loader2, CalendarDays, Printer, ArrowLeft, PackageOpen, Lock, ChevronDown, ChevronUp } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import HaccpPrintHeader from "@/components/HaccpPrintHeader";
 
@@ -45,51 +45,67 @@ const MATERIAL_ITEMS = [
 ];
 
 type ReceiveData = { expiry: string; lot: string; qty: string; appearance: 'ok' | 'ng' | null; smell: 'ok' | 'ng' | null; };
+type ViewMode = 'input' | 'list' | 'print';
+type MaterialReceivingRecord = {
+    id?: string;
+    check_date: string;
+    checker_name?: string;
+    results?: Record<string, ReceiveData>;
+};
 
 export default function MaterialReceivingPage() {
     const { canEdit } = useAuth();
     const [loading, setLoading] = useState(false);
-    const [viewMode, setViewMode] = useState<'input' | 'list' | 'print'>('input');
+    const [viewMode, setViewMode] = useState<ViewMode>('input');
 
-    const [checkDate, setCheckDate] = useState("");
+    const [checkDate, setCheckDate] = useState(() => new Date().toISOString().split('T')[0]);
     const [results, setResults] = useState<Record<string, ReceiveData>>({});
     const [checkerName, setCheckerName] = useState("");
     const [isSaving, setIsSaving] = useState(false);
     const [expandedItem, setExpandedItem] = useState<string | null>(null);
 
     // 一覧用State
-    const [records, setRecords] = useState<any[]>([]);
-    const [printRecord, setPrintRecord] = useState<any>(null);
+    const [records, setRecords] = useState<MaterialReceivingRecord[]>([]);
+    const [printRecord, setPrintRecord] = useState<MaterialReceivingRecord | null>(null);
 
-    useEffect(() => {
-        const today = new Date().toISOString().split('T')[0];
-        setCheckDate(today);
-        fetchRecords();
-    }, []);
-
-    useEffect(() => {
-        if (checkDate && viewMode === 'input') fetchDailyData(checkDate);
-    }, [checkDate, viewMode]);
-
-    const fetchRecords = async () => {
+    const fetchRecords = useCallback(async () => {
         setLoading(true);
         const { data } = await supabase.from('material_receiving_checks').select('*').order('check_date', { ascending: false }).limit(30);
-        if (data) setRecords(data);
+        if (data) setRecords(data as MaterialReceivingRecord[]);
         setLoading(false);
-    };
+    }, []);
 
-    const fetchDailyData = async (dateStr: string) => {
+    const fetchDailyData = useCallback(async (dateStr: string) => {
         setLoading(true);
         const { data } = await supabase.from('material_receiving_checks').select('*').eq('check_date', dateStr).maybeSingle();
-        if (data) {
-            setResults(data.results || {}); setCheckerName(data.checker_name || "");
+        const record = data as MaterialReceivingRecord | null;
+        if (record) {
+            setResults(record.results || {}); setCheckerName(record.checker_name || "");
         } else {
             setResults({}); setCheckerName("");
         }
         setLoading(false);
-    };
+    }, []);
 
-    const handleInputChange = (itemId: string, field: keyof ReceiveData, value: any) => {
+    useEffect(() => {
+        const timer = window.setTimeout(() => {
+            void fetchRecords();
+        }, 0);
+
+        return () => window.clearTimeout(timer);
+    }, [fetchRecords]);
+
+    useEffect(() => {
+        if (!checkDate || viewMode !== 'input') return;
+
+        const timer = window.setTimeout(() => {
+            void fetchDailyData(checkDate);
+        }, 0);
+
+        return () => window.clearTimeout(timer);
+    }, [checkDate, viewMode, fetchDailyData]);
+
+    const handleInputChange = (itemId: string, field: keyof ReceiveData, value: string | null) => {
         if (!canEdit) return;
         setResults(prev => {
             const current = prev[itemId] || { expiry: "", lot: "", qty: "", appearance: null, smell: null };
@@ -234,7 +250,7 @@ export default function MaterialReceivingPage() {
                 </div>
             </div>
 
-            <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as any)} className="w-full">
+            <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as ViewMode)} className="w-full">
                 <TabsList className="mb-6 bg-slate-200/80 p-1.5 rounded-xl">
                     <TabsTrigger value="input" className="font-bold py-2.5 px-6 rounded-lg data-[state=active]:bg-white data-[state=active]:text-indigo-700 data-[state=active]:shadow-sm">入荷データ入力</TabsTrigger>
                     <TabsTrigger value="list" className="font-bold py-2.5 px-6 rounded-lg data-[state=active]:bg-white data-[state=active]:text-indigo-700 data-[state=active]:shadow-sm">受入記録一覧 (印刷)</TabsTrigger>

@@ -1,17 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 // ▼ 修正: Plus をインポートに追加しました ▼
 import { Save, Loader2, CalendarDays, Printer, ArrowLeft, Eye, Lock, Edit, Trash2, Plus } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import HaccpPrintHeader from "@/components/HaccpPrintHeader";
 
 // YO-30 の項目定義
@@ -48,6 +46,16 @@ const TEST_SECTIONS = [
 ];
 
 type PlanOption = { lot_code: string; product_name: string };
+type SensoryRecord = {
+    id: string;
+    test_date: string;
+    lot_code: string;
+    product_name: string;
+    results?: Record<string, string[] | string>;
+    checker_name?: string | null;
+    sub_checker_name?: string | null;
+    notes?: string | null;
+};
 
 export default function SensoryTestsPage() {
     const { canEdit } = useAuth();
@@ -55,7 +63,7 @@ export default function SensoryTestsPage() {
     const [viewMode, setViewMode] = useState<'input' | 'list'>('list');
 
     // 日次入力用State
-    const [testDate, setTestDate] = useState("");
+    const [testDate, setTestDate] = useState(() => new Date().toISOString().split('T')[0]);
     const [lotCode, setLotCode] = useState("");
     const [productName, setProductName] = useState("");
     const [results, setResults] = useState<Record<string, string[]>>({});
@@ -69,45 +77,53 @@ export default function SensoryTestsPage() {
     const [availableLots, setAvailableLots] = useState<PlanOption[]>([]);
 
     // 一覧用State
-    const [testRecords, setTestRecords] = useState<any[]>([]);
+    const [testRecords, setTestRecords] = useState<SensoryRecord[]>([]);
 
     // 印刷・編集用State
-    const [printRecord, setPrintRecord] = useState<any>(null);
+    const [printRecord, setPrintRecord] = useState<SensoryRecord | null>(null);
 
-    // 初期化と一覧取得
-    useEffect(() => {
-        const today = new Date().toISOString().split('T')[0];
-        setTestDate(today);
-        fetchRecords();
-    }, []);
-
-    // 入力画面で日付が変わった際に、その日の製造計画（Lot）を取得する
-    useEffect(() => {
-        if (viewMode === 'input' && testDate) fetchAvailableLots(testDate);
-    }, [testDate, viewMode]);
-
-    const fetchRecords = async () => {
+    const fetchRecords = useCallback(async () => {
         setLoading(true);
         const { data } = await supabase.from('sensory_tests').select('*').order('test_date', { ascending: false }).limit(50);
-        if (data) setTestRecords(data);
+        if (data) setTestRecords(data as SensoryRecord[]);
         setLoading(false);
-    };
+    }, []);
 
-    const fetchAvailableLots = async (dateStr: string) => {
+    const fetchAvailableLots = useCallback(async (dateStr: string) => {
         const { data } = await supabase.from('production_plans')
             .select('lot_code, products(name, variant_name)')
             .eq('production_date', dateStr);
 
         if (data) {
-            const lots = data.map((d: any) => ({
+            const lots = data.map((d: { lot_code: string; products?: { name?: string | null; variant_name?: string | null } | null }) => ({
                 lot_code: d.lot_code,
-                product_name: `${d.products?.name} (${d.products?.variant_name})`
+                product_name: `${d.products?.name ?? ""} (${d.products?.variant_name ?? ""})`
             }));
             setAvailableLots(lots);
         } else {
             setAvailableLots([]);
         }
-    };
+    }, []);
+
+    // 初期化と一覧取得
+    useEffect(() => {
+        const timer = window.setTimeout(() => {
+            void fetchRecords();
+        }, 0);
+
+        return () => window.clearTimeout(timer);
+    }, [fetchRecords]);
+
+    // 入力画面で日付が変わった際に、その日の製造計画（Lot）を取得する
+    useEffect(() => {
+        if (viewMode === 'input' && testDate) {
+            const timer = window.setTimeout(() => {
+                void fetchAvailableLots(testDate);
+            }, 0);
+
+            return () => window.clearTimeout(timer);
+        }
+    }, [testDate, viewMode, fetchAvailableLots]);
 
     // Lot番号が選択されたら、製品名を自動セット
     const handleLotSelect = (selectedLot: string) => {
@@ -139,7 +155,7 @@ export default function SensoryTestsPage() {
         setViewMode('input');
     };
 
-    const handleEdit = (record: any) => {
+    const handleEdit = (record: SensoryRecord) => {
         setTestDate(record.test_date);
         setLotCode(record.lot_code);
         setProductName(record.product_name);
@@ -197,7 +213,7 @@ export default function SensoryTestsPage() {
         }
         setIsSaving(true);
 
-        const saveResults: Record<string, any> = { ...results };
+        const saveResults: Record<string, string[] | string> = { ...results };
         Object.keys(otherTexts).forEach(key => {
             if (results[key]?.includes("その他") || results[key]?.includes("その他 （ ）")) {
                 saveResults[`${key}_other_text`] = otherTexts[key];
@@ -226,7 +242,7 @@ export default function SensoryTestsPage() {
         }
     };
 
-    const handleDelete = async (record: any) => {
+    const handleDelete = async (record: SensoryRecord) => {
         if (!confirm(`Lot: ${record.lot_code} の検査記録を削除しますか？`)) return;
         const { error } = await supabase.from('sensory_tests').delete().eq('id', record.id);
         if (error) alert("削除エラー: " + error.message);

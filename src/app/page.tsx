@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -8,7 +8,60 @@ import { AlertCircle, Package, Truck, Calendar, Lock, Loader2, Clock, CheckCircl
 import { useAuth } from "@/contexts/AuthContext";
 import Link from "next/link";
 
-type OrderGroup = { groupId: string; customerName: string; customerOrderNo: string; plannedShipDate: string; desiredShipDate: string; status: string; items: any[]; totalProgress: number; totalCompletedCs: number; totalQuantityCs: number; isLate: boolean; shipWarning: boolean; completionDateStr: string; shipAvailableDateStr: string; };
+type InventoryItem = {
+  name: string;
+  safety_stock: number;
+  item_stocks?: Array<{ quantity: number | null }> | { quantity: number | null } | null;
+};
+
+type ProductionPlanRow = {
+  planned_cs: number;
+  products?: { name?: string | null } | null;
+};
+
+type OrderRow = {
+  id: string;
+  planned_ship_date: string;
+  desired_ship_date: string;
+  status: string;
+  quantity: number;
+  customer_order_no: string;
+  customers?: { name?: string | null } | null;
+  products?: { name?: string | null; variant_name?: string | null; unit_per_cs?: number | null } | null;
+  production_plans?: Array<{ production_date: string; planned_cs: number; status: string }> | null;
+};
+
+type ProductStockRow = {
+  lot_code: string;
+  total_pieces: number;
+  expiry_date: string;
+  products?: { name?: string | null; unit_per_cs?: number | null } | null;
+};
+
+type KeepSampleRow = {
+  management_no: string;
+  saved_quantity: number;
+  used_quantity: number;
+  expiry_date: string;
+  products?: { name?: string | null } | null;
+};
+
+type OrderGroup = {
+  groupId: string;
+  customerName: string;
+  customerOrderNo: string;
+  plannedShipDate: string;
+  desiredShipDate: string;
+  status: string;
+  items: OrderRow[];
+  totalProgress: number;
+  totalCompletedCs: number;
+  totalQuantityCs: number;
+  isLate: boolean;
+  shipWarning: boolean;
+  completionDateStr: string;
+  shipAvailableDateStr: string;
+};
 
 export default function Dashboard() {
   const { canEdit } = useAuth();
@@ -20,13 +73,11 @@ export default function Dashboard() {
   const [ongoingGroups, setOngoingGroups] = useState<OrderGroup[]>([]);
 
   // ★追加: アラート用State
-  const [expiringProducts, setExpiringProducts] = useState<any[]>([]); // 賞味期限間近
-  const [expiredSamples, setExpiredSamples] = useState<any[]>([]); // 廃棄対象サンプル
+  const [expiringProducts, setExpiringProducts] = useState<ProductStockRow[]>([]); // 賞味期限間近
+  const [expiredSamples, setExpiredSamples] = useState<KeepSampleRow[]>([]); // 廃棄対象サンプル
   const [missingHaccp, setMissingHaccp] = useState<string[]>([]); // 未入力のHACCP記録
 
-  useEffect(() => { fetchDashboardData(); }, []);
-
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = useCallback(async () => {
     setLoading(true);
     const d = new Date();
     const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -36,7 +87,7 @@ export default function Dashboard() {
       const { data: itemsData } = await supabase.from("items").select("name, safety_stock, item_stocks(quantity)");
       const shortages: string[] = []; const warnings: string[] = [];
       if (itemsData) {
-        itemsData.forEach((item: any) => {
+        itemsData.forEach((item: InventoryItem) => {
           const qty = Array.isArray(item.item_stocks) ? (item.item_stocks[0]?.quantity || 0) : (item.item_stocks?.quantity || 0);
           if (item.safety_stock > 0) {
             if (qty < item.safety_stock) shortages.push(item.name);
@@ -49,8 +100,8 @@ export default function Dashboard() {
       // 2. 本日の製造
       const { data: prodData } = await supabase.from("production_plans").select("planned_cs, products(name)").eq("production_date", todayStr);
       if (prodData && prodData.length > 0) {
-        const totalCs = prodData.reduce((sum: number, p: any) => sum + p.planned_cs, 0);
-        const names = Array.from(new Set(prodData.map((p: any) => p.products?.name)));
+        const totalCs = prodData.reduce((sum: number, p: ProductionPlanRow) => sum + p.planned_cs, 0);
+        const names = Array.from(new Set(prodData.map((p: ProductionPlanRow) => p.products?.name)));
         const detail = names.slice(0, 2).join(", ") + (names.length > 2 ? " 他" : "");
         setTodayProd({ totalCs, detail });
       }
@@ -58,8 +109,8 @@ export default function Dashboard() {
       // 3. 本日の出荷
       const { data: shipData } = await supabase.from("orders").select("quantity, customers(name), products(unit_per_cs)").eq("planned_ship_date", todayStr).neq("status", "shipped");
       if (shipData && shipData.length > 0) {
-        const totalCs = shipData.reduce((sum: number, o: any) => sum + Math.floor(o.quantity / (o.products?.unit_per_cs || 24)), 0);
-        const names = Array.from(new Set(shipData.map((o: any) => o.customers?.name)));
+        const totalCs = shipData.reduce((sum: number, o: OrderRow) => sum + Math.floor(o.quantity / (o.products?.unit_per_cs || 24)), 0);
+        const names = Array.from(new Set(shipData.map((o: OrderRow) => o.customers?.name)));
         const detail = names.slice(0, 2).join("様, ") + "様" + (names.length > 2 ? " 他" : " 宛");
         setTodayShip({ totalCs, detail });
       }
@@ -68,17 +119,17 @@ export default function Dashboard() {
       const { data: ordersData } = await supabase.from("orders").select("id, planned_ship_date, desired_ship_date, status, quantity, customer_order_no, customers(name), products(name, variant_name, unit_per_cs), production_plans(production_date, planned_cs, status)").in("status", ["received", "in_production"]).order("planned_ship_date", { ascending: true });
       if (ordersData) {
         const groups: Record<string, OrderGroup> = {};
-        ordersData.forEach((order: any) => {
+        ordersData.forEach((order: OrderRow) => {
           const parts = order.id.split('-'); const gId = parts.length > 3 ? parts.slice(0, 3).join('-') : order.id;
           const plans = order.production_plans || []; const unitPerCs = order.products?.unit_per_cs || 24;
-          const completedPieces = plans.filter((p: any) => p.status === 'completed').reduce((sum: number, p: any) => sum + (p.planned_cs * unitPerCs), 0);
-          const plannedPieces = plans.reduce((sum: number, p: any) => sum + (p.planned_cs * unitPerCs), 0);
+          const completedPieces = plans.filter((p) => p.status === 'completed').reduce((sum: number, p) => sum + (p.planned_cs * unitPerCs), 0);
+          const plannedPieces = plans.reduce((sum: number, p) => sum + (p.planned_cs * unitPerCs), 0);
           const progressPercent = Math.min(100, Math.floor((completedPieces / order.quantity) * 100));
           const isFullyPlanned = plannedPieces >= order.quantity;
 
           let completionDateStr = "未計画"; let shipAvailableDateStr = "-"; let shipAvailableDateObj = null;
           if (plans.length > 0) {
-            const dates = plans.map((p: any) => new Date(p.production_date).getTime());
+            const dates = plans.map((p) => new Date(p.production_date).getTime());
             const lastProdDate = new Date(Math.max(...dates));
             if (isFullyPlanned) {
               completionDateStr = `${lastProdDate.getFullYear()}/${lastProdDate.getMonth() + 1}/${lastProdDate.getDate()}`;
@@ -124,7 +175,7 @@ export default function Dashboard() {
       // ★追加 6. 廃棄対象のキープサンプル (期限切れ かつ 残数あり)
       const { data: expSamples } = await supabase.from("keep_samples").select("management_no, saved_quantity, used_quantity, expiry_date, products(name)").lt("expiry_date", todayStr).order("expiry_date", { ascending: true });
       if (expSamples) {
-        const toDiscard = expSamples.filter((s: any) => (s.saved_quantity - s.used_quantity) > 0);
+        const toDiscard = expSamples.filter((s: KeepSampleRow) => (s.saved_quantity - s.used_quantity) > 0);
         setExpiredSamples(toDiscard);
       }
 
@@ -144,7 +195,15 @@ export default function Dashboard() {
 
     } catch (error) { console.error("Dashboard fetch error:", error); }
     setLoading(false);
-  };
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void fetchDashboardData();
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [fetchDashboardData]);
 
   if (loading) return <div className="flex justify-center items-center h-[80vh]"><Loader2 className="animate-spin h-10 w-10 text-slate-400" /></div>;
 

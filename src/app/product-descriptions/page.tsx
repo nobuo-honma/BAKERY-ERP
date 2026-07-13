@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -44,11 +44,7 @@ export default function ProductDescriptionsPage() {
     const [formData, setFormData] = useState<Partial<ProductDesc>>({});
     const [isSaving, setIsSaving] = useState(false);
 
-    useEffect(() => {
-        fetchData();
-    }, []);
-
-    const fetchData = async () => {
+    const fetchData = useCallback(async () => {
         setLoading(true);
         const { data: pData } = await supabase.from('products').select('*').order('id');
         const { data: dData } = await supabase.from('product_descriptions').select('*');
@@ -60,7 +56,15 @@ export default function ProductDescriptionsPage() {
             setDescriptions(descMap);
         }
         setLoading(false);
-    };
+    }, []);
+
+    useEffect(() => {
+        const timer = window.setTimeout(() => {
+            void fetchData();
+        }, 0);
+
+        return () => window.clearTimeout(timer);
+    }, [fetchData]);
 
     const handleEdit = (productId: string) => {
         setEditingProductId(productId);

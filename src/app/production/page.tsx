@@ -16,6 +16,10 @@ type Order = { id: string; order_date: string; desired_ship_date: string; planne
 type Plan = { id: string; order_id: string; product_id: string; production_date: string; production_kg: number; planned_cs: number; planned_units: number; lot_code: string; expiry_date: string; status: string; notes?: string; products?: { name: string; variant_name: string; unit_per_cs?: number; unit_per_kg?: number }; actual_cs?: number; actual_piece?: number; };
 type Event = { id: string; event_date: string; title: string; notes?: string; };
 type Product = { id: string; name: string; variant_name: string; unit_per_kg: number; unit_per_cs: number; };
+type OrderWithPlans = Order & {
+  production_plans?: Array<{ planned_units?: number; planned_cs?: number }>;
+};
+type CalendarNoteRow = { note_content: string };
 
 export default function ProductionPage() {
   const { canEdit } = useAuth();
@@ -29,7 +33,6 @@ export default function ProductionPage() {
   const [calendarPlans, setCalendarPlans] = useState<Plan[]>([]);
   const [calendarOrders, setCalendarOrders] = useState<Order[]>([]);
   const [calendarEvents, setCalendarEvents] = useState<Event[]>([]);
-  const [loadingCalendar, setLoadingCalendar] = useState(false);
 
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [isStockProduction, setIsStockProduction] = useState(false);
@@ -73,9 +76,9 @@ export default function ProductionPage() {
     const { data: pData } = await supabase.from("production_plans").select("*, products(name, variant_name, unit_per_kg, unit_per_cs)").order("production_date", { ascending: false }).limit(30);
     const { data: prData } = await supabase.from("products").select("*");
 
-    const processedOrders = (oData as any[])?.map(o => {
+    const processedOrders = (oData as OrderWithPlans[] | null)?.map(o => {
       const unitPerCs = o.products?.unit_per_cs || 24;
-      const plannedPieces = o.production_plans ? o.production_plans.reduce((sum: number, p: any) => sum + (p.planned_units || (p.planned_cs * unitPerCs)), 0) : 0;
+      const plannedPieces = o.production_plans ? o.production_plans.reduce((sum: number, p) => sum + (p.planned_units || ((p.planned_cs ?? 0) * unitPerCs)), 0) : 0;
       const remainPieces = o.quantity - plannedPieces;
 
       return { ...o, plannedPieces, remainPieces };
@@ -101,7 +104,6 @@ export default function ProductionPage() {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const fetchCalendarPlans = useCallback(async () => {
-    setLoadingCalendar(true);
     const y = calendarMonth.getFullYear(); const m = calendarMonth.getMonth() + 1;
     const currentMonthStr = `${y}-${String(m).padStart(2, '0')}`;
     const startDate = `${currentMonthStr}-01`;
@@ -117,9 +119,7 @@ export default function ProductionPage() {
     if (eData) setCalendarEvents(eData as Event[]);
 
     const { data: noteData } = await supabase.from("calendar_notes").select("note_content").eq("month_str", currentMonthStr).maybeSingle();
-    setMonthlyNote(noteData ? noteData.note_content : "");
-
-    setLoadingCalendar(false);
+    setMonthlyNote(noteData ? (noteData as CalendarNoteRow).note_content : "");
   }, [calendarMonth]);
 
   useEffect(() => { if (viewMode === 'calendar') fetchCalendarPlans(); }, [fetchCalendarPlans, viewMode]);
@@ -136,8 +136,9 @@ export default function ProductionPage() {
         updated_at: new Date().toISOString()
       }, { onConflict: 'month_str' });
       alert(`${m}月の備考を保存しました。`);
-    } catch (err: any) {
-      alert("エラー: " + err.message);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "不明なエラーが発生しました。";
+      alert("エラー: " + message);
     }
     setIsSavingNote(false);
   };
@@ -298,7 +299,10 @@ export default function ProductionPage() {
 
       setEditingPlan(null); if (viewMode === 'calendar') fetchCalendarPlans(); fetchData();
       alert("計画をキャンセル（削除）し、必要な在庫のロールバックを完了しました。");
-    } catch (err: any) { alert("削除処理中にエラーが発生しました: " + err.message); }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "不明なエラーが発生しました。";
+      alert("削除処理中にエラーが発生しました: " + message);
+    }
     setIsProcessing(false);
   };
 
@@ -320,7 +324,9 @@ export default function ProductionPage() {
       }
       await supabase.from("production_plans").update({ status: "in_progress" }).eq("id", editingPlan.id);
       setEditingPlan(null); if (viewMode === 'calendar') fetchCalendarPlans(); fetchData(); alert("製造を開始し、資材の在庫を減算しました。");
-    } catch (err) { alert("エラーが発生しました。"); }
+    } catch {
+      alert("エラーが発生しました。");
+    }
     setIsProcessing(false);
   };
 
@@ -396,9 +402,10 @@ export default function ProductionPage() {
       fetchData();
       alert(`製造完了！\nキープサンプルを ${keepQuantityPacks}パック 自動登録し、\n残りの実績を製品在庫に追加しました。`);
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      alert("処理中にエラーが発生しました: " + err.message);
+      const message = err instanceof Error ? err.message : "不明なエラーが発生しました。";
+      alert("処理中にエラーが発生しました: " + message);
     }
     setIsProcessing(false);
   };
@@ -895,7 +902,7 @@ export default function ProductionPage() {
               <div className="bg-slate-50 p-4 rounded-lg text-center border">
                 <div className="text-xs text-slate-500 mb-1">予定ケース数</div>
                 <div className="text-2xl font-black text-slate-400 line-through">
-                  {Math.floor((editingPlan?.planned_units || (editingPlan?.planned_cs! * (editingPlan?.products?.unit_per_cs || 24))) / (editingPlan?.products?.unit_per_cs || 24))}
+                  {Math.floor((editingPlan?.planned_units || ((editingPlan?.planned_cs ?? 0) * (editingPlan?.products?.unit_per_cs || 24))) / (editingPlan?.products?.unit_per_cs || 24))}
                   <span className="text-sm font-normal ml-1">c/s</span>
                 </div>
               </div>

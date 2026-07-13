@@ -31,6 +31,8 @@ type ParsedSample = {
   _error?: string;
 };
 
+type ParsedSampleFieldValue = string | number | "";
+
 // =======================================================================
 // キープサンプル表示用 Lot番号変換関数 (カタカナ -> 数字)
 // =======================================================================
@@ -182,8 +184,9 @@ export default function KeepSamplesPage() {
       setNewProductId(""); setNewLotCode(""); setNewSavedQty(10); setNewProductionDate(""); setNewExpiryDate("");
       fetchSamples();
 
-    } catch (err: any) {
-      alert("登録エラー: " + err.message);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "不明なエラー";
+      alert("登録エラー: " + message);
     }
     setIsProcessing(false);
   };
@@ -235,8 +238,9 @@ export default function KeepSamplesPage() {
       alert(`${idsToDelete.length} 件の重複データを一括削除しました！`);
       fetchSamples();
 
-    } catch (err: any) {
-      alert("削除中にエラーが発生しました: " + err.message);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "不明なエラー";
+      alert("削除中にエラーが発生しました: " + message);
     }
     setIsProcessing(false);
   };
@@ -345,13 +349,13 @@ export default function KeepSamplesPage() {
     setLoading(false);
   };
 
-  const handleUpdateParsed = (idx: number, field: keyof ParsedSample, value: any) => {
+  const handleUpdateParsed = (idx: number, field: keyof ParsedSample, value: ParsedSampleFieldValue) => {
     const updated = [...parsedList];
     updated[idx] = { ...updated[idx], [field]: value, _error: "" };
 
     if (field === 'product_id' || field === 'production_date') {
-      const pId = field === 'product_id' ? value : updated[idx].product_id;
-      const pDate = field === 'production_date' ? value : updated[idx].production_date;
+      const pId = field === 'product_id' ? String(value) : updated[idx].product_id;
+      const pDate = field === 'production_date' ? String(value) : updated[idx].production_date;
       if (pId && pDate) {
         updated[idx].calculated_lot_code = generateLotNumber(pDate, pId, 1);
       } else {
@@ -393,8 +397,9 @@ export default function KeepSamplesPage() {
       setParsedList([]);
       fetchSamples();
 
-    } catch (err: any) {
-      alert("一括保存エラー: " + err.message);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "不明なエラー";
+      alert("一括保存エラー: " + message);
     }
     setIsProcessing(false);
   };

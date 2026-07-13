@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -33,13 +33,22 @@ const CLEANING_ITEMS = [
 
 type CheckResult = 'ok' | 'ng' | null;
 
+type CleaningCheckRow = {
+    check_date: string;
+    results?: Record<string, CheckResult>;
+    checker_name?: string;
+    notes?: string;
+};
+
+type MonthlyDataMap = Record<string, CleaningCheckRow>;
+
 export default function CleaningChecksPage() {
     const { canEdit } = useAuth();
     const [loading, setLoading] = useState(false);
     const [viewMode, setViewMode] = useState<'input' | 'monthly' | 'print'>('input');
 
     // 日次入力用State
-    const [checkDate, setCheckDate] = useState("");
+    const [checkDate, setCheckDate] = useState(() => new Date().toISOString().split('T')[0]);
     const [results, setResults] = useState<Record<string, CheckResult>>({});
     const [checkerName, setCheckerName] = useState("");
     const [notes, setNotes] = useState("");
@@ -47,59 +56,62 @@ export default function CleaningChecksPage() {
 
     // 月次一覧用State
     const [calendarMonth, setCalendarMonth] = useState(new Date());
-    const [monthlyData, setMonthlyData] = useState<Record<string, any>>({});
+    const [monthlyData, setMonthlyData] = useState<MonthlyDataMap>({});
 
-    // 初期マウント時に今日の日付をセット
-    useEffect(() => {
-        const today = new Date().toISOString().split('T')[0];
-        setCheckDate(today);
-    }, []);
-
-    // 日付が変わったら、その日のデータを取得
-    useEffect(() => {
-        if (checkDate && viewMode === 'input') {
-            fetchDailyData(checkDate);
-        }
-    }, [checkDate, viewMode]);
-
-    // 月が変わったら、その月のデータを取得
-    useEffect(() => {
-        if (viewMode === 'monthly' || viewMode === 'print') {
-            fetchMonthlyData(calendarMonth);
-        }
-    }, [calendarMonth, viewMode]);
-
-    const fetchDailyData = async (dateStr: string) => {
+    const fetchDailyData = useCallback(async (dateStr: string) => {
         setLoading(true);
-        const { data, error } = await supabase.from('cleaning_checks').select('*').eq('check_date', dateStr).maybeSingle();
-        if (data) {
-            setResults(data.results || {});
-            setCheckerName(data.checker_name || "");
-            setNotes(data.notes || "");
+        const { data } = await supabase.from('cleaning_checks').select('*').eq('check_date', dateStr).maybeSingle();
+        const row = data as CleaningCheckRow | null;
+        if (row) {
+            setResults(row.results || {});
+            setCheckerName(row.checker_name || "");
+            setNotes(row.notes || "");
         } else {
-            // データがない場合はリセット
-            setResults({}); setCheckerName(""); setNotes("");
+            setResults({});
+            setCheckerName("");
+            setNotes("");
         }
         setLoading(false);
-    };
+    }, []);
 
-    const fetchMonthlyData = async (dateObj: Date) => {
+    const fetchMonthlyData = useCallback(async (dateObj: Date) => {
         setLoading(true);
         const y = dateObj.getFullYear();
         const m = String(dateObj.getMonth() + 1).padStart(2, '0');
         const startDate = `${y}-${m}-01`;
         const endDate = new Date(y, dateObj.getMonth() + 1, 0).toISOString().split('T')[0];
 
-        const { data, error } = await supabase.from('cleaning_checks')
+        const { data } = await supabase.from('cleaning_checks')
             .select('*').gte('check_date', startDate).lte('check_date', endDate);
 
-        if (data) {
-            const dataMap: Record<string, any> = {};
-            data.forEach(row => { dataMap[row.check_date] = row; });
-            setMonthlyData(dataMap);
-        }
+        const rows = (data as CleaningCheckRow[] | null) ?? [];
+        const dataMap: MonthlyDataMap = {};
+        rows.forEach((row) => {
+            dataMap[row.check_date] = row;
+        });
+        setMonthlyData(dataMap);
         setLoading(false);
-    };
+    }, []);
+
+    useEffect(() => {
+        if (!checkDate || viewMode !== 'input') return;
+
+        const timeoutId = window.setTimeout(() => {
+            void fetchDailyData(checkDate);
+        }, 0);
+
+        return () => window.clearTimeout(timeoutId);
+    }, [checkDate, fetchDailyData, viewMode]);
+
+    useEffect(() => {
+        if (viewMode !== 'monthly' && viewMode !== 'print') return;
+
+        const timeoutId = window.setTimeout(() => {
+            void fetchMonthlyData(calendarMonth);
+        }, 0);
+
+        return () => window.clearTimeout(timeoutId);
+    }, [calendarMonth, fetchMonthlyData, viewMode]);
 
     const toggleResult = (itemId: string) => {
         if (!canEdit) return;
@@ -231,7 +243,7 @@ export default function CleaningChecksPage() {
                 )}
             </div>
 
-            <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as any)} className="w-full">
+            <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as "input" | "monthly" | "print")} className="w-full">
                 <TabsList className="mb-6 bg-slate-200/80 p-1.5 rounded-xl">
                     <TabsTrigger value="input" className="font-bold py-2.5 px-6 rounded-lg data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm">日次チェック (現場入力用)</TabsTrigger>
                     <TabsTrigger value="monthly" className="font-bold py-2.5 px-6 rounded-lg data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm">月間一覧 (管理者・監査用)</TabsTrigger>

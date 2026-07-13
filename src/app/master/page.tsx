@@ -16,7 +16,7 @@ type Item = { id: string; name: string; item_type: string; unit_size: number; un
 type Bom = { id: string; product_id: string; item_id: string; usage_rate: number; unit: string; basis_type: string; products?: { name: string; variant_name: string }; items?: { name: string }; };
 type Customer = { id: string; name: string; contact_name: string; postal_code: string; address: string; phone: string; fax: string; notes: string; };
 
-function EditableCell({ value, onSave, type = "text", placeholder = "", alignRight = false }: { value: any, onSave: (val: any) => void, type?: "text" | "number", placeholder?: string, alignRight?: boolean }) {
+function EditableCell({ value, onSave, type = "text", placeholder = "", alignRight = false }: { value: string | number | null | undefined, onSave: (val: string | number) => void, type?: "text" | "number", placeholder?: string, alignRight?: boolean }) {
   const { canEdit } = useAuth();
   const [isEditing, setIsEditing] = useState(false);
   const [val, setVal] = useState(value || "");
@@ -69,7 +69,7 @@ export default function MasterPage() {
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [newData, setNewData] = useState<any>({});
+  const [newData, setNewData] = useState<Record<string, string | number>>({});
 
   useEffect(() => { fetchData(); }, []);
 
@@ -87,7 +87,7 @@ export default function MasterPage() {
     setLoading(false);
   };
 
-  const handleUpdate = async (table: string, id: string, column: string, newValue: any) => {
+  const handleUpdate = async (table: string, id: string, column: string, newValue: string | number) => {
     setSavingMsg("保存中...");
     const { error } = await supabase.from(table).update({ [column]: newValue }).eq('id', id);
     if (error) {
@@ -110,7 +110,7 @@ export default function MasterPage() {
     setIsProcessing(true);
     try {
       let tableName = "";
-      let insertData = { ...newData };
+      const insertData = { ...newData };
 
       if (currentTab === "products") {
         tableName = "products";
@@ -132,8 +132,9 @@ export default function MasterPage() {
       alert("新規データを登録しました！");
       setIsAddModalOpen(false);
       fetchData();
-    } catch (err: any) {
-      alert("登録エラー: " + err.message);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "不明なエラー";
+      alert("登録エラー: " + message);
     }
     setIsProcessing(false);
   };

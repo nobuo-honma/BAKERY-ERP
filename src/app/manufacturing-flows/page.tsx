@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,11 +12,13 @@ import { useAuth } from "@/contexts/AuthContext";
 
 type Product = { id: string; name: string; variant_name: string; };
 
+type FlowMaterialStorage = "room" | "cold" | "freeze" | "freeze_water" | "none";
+
 type FlowMaterial = {
     id: string;
     no: string;
     name: string;
-    storage: "room" | "cold" | "freeze" | "freeze_water" | "none";
+    storage: FlowMaterialStorage;
     target_step_id: string;
 };
 
@@ -40,13 +42,33 @@ type ManufacturingFlow = {
     updated_at: string;
 };
 
+type ViewMode = 'list' | 'edit' | 'print';
+type FlowNode = {
+    id: string;
+    type: 'material' | 'storage' | 'step';
+    label: string;
+    no?: string;
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    data?: FlowMaterial | FlowStep;
+    texts?: string[];
+};
+
+type FlowEdge = {
+    from: string;
+    to: string;
+    type: 'right' | 'direct' | 'left' | 'main';
+};
+
 // 描画エリアのサイズ (単位: mm)
 const CANVAS_W = 180;
 const CANVAS_H = 240;
 
 export default function ManufacturingFlowsPage() {
     const { canEdit } = useAuth();
-    const [viewMode, setViewMode] = useState<'list' | 'edit' | 'print'>('list');
+    const [viewMode, setViewMode] = useState<ViewMode>('list');
     const [loading, setLoading] = useState(true);
 
     const [products, setProducts] = useState<Product[]>([]);
@@ -56,11 +78,7 @@ export default function ManufacturingFlowsPage() {
     const [formData, setFormData] = useState<Partial<ManufacturingFlow>>({});
     const [isSaving, setIsSaving] = useState(false);
 
-    useEffect(() => {
-        fetchData();
-    }, []);
-
-    const fetchData = async () => {
+    const fetchData = useCallback(async () => {
         setLoading(true);
         const { data: pData } = await supabase.from('products').select('*').order('id');
         const { data: fData } = await supabase.from('manufacturing_flows').select('*');
@@ -68,11 +86,21 @@ export default function ManufacturingFlowsPage() {
         if (pData) setProducts(pData as Product[]);
         if (fData) {
             const flowMap: Record<string, ManufacturingFlow> = {};
-            fData.forEach(f => { flowMap[f.product_id] = f; });
+            (fData as ManufacturingFlow[]).forEach((flow) => {
+                flowMap[flow.product_id] = flow;
+            });
             setFlows(flowMap);
         }
         setLoading(false);
-    };
+    }, []);
+
+    useEffect(() => {
+        const timer = window.setTimeout(() => {
+            void fetchData();
+        }, 0);
+
+        return () => window.clearTimeout(timer);
+    }, [fetchData]);
 
     const handleEdit = (productId: string) => {
         setEditingProductId(productId);
@@ -80,11 +108,17 @@ export default function ManufacturingFlowsPage() {
 
         if (existing) {
             // 互換性のためstorageの型を変換
-            const mats = existing.materials?.map(m => ({
-                ...m, id: m.id || Date.now().toString() + Math.random(),
-                storage: (m.storage as any) || "none",
-                target_step_id: m.target_step_id || ""
-            })) as FlowMaterial[] || [];
+            const mats = existing.materials?.map((m) => {
+                const storage = m.storage === "room" || m.storage === "cold" || m.storage === "freeze" || m.storage === "freeze_water"
+                    ? m.storage
+                    : "none";
+                return {
+                    ...m,
+                    id: m.id || Date.now().toString() + Math.random(),
+                    storage,
+                    target_step_id: m.target_step_id || ""
+                } satisfies FlowMaterial;
+            }) || [];
             const steps = existing.flow_steps?.map(s => ({ ...s, zone: s.zone || "" })) || [];
             setFormData({ ...existing, materials: mats, flow_steps: steps });
         } else {
@@ -148,10 +182,10 @@ export default function ManufacturingFlowsPage() {
         const newMat: FlowMaterial = { id: Date.now().toString(), no: newNo, name: "", storage: "none", target_step_id: "" };
         setFormData(prev => ({ ...prev, materials: [...(prev.materials || []), newMat] }));
     };
-    const updateMaterial = (index: number, field: keyof FlowMaterial, value: any) => {
+    const updateMaterial = (index: number, field: keyof FlowMaterial, value: string | FlowMaterialStorage) => {
         setFormData(prev => {
             const newMats = [...(prev.materials || [])];
-            newMats[index] = { ...newMats[index], [field]: value };
+            newMats[index] = { ...newMats[index], [field]: value } as FlowMaterial;
             return { ...prev, materials: newMats };
         });
     };
@@ -163,10 +197,10 @@ export default function ManufacturingFlowsPage() {
         const newStep: FlowStep = { id: `s${Date.now()}`, zone: "", step_name: "", details: "", is_ccp: false, ccp_no: "" };
         setFormData(prev => ({ ...prev, flow_steps: [...(prev.flow_steps || []), newStep] }));
     };
-    const updateStep = (index: number, field: keyof FlowStep, value: any) => {
+    const updateStep = (index: number, field: keyof FlowStep, value: string | boolean) => {
         setFormData(prev => {
             const newSteps = [...(prev.flow_steps || [])];
-            newSteps[index] = { ...newSteps[index], [field]: value };
+            newSteps[index] = { ...newSteps[index], [field]: value } as FlowStep;
             if (field === 'is_ccp' && !value) newSteps[index].ccp_no = "";
             return { ...prev, flow_steps: newSteps };
         });
@@ -200,8 +234,8 @@ export default function ManufacturingFlowsPage() {
         const materials = flow.materials || [];
         const steps = flow.flow_steps || [];
 
-        const nds: any[] = [];
-        const egs: any[] = [];
+        const nds: FlowNode[] = [];
+        const egs: FlowEdge[] = [];
 
         // Y座標の定義
         const Y_MAT = 5;
@@ -266,7 +300,7 @@ export default function ManufacturingFlowsPage() {
         return { nodes: nds, edges: egs };
     }, [viewMode, editingProductId, flows, formData]);
 
-    const drawPath = (edge: any) => {
+    const drawPath = (edge: FlowEdge) => {
         const fromNode = nodes.find(n => n.id === edge.from);
         const toNode = nodes.find(n => n.id === edge.to);
         if (!fromNode || !toNode) return "";
@@ -303,10 +337,9 @@ export default function ManufacturingFlowsPage() {
         const steps = flow.flow_steps || [];
 
         // ゾーンラベルの計算
-        const zones: any[] = [];
+        const zones: Array<{ name: string; startY: number; endY: number }> = [];
         let currentZone = "";
-        let startY = 0;
-        steps.forEach((s, i) => {
+        steps.forEach((s) => {
             const n = nodes.find(nd => nd.id === s.id);
             if (!n) return;
             if (s.zone !== currentZone) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback, type ChangeEvent } from "react";
 import { supabase } from "@/lib/supabase";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -10,8 +10,8 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import {
-  Package, Wheat, Box, Boxes, ClipboardEdit, ArrowRight, Save, Loader2, AlertCircle,
-  CheckCircle2, ListChecks, TrendingUp, TrendingDown, Filter, Lock, Printer, ArrowLeft, Plus
+  Package, ClipboardEdit, Save, Loader2, AlertCircle,
+  CheckCircle2, Filter, Lock, Printer, ArrowLeft, Plus
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -19,22 +19,22 @@ import { useAuth } from "@/contexts/AuthContext";
 // エディタの型解決不具合（windowやalertが見つからない等）を
 // 完全に回避するための安全なグローバルヘルパー
 // ==========================================================
-const safeAlert = (message?: any) => {
-  if (typeof globalThis !== "undefined" && "alert" in globalThis) {
-    (globalThis as any).alert(message);
+const safeAlert = (message?: string) => {
+  if (typeof window !== "undefined" && typeof window.alert === "function") {
+    window.alert(message);
   }
 };
 
 const safeConfirm = (message?: string): boolean => {
-  if (typeof globalThis !== "undefined" && "confirm" in globalThis) {
-    return (globalThis as any).confirm(message);
+  if (typeof window !== "undefined" && typeof window.confirm === "function") {
+    return window.confirm(message);
   }
   return false;
 };
 
 const safePrint = () => {
-  if (typeof globalThis !== "undefined" && "print" in globalThis) {
-    (globalThis as any).print();
+  if (typeof window !== "undefined" && typeof window.print === "function") {
+    window.print();
   }
 };
 
@@ -72,6 +72,53 @@ type AdjustmentHistory = {
   reason: string;
 };
 
+type ForecastFilter = 'all' | 'raw_material' | 'material';
+type ForecastDay = {
+  date: string;
+  inQty: number;
+  outQty: number;
+  endQty: number;
+};
+type ForecastItemData = {
+  item: ItemStock;
+  days: Record<string, ForecastDay>;
+};
+type BomRow = {
+  product_id: string;
+  item_id: string;
+  basis_type: 'production_qty' | 'planned_cs';
+  usage_rate: number;
+};
+type ProductionPlanRow = {
+  product_id: string;
+  production_date: string;
+  production_kg: number;
+  planned_cs: number;
+  status?: string;
+};
+type ArrivalRow = {
+  item_id: string;
+  expected_date: string;
+  quantity: number;
+  status?: string;
+};
+type ItemRecordFromDb = {
+  id: string;
+  name: string;
+  item_type: ItemStock['item_type'];
+  unit: string;
+  unit_size?: number;
+  unit_price?: number;
+  safety_stock: number;
+  item_stocks?: { quantity?: number } | Array<{ quantity?: number }> | null;
+};
+type ProductOption = {
+  id: string;
+  name: string;
+  variant: string;
+  unit: number;
+};
+
 export default function InventoryPage() {
   const { canEdit } = useAuth();
   const [viewMode, setViewMode] = useState<'list' | 'print' | 'print_forecast' | 'print_usage'>('list');
@@ -82,10 +129,10 @@ export default function InventoryPage() {
   const [histories, setHistories] = useState<AdjustmentHistory[]>([]);
 
   // 予測(MRP)用
-  const [boms, setBoms] = useState<any[]>([]);
-  const [pendingPlans, setPendingPlans] = useState<any[]>([]);
-  const [pendingArrivals, setPendingArrivals] = useState<any[]>([]);
-  const [forecastFilter, setForecastFilter] = useState<'all' | 'raw_material' | 'material'>('all');
+  const [boms, setBoms] = useState<BomRow[]>([]);
+  const [pendingPlans, setPendingPlans] = useState<ProductionPlanRow[]>([]);
+  const [pendingArrivals, setPendingArrivals] = useState<ArrivalRow[]>([]);
+  const [forecastFilter, setForecastFilter] = useState<ForecastFilter>('all');
 
   // 棚卸(調整)用
   const [adjustmentModal, setAdjustmentModal] = useState<{
@@ -111,7 +158,7 @@ export default function InventoryPage() {
 
   // 新規 Lot 登録用
   const [newStockModalOpen, setNewStockModalOpen] = useState(false);
-  const [productsList, setProductsList] = useState<{ id: string, name: string, variant: string, unit: number }[]>([]);
+  const [productsList, setProductsList] = useState<ProductOption[]>([]);
   const [newStockData, setNewStockData] = useState({ lotCode: "", productId: "", expiryDate: "", cs: 0, p: 0 });
 
   // 数値フォーマットヘルパー
@@ -134,8 +181,9 @@ export default function InventoryPage() {
       const { data: prData } = await supabase.from("products").select("id, name, variant_name, unit_per_cs");
 
       if (itemsData) {
-        const formattedItems = itemsData.map((item: any) => {
-          const qty = Array.isArray(item.item_stocks) ? (item.item_stocks[0]?.quantity || 0) : (item.item_stocks?.quantity || 0);
+        const formattedItems = itemsData.map((item: ItemRecordFromDb) => {
+          const itemStocks = Array.isArray(item.item_stocks) ? item.item_stocks[0] : item.item_stocks;
+          const qty = itemStocks?.quantity ?? 0;
           return {
             id: item.id,
             name: item.name,
@@ -145,19 +193,19 @@ export default function InventoryPage() {
             unit_price: item.unit_price || 0,
             safety_stock: item.safety_stock,
             current_qty: qty
-          };
+          } satisfies ItemStock;
         });
-        setRawMaterials(formattedItems.filter((i: any) => i.item_type === 'raw_material'));
-        setMaterials(formattedItems.filter((i: any) => i.item_type === 'material'));
+        setRawMaterials(formattedItems.filter((i) => i.item_type === 'raw_material'));
+        setMaterials(formattedItems.filter((i) => i.item_type === 'material'));
       }
-      if (pStocksData) setProductStocks(pStocksData as any);
-      if (histData) setHistories(histData as any[]);
-      if (bData) setBoms(bData);
-      if (plData) setPendingPlans(plData);
-      if (aData) setPendingArrivals(aData);
-      if (prData) setProductsList(prData.map(p => ({ id: p.id, name: p.name, variant: p.variant_name, unit: p.unit_per_cs })));
-    } catch (e) {
-      console.error(e);
+      if (pStocksData) setProductStocks(pStocksData as ProductStock[]);
+      if (histData) setHistories(histData as AdjustmentHistory[]);
+      if (bData) setBoms(bData as BomRow[]);
+      if (plData) setPendingPlans(plData as ProductionPlanRow[]);
+      if (aData) setPendingArrivals(aData as ArrivalRow[]);
+      if (prData) setProductsList(prData.map((p) => ({ id: p.id, name: p.name, variant: p.variant_name, unit: p.unit_per_cs })));
+    } catch (error) {
+      console.error(error);
     } finally {
       setLoading(false);
     }
@@ -206,7 +254,8 @@ export default function InventoryPage() {
       setActualQty("");
       setAdjReason("定例棚卸");
       fetchInventory();
-    } catch (e) {
+    } catch (error) {
+      console.error(error);
       safeAlert("エラーが発生しました");
     } finally {
       setIsProcessing(false);
@@ -230,10 +279,10 @@ export default function InventoryPage() {
   const handleBatchSubmit = async () => {
     setIsProcessing(true);
     try {
-      const itemUpdates: any[] = [];
-      const productUpdates: any[] = [];
+      const itemUpdates: { item_id: string; quantity: number }[] = [];
+      const productUpdates: { id: string; total_pieces: number }[] = [];
       const productDeletes: string[] = [];
-      const historyInserts: any[] = [];
+      const historyInserts: { item_id?: string; product_id?: string; lot_code?: string; before_qty: number; after_qty: number; reason: string }[] = [];
 
       for (const item of [...rawMaterials, ...materials]) {
         const newVal = batchInputs[item.id];
@@ -277,8 +326,9 @@ export default function InventoryPage() {
       setIsBatchMode(false);
       setBatchInputs({});
       fetchInventory();
-    } catch (err: any) {
-      safeAlert("エラー: " + err.message);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "不明なエラー";
+      safeAlert("エラー: " + message);
     } finally {
       setIsProcessing(false);
     }
@@ -334,8 +384,9 @@ export default function InventoryPage() {
       setNewStockModalOpen(false);
       setNewStockData({ lotCode: "", productId: "", expiryDate: "", cs: 0, p: 0 });
       fetchInventory();
-    } catch (err: any) {
-      safeAlert("エラーが発生しました:" + err.message);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "不明なエラー";
+      safeAlert("エラーが発生しました:" + message);
     } finally {
       setIsProcessing(false);
     }
@@ -349,7 +400,7 @@ export default function InventoryPage() {
       return d.toISOString().split('T')[0];
     });
     const todayStr = dates[0];
-    const fData: Record<string, any> = {};
+    const fData: Record<string, ForecastItemData> = {};
 
     [...rawMaterials, ...materials].forEach(item => {
       fData[item.id] = { item, days: {} };
@@ -361,7 +412,7 @@ export default function InventoryPage() {
     pendingArrivals.forEach(arr => {
       const itemF = fData[arr.item_id];
       if (itemF) {
-        let targetDate = arr.expected_date < todayStr ? todayStr : arr.expected_date;
+        const targetDate = arr.expected_date < todayStr ? todayStr : arr.expected_date;
         if (itemF.days[targetDate]) {
           itemF.days[targetDate].inQty += itemF.item.item_type === 'raw_material' ? arr.quantity : Math.round(arr.quantity);
         }
@@ -369,7 +420,7 @@ export default function InventoryPage() {
     });
 
     pendingPlans.forEach(plan => {
-      let targetDate = plan.production_date < todayStr ? todayStr : plan.production_date;
+      const targetDate = plan.production_date < todayStr ? todayStr : plan.production_date;
       const productBoms = boms.filter(b => b.product_id === plan.product_id);
       productBoms.forEach(bom => {
         const itemF = fData[bom.item_id];
@@ -384,7 +435,7 @@ export default function InventoryPage() {
       });
     });
 
-    Object.values(fData).forEach((itemF: any) => {
+    Object.values(fData).forEach((itemF) => {
       let current = itemF.item.current_qty;
       dates.forEach(date => {
         const day = itemF.days[date];
@@ -398,7 +449,7 @@ export default function InventoryPage() {
   }, [rawMaterials, materials, boms, pendingPlans, pendingArrivals]);
 
   const filteredForecastData = useMemo(() => {
-    const allData = Object.values(forecastResult.fData) as any[];
+    const allData = Object.values(forecastResult.fData);
     if (forecastFilter === 'all') return allData;
     return allData.filter((f) => f.item.item_type === forecastFilter);
   }, [forecastResult.fData, forecastFilter]);
@@ -442,7 +493,7 @@ export default function InventoryPage() {
                           min="0"
                           step={item.item_type === 'raw_material' ? "0.01" : "1"}
                           value={batchInputs[item.id] !== undefined ? batchInputs[item.id] : ""}
-                          onChange={(e: any) => setBatchInputs({ ...batchInputs, [item.id]: e.currentTarget.value === "" ? "" : Number(e.currentTarget.value) })}
+                          onChange={(e: ChangeEvent<HTMLInputElement>) => setBatchInputs({ ...batchInputs, [item.id]: e.currentTarget.value === "" ? "" : Number(e.currentTarget.value) })}
                           className={`w-28 text-right font-mono font-bold h-9 ${isChanged ? 'border-amber-400 bg-white ring-2 ring-amber-200' : 'border-slate-300 shadow-sm'}`}
                         />
                         {isChanged && <span className="text-[10px] text-amber-700 bg-amber-100 rounded px-1.5 py-0.5 font-bold shrink-0">変更</span>}
@@ -523,7 +574,7 @@ export default function InventoryPage() {
                       min="0"
                       step={item.item_type === 'raw_material' ? "0.01" : "1"}
                       value={batchInputs[item.id] !== undefined ? batchInputs[item.id] : ""}
-                      onChange={(e: any) => setBatchInputs({ ...batchInputs, [item.id]: e.currentTarget.value === "" ? "" : Number(e.currentTarget.value) })}
+                      onChange={(e: ChangeEvent<HTMLInputElement>) => setBatchInputs({ ...batchInputs, [item.id]: e.currentTarget.value === "" ? "" : Number(e.currentTarget.value) })}
                       className="text-right font-mono font-bold text-xl h-11 border-slate-300"
                     />
                     <span className="font-medium text-slate-600 text-sm">{item.unit}</span>
@@ -707,7 +758,7 @@ export default function InventoryPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredForecastData.map((f: any) => (
+              {filteredForecastData.map((f) => (
                 <tr key={f.item.id} className="h-12 hover:bg-slate-50 border-b border-slate-300">
                   <td className="border-r border-slate-300 px-1.5 font-semibold truncate whitespace-nowrap text-slate-800 text-[10px]">{f.item.name}</td>
                   <td className="border-r border-slate-300 text-right pr-1.5 font-mono font-bold bg-slate-50/50 text-slate-900 text-[9px]">{formatQty(f.item.current_qty, f.item.item_type)}</td>
@@ -777,9 +828,9 @@ export default function InventoryPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredForecastData.filter((f: any) => {
+              {filteredForecastData.filter((f) => {
                 return forecastResult.dates.some(date => f.days[date].outQty > 0);
-              }).map((f: any) => (
+              }).map((f) => (
                 <tr key={f.item.id} className="h-8 hover:bg-slate-50">
                   <td className="border-r border-slate-300 px-1.5 font-medium truncate whitespace-nowrap text-slate-800">{f.item.name}</td>
                   <td className="border-r border-slate-300 text-center text-[10px] text-slate-500 bg-slate-50/50">{f.item.unit}</td>
@@ -848,7 +899,7 @@ export default function InventoryPage() {
                 {isBatchMode && (
                   <select
                     value={batchReason}
-                    onChange={(e: any) => setBatchReason(e.currentTarget.value)}
+                    onChange={(e: ChangeEvent<HTMLSelectElement>) => setBatchReason(e.currentTarget.value)}
                     className="border border-slate-300 rounded-lg text-xs font-bold p-2 bg-slate-50 h-9"
                   >
                     <option value="月末一斉棚卸">月末一斉棚卸</option>
@@ -910,7 +961,7 @@ export default function InventoryPage() {
                               min="0"
                               step="1"
                               value={batchInputs[stock.id] !== undefined ? batchInputs[stock.id] : ""}
-                              onChange={(e: any) => setBatchInputs({ ...batchInputs, [stock.id]: e.currentTarget.value === "" ? "" : Number(e.currentTarget.value) })}
+                              onChange={(e: ChangeEvent<HTMLInputElement>) => setBatchInputs({ ...batchInputs, [stock.id]: e.currentTarget.value === "" ? "" : Number(e.currentTarget.value) })}
                               className={`w-28 text-right font-mono font-bold h-9 ${isChanged ? 'border-amber-400 bg-white ring-2 ring-amber-200' : 'border-slate-300 shadow-sm'}`}
                             />
                             <span className="text-xs font-normal text-slate-500 w-8 text-left">P</span>
@@ -981,7 +1032,7 @@ export default function InventoryPage() {
                           min="0"
                           step="1"
                           value={batchInputs[stock.id] !== undefined ? batchInputs[stock.id] : ""}
-                          onChange={(e: any) => setBatchInputs({ ...batchInputs, [stock.id]: e.currentTarget.value === "" ? "" : Number(e.currentTarget.value) })}
+                          onChange={(e: ChangeEvent<HTMLInputElement>) => setBatchInputs({ ...batchInputs, [stock.id]: e.currentTarget.value === "" ? "" : Number(e.currentTarget.value) })}
                           className="text-right font-mono font-bold text-xl h-11 border-slate-300"
                         />
                         <span className="font-medium text-slate-600 text-sm">P</span>
@@ -1067,7 +1118,7 @@ export default function InventoryPage() {
                 <Filter className="w-4 h-4 text-slate-400" />
                 <select
                   value={forecastFilter}
-                  onChange={(e: any) => setForecastFilter(e.currentTarget.value as any)}
+                  onChange={(e: ChangeEvent<HTMLSelectElement>) => setForecastFilter(e.currentTarget.value as ForecastFilter)}
                   className="border border-slate-200 rounded-lg p-1.5 text-xs font-bold bg-white text-slate-700 h-9"
                 >
                   <option value="all">すべての品目</option>
@@ -1098,7 +1149,7 @@ export default function InventoryPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredForecastData.map((f: any) => (
+                  {filteredForecastData.map((f) => (
                     <TableRow key={f.item.id} className="hover:bg-slate-50/80 border-b border-slate-100 last:border-none transition-colors">
                       <td className="font-bold text-slate-800 truncate pl-3">{f.item.name}</td>
                       <td className="text-right font-mono font-bold bg-slate-50/50 pr-3 text-blue-800 border-r border-slate-200">{formatQty(f.item.current_qty, f.item.item_type)}</td>
@@ -1158,7 +1209,7 @@ export default function InventoryPage() {
                   step={adjustmentModal.itemType === 'raw_material' ? "0.01" : "1"}
                   placeholder="実数量を入力"
                   value={actualQty}
-                  onChange={(e: any) => setActualQty(e.currentTarget.value === "" ? "" : Number(e.currentTarget.value))}
+                  onChange={(e: ChangeEvent<HTMLInputElement>) => setActualQty(e.currentTarget.value === "" ? "" : Number(e.currentTarget.value))}
                   className="text-right font-mono font-bold text-2xl h-12 border-slate-300"
                 />
                 <span className="font-bold text-slate-500 shrink-0 w-8">{adjustmentModal.unit}</span>
@@ -1178,7 +1229,7 @@ export default function InventoryPage() {
               <label className="block text-xs font-bold text-slate-500">調整理由</label>
               <select
                 value={adjReason}
-                onChange={(e: any) => setAdjReason(e.currentTarget.value)}
+                onChange={(e: ChangeEvent<HTMLSelectElement>) => setAdjReason(e.currentTarget.value)}
                 className="w-full border border-slate-300 rounded-lg p-2.5 bg-white font-bold text-slate-700 text-sm h-11"
               >
                 <option value="定例棚卸">定例棚卸</option>
@@ -1206,7 +1257,7 @@ export default function InventoryPage() {
               <label className="text-xs font-bold text-slate-500">製品選択</label>
               <select
                 value={newStockData.productId}
-                onChange={(e: any) => setNewStockData({ ...newStockData, productId: e.currentTarget.value })}
+                onChange={(e: ChangeEvent<HTMLSelectElement>) => setNewStockData({ ...newStockData, productId: e.currentTarget.value })}
                 className="w-full border border-slate-300 rounded-lg p-2.5 bg-white font-bold text-slate-700 text-sm h-11"
               >
                 <option value="">製品を選択してください</option>
@@ -1215,20 +1266,20 @@ export default function InventoryPage() {
             </div>
             <div className="space-y-1">
               <label className="text-xs font-bold text-slate-500">Lot 番号</label>
-              <Input type="text" placeholder="例: 2026A" value={newStockData.lotCode} onChange={(e: any) => setNewStockData({ ...newStockData, lotCode: e.currentTarget.value })} className="font-bold h-10" />
+              <Input type="text" placeholder="例: 2026A" value={newStockData.lotCode} onChange={(e: ChangeEvent<HTMLInputElement>) => setNewStockData({ ...newStockData, lotCode: e.currentTarget.value })} className="font-bold h-10" />
             </div>
             <div className="space-y-1">
               <label className="text-xs font-bold text-slate-500">賞味・有効期限</label>
-              <Input type="date" value={newStockData.expiryDate} onChange={(e: any) => setNewStockData({ ...newStockData, expiryDate: e.currentTarget.value })} className="font-bold font-mono h-10" />
+              <Input type="date" value={newStockData.expiryDate} onChange={(e: ChangeEvent<HTMLInputElement>) => setNewStockData({ ...newStockData, expiryDate: e.currentTarget.value })} className="font-bold font-mono h-10" />
             </div>
             <div className="grid grid-cols-2 gap-3 bg-blue-50/30 p-3 rounded-lg border border-blue-100">
               <div className="space-y-1">
                 <label className="text-xs font-bold text-blue-700">追加ケース数 (cs)</label>
-                <Input type="number" min="0" step="1" value={newStockData.cs || ""} onChange={(e: any) => setNewStockData({ ...newStockData, cs: e.currentTarget.value === "" ? 0 : Math.round(Number(e.currentTarget.value)) })} className="text-right font-mono font-bold bg-white h-10" />
+                <Input type="number" min="0" step="1" value={newStockData.cs || ""} onChange={(e: ChangeEvent<HTMLInputElement>) => setNewStockData({ ...newStockData, cs: e.currentTarget.value === "" ? 0 : Math.round(Number(e.currentTarget.value)) })} className="text-right font-mono font-bold bg-white h-10" />
               </div>
               <div className="space-y-1">
                 <label className="text-xs font-bold text-blue-700">追加バラ数 (p)</label>
-                <Input type="number" min="0" step="1" value={newStockData.p || ""} onChange={(e: any) => setNewStockData({ ...newStockData, p: e.currentTarget.value === "" ? 0 : Math.round(Number(e.currentTarget.value)) })} className="text-right font-mono font-bold bg-white h-10" />
+                <Input type="number" min="0" step="1" value={newStockData.p || ""} onChange={(e: ChangeEvent<HTMLInputElement>) => setNewStockData({ ...newStockData, p: e.currentTarget.value === "" ? 0 : Math.round(Number(e.currentTarget.value)) })} className="text-right font-mono font-bold bg-white h-10" />
               </div>
             </div>
           </div>

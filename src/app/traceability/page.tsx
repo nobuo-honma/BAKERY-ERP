@@ -15,11 +15,48 @@ type TraceResult = {
     productName: string;
     expiryDate: string;
     totalProduced: number; // 個数
-    shipments: any[];
-    productionPlan: any | null;
-    fujiSteamyLogs: any[];
-    sensoryTest: any | null;
-    boms: any[]; // 使用原料
+    shipments: ShipmentTraceRow[];
+    productionPlan: ProductionPlanTraceRow | null;
+    fujiSteamyLogs: FujiSteamyTraceRow[];
+    sensoryTest: SensoryTraceRow | null;
+    boms: BomTraceRow[]; // 使用原料
+};
+
+type ShipmentTraceRow = {
+    ship_date: string;
+    qty_cs: number;
+    qty_piece: number;
+    orders?: {
+        customer_order_no?: string | null;
+        customers?: { name?: string | null } | null;
+    } | null;
+};
+
+type ProductionPlanTraceRow = {
+    product_id?: string | null;
+    production_date?: string | null;
+    actual_cs?: number | null;
+    actual_piece?: number | null;
+    planned_units?: number | null;
+    products?: { name?: string | null; variant_name?: string | null; unit_per_cs?: number | null } | null;
+};
+
+type FujiSteamyTraceRow = Record<string, unknown>;
+type SensoryTraceRow = {
+    test_date?: string | null;
+    checker_name?: string | null;
+    sub_checker_name?: string | null;
+    results?: Record<string, string[] | string>;
+    notes?: string | null;
+};
+
+type BomTraceRow = {
+    usage_rate?: number | null;
+    unit?: string | null;
+    items?: {
+        name?: string | null;
+        item_type?: string | null;
+    } | null;
 };
 
 // =======================================================================
@@ -69,8 +106,8 @@ export default function TraceabilityPage() {
                 return;
             }
 
-            const sProduct = stockData?.products as any;
-            const pProduct = planData?.products as any;
+            const sProduct = stockData?.products as { name?: string | null; variant_name?: string | null; unit_per_cs?: number | null } | null;
+            const pProduct = planData?.products as { name?: string | null; variant_name?: string | null; unit_per_cs?: number | null } | null;
 
             const productId = stockData?.product_id || planData?.product_id;
             const productName = stockData ? `${sProduct.name} (${sProduct.variant_name})` : `${pProduct.name} (${pProduct.variant_name})`;
@@ -123,7 +160,7 @@ export default function TraceabilityPage() {
                 boms: boms || []
             });
 
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error(err);
             setErrorMsg("検索中にエラーが発生しました。");
         }
@@ -133,7 +170,7 @@ export default function TraceabilityPage() {
     // =======================================================================
     // 官能検査のJSONデータをパースして、カテゴリ別にグループ化する関数
     // =======================================================================
-    const renderSensoryResults = (resultsObj: any) => {
+    const renderSensoryResults = (resultsObj: Record<string, string[] | string> | null | undefined) => {
         if (!resultsObj) return null;
 
         const grouped: Record<string, { label: string, values: string[], other?: string }[]> = {
@@ -271,7 +308,7 @@ export default function TraceabilityPage() {
                                             <TableHeader className="bg-slate-100/50"><TableRow><TableHead>出荷日</TableHead><TableHead>出荷先</TableHead><TableHead className="text-right">数量</TableHead></TableRow></TableHeader>
                                             <TableBody>
                                                 {result.shipments.map((s, i) => {
-                                                    const orderObj = s.orders as any;
+                                                    const orderObj = s.orders;
                                                     return (
                                                         <TableRow key={i}>
                                                             <TableCell className="font-bold text-xs">{new Date(s.ship_date).toLocaleDateString('ja-JP')}</TableCell>
@@ -303,7 +340,7 @@ export default function TraceabilityPage() {
                                     {result.boms.length > 0 ? (
                                         <Table className="text-sm">
                                             <TableBody>
-                                                {result.boms.filter((b: any) => b.items?.item_type === 'raw_material').map((b: any, i: number) => (
+                                                {result.boms.filter((b) => b.items?.item_type === 'raw_material').map((b, i) => (
                                                     <TableRow key={i}>
                                                         <TableCell className="font-bold text-slate-700">{b.items?.name}</TableCell>
                                                     </TableRow>

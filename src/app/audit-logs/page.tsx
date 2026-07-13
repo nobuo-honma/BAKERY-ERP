@@ -14,9 +14,27 @@ type AuditLog = {
     record_id: string;
     check_date: string;
     action: string;
-    old_data: any;
-    new_data: any;
+    old_data: RecordData | null;
+    new_data: RecordData | null;
     changed_at: string;
+};
+
+type RecordData = Record<string, unknown> & {
+    results?: Record<string, unknown>;
+    notes?: string;
+    improvement_done?: string;
+    improvement_planned?: string;
+    checker_name?: string;
+    sub_checker_name?: string;
+    product_name?: string;
+    lot_code?: string;
+    test_date?: string;
+};
+
+type DiffEntry = {
+    path: string;
+    oldVal: unknown;
+    newVal: unknown;
 };
 
 // テーブル名を日本語に変換
@@ -36,7 +54,7 @@ const TABLE_NAMES: Record<string, string> = {
 // ============================================================================
 
 // 値を見やすくフォーマットする
-const renderValue = (val: any) => {
+const renderValue = (val: unknown) => {
     if (val === 'ok') return <span className="text-emerald-600 font-bold">〇 (良)</span>;
     if (val === 'ng') return <span className="text-red-600 font-bold">× (不良)</span>;
     if (val === null || val === undefined || val === "") return <span className="text-slate-400 text-[10px]">未入力</span>;
@@ -57,8 +75,8 @@ const FIELD_LABELS: Record<string, string> = {
 };
 
 // 前後のデータから差分を抽出する
-function getDifferences(oldData: any, newData: any) {
-    let diffs: { path: string, oldVal: any, newVal: any }[] = [];
+function getDifferences(oldData: RecordData | null, newData: RecordData | null) {
+    const diffs: DiffEntry[] = [];
 
     // 1. 基本フィールドの比較
     const baseKeys = ['checker_name', 'sub_checker_name', 'notes', 'improvement_done', 'improvement_planned', 'product_name', 'lot_code'];
@@ -69,8 +87,8 @@ function getDifferences(oldData: any, newData: any) {
     });
 
     // 2. results (チェック項目) の比較
-    const res1 = oldData?.results || {};
-    const res2 = newData?.results || {};
+    const res1: Record<string, unknown> = oldData?.results ?? {};
+    const res2: Record<string, unknown> = newData?.results ?? {};
     const resKeys = Array.from(new Set([...Object.keys(res1), ...Object.keys(res2)]));
 
     resKeys.forEach(key => {
@@ -78,13 +96,15 @@ function getDifferences(oldData: any, newData: any) {
         const v2 = res2[key];
         if (JSON.stringify(v1) !== JSON.stringify(v2)) {
             // ネストしている場合 (YO-14など)
-            if (typeof v1 === 'object' && v1 !== null && !Array.isArray(v1) || typeof v2 === 'object' && v2 !== null && !Array.isArray(v2)) {
-                const nestedKeys = Array.from(new Set([...Object.keys(v1 || {}), ...Object.keys(v2 || {})]));
+            if ((typeof v1 === 'object' && v1 !== null && !Array.isArray(v1)) || (typeof v2 === 'object' && v2 !== null && !Array.isArray(v2))) {
+                const nestedV1 = (typeof v1 === 'object' && v1 !== null && !Array.isArray(v1) ? v1 : {}) as Record<string, unknown>;
+                const nestedV2 = (typeof v2 === 'object' && v2 !== null && !Array.isArray(v2) ? v2 : {}) as Record<string, unknown>;
+                const nestedKeys = Array.from(new Set([...Object.keys(nestedV1), ...Object.keys(nestedV2)]));
                 nestedKeys.forEach(nk => {
-                    if ((v1?.[nk] || "") !== (v2?.[nk] || "")) {
+                    if ((nestedV1[nk] ?? "") !== (nestedV2[nk] ?? "")) {
                         // expiry -> 賞味期限 などの簡単な変換
                         const subLabel = nk === 'expiry' ? '期限' : nk === 'lot' ? 'Lot' : nk === 'qty' ? '数量' : nk === 'appearance' ? '外観' : nk === 'smell' ? '臭い' : nk;
-                        diffs.push({ path: `[品目 ${key}] の ${subLabel}`, oldVal: v1?.[nk], newVal: v2?.[nk] });
+                        diffs.push({ path: `[品目 ${key}] の ${subLabel}`, oldVal: nestedV1[nk], newVal: nestedV2[nk] });
                     }
                 });
             } else {
@@ -97,7 +117,7 @@ function getDifferences(oldData: any, newData: any) {
 }
 
 // 差分を表示するコンポーネント
-function DiffViewer({ action, oldData, newData }: { action: string, oldData: any, newData: any }) {
+function DiffViewer({ action, oldData, newData }: { action: string; oldData: RecordData | null; newData: RecordData | null }) {
     if (action === 'UPDATE') {
         const diffs = getDifferences(oldData, newData);
 
@@ -129,7 +149,7 @@ function DiffViewer({ action, oldData, newData }: { action: string, oldData: any
     const targetData = action === 'INSERT' ? newData : oldData;
     if (!targetData) return null;
 
-    const results = targetData.results || {};
+    const results: Record<string, unknown> = targetData.results ?? {};
     const keys = Object.keys(results);
     const displayKeys = keys.slice(0, 8); // 多すぎる場合は省略
     const hasMore = keys.length > 8;
@@ -167,10 +187,6 @@ export default function AuditLogsPage() {
     const [logs, setLogs] = useState<AuditLog[]>([]);
     const [loading, setLoading] = useState(true);
 
-    useEffect(() => {
-        fetchLogs();
-    }, []);
-
     const fetchLogs = async () => {
         setLoading(true);
         const { data } = await supabase
@@ -182,6 +198,16 @@ export default function AuditLogsPage() {
         if (data) setLogs(data as AuditLog[]);
         setLoading(false);
     };
+
+    useEffect(() => {
+        const timeoutId = window.setTimeout(() => {
+            void (async () => {
+                await fetchLogs();
+            })();
+        }, 0);
+
+        return () => window.clearTimeout(timeoutId);
+    }, []);
 
     const getCheckerName = (log: AuditLog) => {
         if (log.action === 'DELETE') return log.old_data?.checker_name || "不明";

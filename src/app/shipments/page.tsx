@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Truck, Loader2, Save, AlertCircle, ArrowRight, Lock, Printer, ArrowLeft, FileText } from "lucide-react";
+import { Truck, Loader2, ArrowRight, Lock, Printer, ArrowLeft, FileText } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 
 type Order = {
@@ -77,7 +77,7 @@ export default function ShipmentsPage() {
       const groups: Record<string, OrderGroup> = {};
       const today = new Date(); today.setHours(0, 0, 0, 0);
 
-      data.forEach((o: any) => {
+      data.forEach((o: Order) => {
         const parts = o.id.split('-');
         const gId = o.customer_order_no
           ? `${o.customer_order_no}_${o.customer_id}_${o.planned_ship_date}`
@@ -97,7 +97,7 @@ export default function ShipmentsPage() {
     }
 
     const { data: sData } = await supabase.from("shipments").select("*, orders(product_id, desired_ship_date, planned_ship_date, customer_order_no, customers(name), products(name, variant_name, unit_per_cs))").order("ship_date", { ascending: false }).limit(50);
-    if (sData) setShipments(sData as any[]);
+    if (sData) setShipments(sData as Shipment[]);
 
     setLoading(false);
   }, []);
@@ -233,9 +233,10 @@ export default function ShipmentsPage() {
 
       alert("出荷処理が完了し、在庫から正確に減算されました！");
       fetchOrders();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      alert("エラー: " + err.message);
+      const message = err instanceof Error ? err.message : "不明なエラーです";
+      alert("エラー: " + message);
     }
     setIsProcessing(false);
   };

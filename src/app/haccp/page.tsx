@@ -50,7 +50,13 @@ export default function HaccpPortalPage() {
     }, []);
 
     useEffect(() => {
-        if (activeTab === "documents") fetchDocuments();
+        if (activeTab !== "documents") return;
+
+        const timeoutId = window.setTimeout(() => {
+            void fetchDocuments();
+        }, 0);
+
+        return () => window.clearTimeout(timeoutId);
     }, [activeTab, fetchDocuments]);
 
     const openModal = (doc?: HaccpDoc) => {
@@ -77,9 +83,10 @@ export default function HaccpPortalPage() {
             if (editingDoc) await supabase.from("haccp_documents").update(docData).eq("id", editingDoc.id);
             else await supabase.from("haccp_documents").insert(docData);
             setModalOpen(false); fetchDocuments();
-        } catch (err: any) {
+        } catch (err: unknown) {
             if (typeof window !== "undefined") {
-                window.alert("エラーが発生しました: " + err.message);
+                const message = err instanceof Error ? err.message : "不明なエラー";
+                window.alert("エラーが発生しました: " + message);
             }
         }
         setIsProcessing(false);

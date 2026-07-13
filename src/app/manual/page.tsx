@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, type ComponentType } from "react";
 import {
   BookOpen, Printer, Menu as MenuIcon, Settings, Info,
   ChevronDown, AlertCircle, CheckCircle2, FileText,
-  AlertTriangle, HelpCircle, ChevronRight, Truck, Calendar, Factory, Package, ArrowRight,
-  ArrowDownToLine, ShoppingCart, Edit, ShieldCheck, LineChart, Search, Bug
+  AlertTriangle, HelpCircle, ChevronRight, Truck, Calendar, Factory, ArrowRight,
+  ArrowDownToLine, ShoppingCart, Edit, ShieldCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -141,7 +141,7 @@ function ChapterTitle({ id, num, title, bread }: { id: string; num?: string; tit
   );
 }
 
-function SectionHead({ children, icon: Icon }: { children: React.ReactNode, icon?: any }) {
+function SectionHead({ children, icon: Icon }: { children: React.ReactNode; icon?: ComponentType<{ className?: string }> }) {
   return (
     <h3 className="text-lg font-bold text-slate-800 mb-4 mt-8 flex items-center gap-2 border-b border-slate-100 pb-2">
       {Icon && <Icon className="w-5 h-5 text-blue-600" />}
@@ -253,12 +253,9 @@ function Accordion({ title, children }: { title: string; children: React.ReactNo
 export default function ManualPage() {
   const [tab, setTab] = useState<TabKey>("user");
   const [mobileTocOpen, setMobileTocOpen] = useState(false);
-  const [techTocOpen, setTechTocOpen] = useState(false);
-  const [mounted, setMounted] = useState(false);
   const [activeSection, setActiveSection] = useState("intro");
 
   useEffect(() => {
-    setMounted(true);
     if (typeof window === "undefined") return;
 
     const handleScroll = () => {
@@ -289,10 +286,7 @@ export default function ManualPage() {
   const scrollToTech = (num: string) => {
     const el = document.getElementById(`tech-${num}`);
     if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 80, behavior: "smooth" });
-    setTechTocOpen(false);
   };
-
-  if (!mounted) return null;
 
   return (
     <div className="bg-slate-50/50 min-h-screen pb-12 print:bg-white print:p-0">

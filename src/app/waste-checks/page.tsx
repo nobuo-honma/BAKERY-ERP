@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,12 @@ const WASTE_ITEMS = [
 ];
 
 type CheckResult = 'ok' | 'ng' | null;
+type WasteRecord = {
+    check_date: string;
+    results?: Record<string, CheckResult>;
+    checker_name?: string | null;
+    notes?: string | null;
+};
 
 export default function WasteChecksPage() {
     const { canEdit } = useAuth();
@@ -31,7 +37,7 @@ export default function WasteChecksPage() {
     const [viewMode, setViewMode] = useState<'input' | 'monthly' | 'print'>('input');
 
     // 日次入力用State
-    const [checkDate, setCheckDate] = useState("");
+    const [checkDate, setCheckDate] = useState(() => new Date().toISOString().split('T')[0]);
     const [results, setResults] = useState<Record<string, CheckResult>>({});
     const [checkerName, setCheckerName] = useState("");
     const [notes, setNotes] = useState("");
@@ -39,33 +45,21 @@ export default function WasteChecksPage() {
 
     // 月次一覧用State
     const [calendarMonth, setCalendarMonth] = useState(new Date());
-    const [monthlyData, setMonthlyData] = useState<Record<string, any>>({});
+    const [monthlyData, setMonthlyData] = useState<Record<string, WasteRecord>>({});
 
-    useEffect(() => {
-        const today = new Date().toISOString().split('T')[0];
-        setCheckDate(today);
-    }, []);
-
-    useEffect(() => {
-        if (checkDate && viewMode === 'input') fetchDailyData(checkDate);
-    }, [checkDate, viewMode]);
-
-    useEffect(() => {
-        if (viewMode === 'monthly' || viewMode === 'print') fetchMonthlyData(calendarMonth);
-    }, [calendarMonth, viewMode]);
-
-    const fetchDailyData = async (dateStr: string) => {
+    const fetchDailyData = useCallback(async (dateStr: string) => {
         setLoading(true);
         const { data } = await supabase.from('waste_checks').select('*').eq('check_date', dateStr).maybeSingle();
         if (data) {
-            setResults(data.results || {}); setCheckerName(data.checker_name || ""); setNotes(data.notes || "");
+            const record = data as WasteRecord | null;
+            setResults(record?.results || {}); setCheckerName(record?.checker_name || ""); setNotes(record?.notes || "");
         } else {
             setResults({}); setCheckerName(""); setNotes("");
         }
         setLoading(false);
-    };
+    }, []);
 
-    const fetchMonthlyData = async (dateObj: Date) => {
+    const fetchMonthlyData = useCallback(async (dateObj: Date) => {
         setLoading(true);
         const y = dateObj.getFullYear(); const m = String(dateObj.getMonth() + 1).padStart(2, '0');
         const startDate = `${y}-${m}-01`;
@@ -73,12 +67,32 @@ export default function WasteChecksPage() {
 
         const { data } = await supabase.from('waste_checks').select('*').gte('check_date', startDate).lte('check_date', endDate);
         if (data) {
-            const dataMap: Record<string, any> = {};
-            data.forEach(row => { dataMap[row.check_date] = row; });
+            const dataMap: Record<string, WasteRecord> = {};
+            data.forEach((row: WasteRecord) => { dataMap[row.check_date] = row; });
             setMonthlyData(dataMap);
         }
         setLoading(false);
-    };
+    }, []);
+
+    useEffect(() => {
+        if (checkDate && viewMode === 'input') {
+            const timer = window.setTimeout(() => {
+                void fetchDailyData(checkDate);
+            }, 0);
+
+            return () => window.clearTimeout(timer);
+        }
+    }, [checkDate, viewMode, fetchDailyData]);
+
+    useEffect(() => {
+        if (viewMode === 'monthly' || viewMode === 'print') {
+            const timer = window.setTimeout(() => {
+                void fetchMonthlyData(calendarMonth);
+            }, 0);
+
+            return () => window.clearTimeout(timer);
+        }
+    }, [calendarMonth, viewMode, fetchMonthlyData]);
 
     const toggleResult = (itemId: string) => {
         if (!canEdit) return;
@@ -112,9 +126,6 @@ export default function WasteChecksPage() {
 
         // 1日〜16日
         const daysTop = Array.from({ length: 16 }, (_, i) => i + 1);
-        // 17日〜月末
-        const daysBottom = Array.from({ length: daysInMonth - 16 }, (_, i) => i + 17);
-
         // その月の最終入力日の備考を取得（月末のまとめとして印字）
         const lastInputDateStr = Object.keys(monthlyData).sort().pop();
         const printNotes = lastInputDateStr ? monthlyData[lastInputDateStr].notes : "";
@@ -255,7 +266,7 @@ export default function WasteChecksPage() {
                 )}
             </div>
 
-            <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as any)} className="w-full">
+            <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as 'input' | 'monthly' | 'print')} className="w-full">
                 <TabsList className="mb-6 bg-slate-200/80 p-1.5 rounded-xl">
                     <TabsTrigger value="input" className="font-bold py-2.5 px-6 rounded-lg data-[state=active]:bg-white data-[state=active]:text-orange-700 data-[state=active]:shadow-sm">日次チェック (現場入力用)</TabsTrigger>
                     <TabsTrigger value="monthly" className="font-bold py-2.5 px-6 rounded-lg data-[state=active]:bg-white data-[state=active]:text-orange-700 data-[state=active]:shadow-sm">月間一覧 (管理者・監査用)</TabsTrigger>

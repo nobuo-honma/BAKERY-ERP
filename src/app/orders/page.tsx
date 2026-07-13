@@ -13,18 +13,23 @@ import { useAuth } from "@/contexts/AuthContext";
 
 type Order = {
   id: string; order_date: string; planned_ship_date: string; desired_ship_date: string;
-  quantity: number; status: string; product_id: string; customer_order_no?: string;
+  quantity: number; status: string; product_id: string; customer_id: string; customer_order_no?: string;
   unit_price?: number; remarks?: string;
   customers?: { name: string; address?: string };
   products?: { name: string; variant_name: string; unit_per_cs: number };
 };
 type Customer = { id: string; name: string; address?: string };
 type Product = { id: string; name: string; variant_name: string; unit_per_kg: number; unit_per_cs: number };
+type DetailFormData = {
+  id?: string; productId: string; cs: number | ""; p: number | ""; unitPrice: number | ""; remarks: string; selectedName: string;
+};
+type FormDataState = {
+  date: string; plannedShipDate: string; shipDate: string; customerId: string; customerOrderNo: string; details: DetailFormData[];
+};
 type BomWithStock = {
   id: string; product_id: string; item_id: string; usage_rate: number; unit: string; basis_type: string;
   items: { name: string; item_type: string; item_stocks: { quantity: number }[] }
 };
-
 type OrderGroup = {
   groupId: string; customerName: string; customerAddress: string; customerId: string; customerOrderNo: string;
   orderDate: string; plannedShipDate: string; desiredShipDate: string; status: string; items: Order[];
@@ -61,32 +66,34 @@ export default function OrdersPage() {
   // 印刷ビュー用
   const [printGroup, setPrintGroup] = useState<OrderGroup | null>(null);
 
-  const [formData, setFormData] = useState<{
-    date: string; plannedShipDate: string; shipDate: string; customerId: string; customerOrderNo: string;
-    details: { id?: string; productId: string; cs: number | ""; p: number | ""; unitPrice: number | ""; remarks: string; selectedName: string }[];
-  }>({ date: "", plannedShipDate: "", shipDate: "", customerId: "", customerOrderNo: "", details: [{ productId: "", cs: 0, p: 0, unitPrice: "", remarks: "", selectedName: "" }] });
+  const [formData, setFormData] = useState<FormDataState>({ date: "", plannedShipDate: "", shipDate: "", customerId: "", customerOrderNo: "", details: [{ productId: "", cs: 0, p: 0, unitPrice: "", remarks: "", selectedName: "" }] });
 
   const [boms, setBoms] = useState<BomWithStock[]>([]);
   const [isSimulating, setIsSimulating] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
+  const resetForm = useCallback(() => {
+    const today = new Date().toISOString().split('T')[0];
+    setEditingGroup(null);
+    setFormData({ date: today, plannedShipDate: "", shipDate: "", customerId: "", customerOrderNo: "", details: [{ productId: "", cs: 0, p: 0, unitPrice: "", remarks: "", selectedName: "" }] });
+  }, []);
+
   const fetchData = useCallback(async () => {
     setLoading(true);
-    // ★修正: customers(name, address) と住所も取得するように変更
     const { data: oData } = await supabase.from("orders").select("*, customers(name, address), products(name, variant_name, unit_per_kg, unit_per_cs)").order("order_date", { ascending: false });
     const { data: cData } = await supabase.from("customers").select("id, name, address");
     const { data: pData } = await supabase.from("products").select("*");
 
     if (oData) {
       const groups: Record<string, OrderGroup> = {};
-      oData.forEach((o: any) => {
+      oData.forEach((o: Order) => {
         const parts = o.id.split('-');
         const gId = parts.length > 3 ? parts.slice(0, 3).join('-') : o.id;
         if (!groups[gId]) {
           groups[gId] = {
             groupId: gId,
             customerName: o.customers?.name || "",
-            customerAddress: o.customers?.address || "", // ★追加
+            customerAddress: o.customers?.address || "",
             customerId: o.customer_id,
             customerOrderNo: o.customer_order_no || "", orderDate: o.order_date,
             plannedShipDate: o.planned_ship_date, desiredShipDate: o.desired_ship_date,
@@ -104,9 +111,15 @@ export default function OrdersPage() {
 
     resetForm();
     setLoading(false);
-  }, []);
+  }, [resetForm]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void fetchData();
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [fetchData]);
 
   const openModal = (group?: OrderGroup) => {
     if (group) {
@@ -133,18 +146,13 @@ export default function OrdersPage() {
     setIsOpen(true);
   };
 
-  const resetForm = () => {
-    const today = new Date().toISOString().split('T')[0];
-    setEditingGroup(null);
-    setFormData({ date: today, plannedShipDate: "", shipDate: "", customerId: "", customerOrderNo: "", details: [{ productId: "", cs: 0, p: 0, unitPrice: "", remarks: "", selectedName: "" }] });
-  };
-
   const addDetailRow = () => setFormData(prev => ({ ...prev, details: [...prev.details, { productId: "", cs: 0, p: 0, unitPrice: "", remarks: "", selectedName: "" }] }));
   const removeDetailRow = (index: number) => setFormData(prev => ({ ...prev, details: prev.details.filter((_, i) => i !== index) }));
-  const updateDetail = (index: number, field: string, value: any) => {
+  const updateDetail = (index: number, field: keyof DetailFormData, value: DetailFormData[keyof DetailFormData]) => {
     setFormData(prev => {
       const newDetails = [...prev.details];
-      newDetails[index] = { ...newDetails[index], [field]: value };
+      const nextDetail = { ...newDetails[index], [field]: value } as DetailFormData;
+      newDetails[index] = nextDetail;
       if (field === 'selectedName') newDetails[index].productId = "";
       return { ...prev, details: newDetails };
     });
@@ -152,27 +160,37 @@ export default function OrdersPage() {
 
   useEffect(() => {
     const productIds = formData.details.map(d => d.productId).filter(Boolean);
-    if (productIds.length === 0) { setBoms([]); return; }
+    if (productIds.length === 0) {
+      const timer = window.setTimeout(() => setBoms([]), 0);
+      return () => window.clearTimeout(timer);
+    }
 
     const fetchBoms = async () => {
       setIsSimulating(true);
       const { data: bomData } = await supabase.from("bom").select(`*, items ( id, name, item_type )`).in("product_id", productIds);
 
       if (bomData && bomData.length > 0) {
-        const itemIds = bomData.map((b: any) => b.item_id);
+        const mappedBoms = bomData as BomWithStock[];
+        const itemIds = mappedBoms.map((b) => b.item_id);
         const { data: stockData } = await supabase.from("item_stocks").select("item_id, quantity").in("item_id", itemIds);
+        const stockRows = (stockData ?? []) as Array<{ item_id: string; quantity: number }>;
 
-        const mergedBoms = bomData.map((b: any) => {
-          const stock = stockData?.find((s: any) => s.item_id === b.item_id);
+        const mergedBoms = mappedBoms.map((b) => {
+          const stock = stockRows.find((s) => s.item_id === b.item_id);
           return { ...b, items: { ...b.items, item_stocks: stock ? [{ quantity: stock.quantity }] : [] } };
         });
-        setBoms(mergedBoms as any);
+        setBoms(mergedBoms);
       } else {
         setBoms([]);
       }
       setIsSimulating(false);
     };
-    fetchBoms();
+
+    const timer = window.setTimeout(() => {
+      void fetchBoms();
+    }, 0);
+
+    return () => window.clearTimeout(timer);
   }, [formData.details]);
 
   const simResult: Record<string, { name: string, unit: string, required: number, stock: number, isShort: boolean }> = {};
@@ -257,7 +275,10 @@ export default function OrdersPage() {
       alert(editingGroup ? "受注データを更新しました！" : `新規受注を登録しました！(${upserts.length}件)`);
       setIsOpen(false);
       fetchData();
-    } catch (err: any) { alert("エラー: " + err.message); }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "不明なエラーが発生しました。";
+      alert("エラー: " + message);
+    }
     setIsProcessing(false);
   };
 
@@ -287,7 +308,7 @@ export default function OrdersPage() {
     // 印刷用に、最低8行分の枠を用意する（元の帳票のレイアウトに近づけるため）
     const displayItems = [...printGroup.items];
     while (displayItems.length < 8) {
-      displayItems.push({ id: `empty-${displayItems.length}` } as any);
+      displayItems.push({ id: `empty-${displayItems.length}` } as Order);
     }
 
     return (

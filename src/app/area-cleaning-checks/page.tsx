@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -27,13 +27,26 @@ const AREA_CLEANING_ITEMS = [
 
 type CheckResult = 'ok' | 'ng' | null;
 
+type AreaCleaningCheckRow = {
+    check_date: string;
+    results?: Record<string, CheckResult>;
+    checker_name?: string;
+    notes?: string;
+};
+
+type MonthlyDataMap = Record<string, AreaCleaningCheckRow>;
+
+function getTodayString() {
+    return new Date().toISOString().split('T')[0];
+}
+
 export default function AreaCleaningChecksPage() {
     const { canEdit } = useAuth();
     const [loading, setLoading] = useState(false);
     const [viewMode, setViewMode] = useState<'input' | 'monthly' | 'print'>('input');
 
     // 日次入力用State
-    const [checkDate, setCheckDate] = useState("");
+    const [checkDate, setCheckDate] = useState(getTodayString);
     const [results, setResults] = useState<Record<string, CheckResult>>({});
     const [checkerName, setCheckerName] = useState("");
     const [notes, setNotes] = useState("");
@@ -41,46 +54,59 @@ export default function AreaCleaningChecksPage() {
 
     // 月次一覧用State
     const [calendarMonth, setCalendarMonth] = useState(new Date());
-    const [monthlyData, setMonthlyData] = useState<Record<string, any>>({});
+    const [monthlyData, setMonthlyData] = useState<MonthlyDataMap>({});
 
-    useEffect(() => {
-        const today = new Date().toISOString().split('T')[0];
-        setCheckDate(today);
-    }, []);
-
-    useEffect(() => {
-        if (checkDate && viewMode === 'input') fetchDailyData(checkDate);
-    }, [checkDate, viewMode]);
-
-    useEffect(() => {
-        if (viewMode === 'monthly' || viewMode === 'print') fetchMonthlyData(calendarMonth);
-    }, [calendarMonth, viewMode]);
-
-    const fetchDailyData = async (dateStr: string) => {
+    const fetchDailyData = useCallback(async (dateStr: string) => {
         setLoading(true);
         const { data } = await supabase.from('area_cleaning_checks').select('*').eq('check_date', dateStr).maybeSingle();
-        if (data) {
-            setResults(data.results || {}); setCheckerName(data.checker_name || ""); setNotes(data.notes || "");
+        const row = data as AreaCleaningCheckRow | null;
+        if (row) {
+            setResults(row.results || {});
+            setCheckerName(row.checker_name || "");
+            setNotes(row.notes || "");
         } else {
-            setResults({}); setCheckerName(""); setNotes("");
+            setResults({});
+            setCheckerName("");
+            setNotes("");
         }
         setLoading(false);
-    };
+    }, []);
 
-    const fetchMonthlyData = async (dateObj: Date) => {
+    const fetchMonthlyData = useCallback(async (dateObj: Date) => {
         setLoading(true);
         const y = dateObj.getFullYear(); const m = String(dateObj.getMonth() + 1).padStart(2, '0');
         const startDate = `${y}-${m}-01`;
         const endDate = new Date(y, dateObj.getMonth() + 1, 0).toISOString().split('T')[0];
 
         const { data } = await supabase.from('area_cleaning_checks').select('*').gte('check_date', startDate).lte('check_date', endDate);
-        if (data) {
-            const dataMap: Record<string, any> = {};
-            data.forEach(row => { dataMap[row.check_date] = row; });
-            setMonthlyData(dataMap);
-        }
+        const rows = (data as AreaCleaningCheckRow[] | null) ?? [];
+        const dataMap: MonthlyDataMap = {};
+        rows.forEach((row) => {
+            dataMap[row.check_date] = row;
+        });
+        setMonthlyData(dataMap);
         setLoading(false);
-    };
+    }, []);
+
+    useEffect(() => {
+        if (!checkDate || viewMode !== 'input') return;
+
+        const timeoutId = window.setTimeout(() => {
+            void fetchDailyData(checkDate);
+        }, 0);
+
+        return () => window.clearTimeout(timeoutId);
+    }, [checkDate, fetchDailyData, viewMode]);
+
+    useEffect(() => {
+        if (viewMode !== 'monthly' && viewMode !== 'print') return;
+
+        const timeoutId = window.setTimeout(() => {
+            void fetchMonthlyData(calendarMonth);
+        }, 0);
+
+        return () => window.clearTimeout(timeoutId);
+    }, [calendarMonth, fetchMonthlyData, viewMode]);
 
     const toggleResult = (itemId: string) => {
         if (!canEdit) return;
@@ -113,7 +139,6 @@ export default function AreaCleaningChecksPage() {
         const daysInMonth = new Date(y, m, 0).getDate();
 
         const daysTop = Array.from({ length: 16 }, (_, i) => i + 1);
-        const daysBottom = Array.from({ length: daysInMonth - 16 }, (_, i) => i + 17);
 
         return (
             <div className="bg-slate-200 min-h-screen py-8 print:p-0 print:bg-white flex flex-col items-center">
@@ -248,7 +273,7 @@ export default function AreaCleaningChecksPage() {
                 )}
             </div>
 
-            <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as any)} className="w-full">
+            <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as "input" | "monthly" | "print")} className="w-full">
                 <TabsList className="mb-6 bg-slate-200/80 p-1.5 rounded-xl">
                     <TabsTrigger value="input" className="font-bold py-2.5 px-6 rounded-lg data-[state=active]:bg-white data-[state=active]:text-cyan-700 data-[state=active]:shadow-sm">日次チェック (現場入力用)</TabsTrigger>
                     <TabsTrigger value="monthly" className="font-bold py-2.5 px-6 rounded-lg data-[state=active]:bg-white data-[state=active]:text-cyan-700 data-[state=active]:shadow-sm">月間一覧 (管理者・監査用)</TabsTrigger>
@@ -287,7 +312,7 @@ export default function AreaCleaningChecksPage() {
                                 <CardContent className="p-0">
                                     {loading ? <div className="flex justify-center items-center h-64"><Loader2 className="animate-spin h-8 w-8 text-cyan-500" /></div> : (
                                         <div className="divide-y divide-slate-100">
-                                            {AREA_CLEANING_ITEMS.map((item, idx) => {
+                                            {AREA_CLEANING_ITEMS.map((item) => {
                                                 const res = results[item.id]; const isOk = res === 'ok'; const isNg = res === 'ng';
                                                 return (
                                                     <div key={item.id} className={`p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-colors ${isNg ? 'bg-red-50/30' : 'hover:bg-slate-50'}`}>
