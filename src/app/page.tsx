@@ -117,7 +117,7 @@ export default function Dashboard() {
       setAlerts({ shortages, warnings, total: shortages.length + warnings.length });
 
       // 2. 本日の製造
-      const { data: prodData } = await supabase.from("production_plans").select("planned_cs, products(name)");
+      const { data: prodData } = await supabase.from("production_plans").select("planned_cs, products(name)").eq("production_date", todayStr);
       if (prodData && prodData.length > 0) {
         const typedProdData = prodData as unknown as Array<{ planned_cs: number; products: { name?: string | null } | Array<{ name?: string | null }> | null }>;
         const totalCs = typedProdData.reduce((sum: number, p) => sum + (p.planned_cs || 0), 0);

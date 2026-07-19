@@ -730,9 +730,50 @@ export default function InventoryPage() {
 
   // 在庫推移予測 PDF (A4 横) - ★数字の重なり問題を解消したバージョン
   if (viewMode === 'print_forecast') {
+    const printDate = new Date().toLocaleDateString('ja-JP');
     return (
       <div className="bg-slate-200 min-h-screen py-8 print:p-0 print:bg-white flex flex-col items-center">
-        <style dangerouslySetInnerHTML={{ __html: `@media print { header, nav { display: none !important; } main { padding: 0 !important; margin: 0 !important; max-width: 100% !important; background: white !important; } @page { size: A4 landscape; margin: 10mm; } body { background-color: white !important; color: black !important; } .print-hide { display: none !important; } }` }} />
+        <style dangerouslySetInnerHTML={{ __html: `
+          @media print {
+            header, nav { display: none !important; }
+            main { padding: 0 !important; margin: 0 !important; max-width: 100% !important; background: white !important; }
+            @page {
+              size: A4 landscape;
+              margin-top: 30mm;
+              margin-bottom: 20mm;
+              margin-left: 10mm;
+              margin-right: 10mm;
+              @top-left {
+                content: "在庫推移予測 (MRP カレンダー)";
+                font-size: 11pt;
+                font-weight: bold;
+                font-family: sans-serif;
+                vertical-align: bottom;
+                padding-bottom: 4mm;
+                border-bottom: 1pt solid black;
+              }
+              @top-right {
+                content: "作成日: ${printDate}";
+                font-size: 8pt;
+                font-family: monospace;
+                vertical-align: bottom;
+                padding-bottom: 4mm;
+              }
+              @bottom-center {
+                content: counter(page) " / " counter(pages);
+                font-size: 9pt;
+                font-family: sans-serif;
+                padding-top: 3mm;
+                border-top: 0.5pt solid #888;
+              }
+            }
+            body { background-color: white !important; color: black !important; }
+            .print-hide { display: none !important; }
+            .print-doc-header { display: none !important; }
+            thead { display: table-header-group !important; }
+            tfoot { display: table-footer-group !important; }
+          }
+        `}} />
         <div className="w-[297mm] print:w-full flex justify-between mb-4 print-hide">
           <Button variant="outline" onClick={() => setViewMode('list')} className="bg-white text-slate-700 font-bold border-slate-300">
             <ArrowLeft className="h-4 w-4 mr-2" /> 戻る
@@ -742,9 +783,10 @@ export default function InventoryPage() {
           </Button>
         </div>
         <div className="w-[297mm] bg-white py-8 px-10 print:p-0 shadow-xl print:shadow-none text-black font-sans box-border flex flex-col justify-between">
-          <div className="flex justify-between items-end mb-4 border-b-2 border-black pb-2">
+          {/* 画面表示用ヘッダー（印刷時は @page margin-box で代替されるため非表示） */}
+          <div className="print-doc-header flex justify-between items-end mb-4 border-b-2 border-black pb-2">
             <h1 className="text-xl font-bold tracking-widest">在庫推移予測 (MRP カレンダー)</h1>
-            <div className="text-xs font-mono">作成日: {new Date().toLocaleDateString('ja-JP')}</div>
+            <div className="text-xs font-mono">作成日: {printDate}</div>
           </div>
           <table className="w-full border-collapse border border-slate-800 text-[9px] table-fixed">
             <thead>
