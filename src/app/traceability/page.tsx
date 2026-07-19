@@ -150,13 +150,24 @@ export default function TraceabilityPage() {
                 .select('usage_rate, unit, items(name, item_type)')
                 .eq('product_id', productId);
 
+            const normalizedPlan: ProductionPlanTraceRow | null = planData
+                ? {
+                    product_id: planData.product_id,
+                    production_date: planData.production_date,
+                    actual_cs: planData.actual_cs,
+                    actual_piece: planData.actual_piece,
+                    planned_units: planData.planned_units,
+                    products: pProduct,
+                  }
+                : null;
+
             setResult({
                 lotCode: searchLot,
                 productName,
                 expiryDate,
                 totalProduced,
                 shipments: (shipments as any) || [],
-                productionPlan: planData || null,
+                productionPlan: normalizedPlan,
                 fujiSteamyLogs: fujiLogs || [],
                 sensoryTest: sensory || null,
                 boms: boms || []
