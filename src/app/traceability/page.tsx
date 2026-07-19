@@ -41,7 +41,14 @@ type ProductionPlanTraceRow = {
     products?: { name?: string | null; variant_name?: string | null; unit_per_cs?: number | null } | null;
 };
 
-type FujiSteamyTraceRow = Record<string, unknown>;
+type FujiSteamyTraceRow = {
+    batch_name?: string | null;
+    start_time?: string | null;
+    reach_80_time?: string | null;
+    max_temp?: string | number | null;
+    avg_temp?: string | number | null;
+    [key: string]: unknown;
+};
 type SensoryTraceRow = {
     test_date?: string | null;
     checker_name?: string | null;
@@ -170,7 +177,11 @@ export default function TraceabilityPage() {
                 productionPlan: normalizedPlan,
                 fujiSteamyLogs: fujiLogs || [],
                 sensoryTest: sensory || null,
-                boms: boms || []
+                boms: (boms || []).map(b => ({
+                    usage_rate: b.usage_rate,
+                    unit: b.unit,
+                    items: Array.isArray(b.items) ? b.items[0] : b.items
+                })) as BomTraceRow[]
             });
 
         } catch (err: unknown) {
@@ -197,10 +208,12 @@ export default function TraceabilityPage() {
 
             const def = SENSORY_LABELS[key];
             if (def) {
+                const rawVal = resultsObj[key];
+                const rawOther = resultsObj[`${key}_other_text`];
                 grouped[def.category].push({
                     label: def.label,
-                    values: resultsObj[key],
-                    other: resultsObj[`${key}_other_text`]
+                    values: Array.isArray(rawVal) ? rawVal : [rawVal],
+                    other: Array.isArray(rawOther) ? rawOther[0] : rawOther
                 });
             }
         });
@@ -382,7 +395,7 @@ export default function TraceabilityPage() {
                                         <div className="space-y-3">
                                             <div className="flex justify-between border-b pb-2 text-xs">
                                                 <span className="text-slate-500 font-bold">実施日</span>
-                                                <span className="font-bold">{new Date(result.sensoryTest.test_date).toLocaleDateString('ja-JP')}</span>
+                                                <span className="font-bold">{result.sensoryTest.test_date ? new Date(result.sensoryTest.test_date).toLocaleDateString('ja-JP') : '-'}</span>
                                             </div>
                                             <div className="flex justify-between border-b pb-2 text-xs">
                                                 <span className="text-slate-500 font-bold">主担当</span>
@@ -418,19 +431,23 @@ export default function TraceabilityPage() {
                                 <CardContent className="p-0">
                                     {result.fujiSteamyLogs.length > 0 ? (
                                         <div className="divide-y divide-slate-100 max-h-[300px] overflow-y-auto">
-                                            {result.fujiSteamyLogs.map((log, i) => (
+                                            {result.fujiSteamyLogs.map((log, i) => {
+                                                const startTime = log.start_time ?? '';
+                                                const reach80 = log.reach_80_time ?? '';
+                                                return (
                                                 <div key={i} className="p-4 flex justify-between items-center bg-white hover:bg-slate-50 transition-colors">
                                                     <div>
-                                                        <div className="text-[10px] text-slate-400 font-mono mb-1">{log.batch_name}</div>
-                                                        <div className="text-xs font-bold text-slate-700">開始: {log.start_time.split(' ')[1] || log.start_time}</div>
-                                                        <div className="text-xs font-bold text-red-600">80℃: {log.reach_80_time !== "-" ? (log.reach_80_time.split(' ')[1] || log.reach_80_time) : "未達"}</div>
+                                                        <div className="text-[10px] text-slate-400 font-mono mb-1">{String(log.batch_name ?? '')}</div>
+                                                        <div className="text-xs font-bold text-slate-700">開始: {startTime.split(' ')[1] || startTime}</div>
+                                                        <div className="text-xs font-bold text-red-600">80℃: {reach80 !== "-" ? (reach80.split(' ')[1] || reach80) : "未達"}</div>
                                                     </div>
                                                     <div className="text-right">
-                                                        <div className="text-xl font-black text-slate-800">{log.max_temp} <span className="text-[10px] font-normal text-slate-500">℃ (最高)</span></div>
-                                                        <div className="text-xs font-bold text-slate-500">{log.avg_temp} <span className="text-[9px] font-normal">℃ (庫内平均)</span></div>
+                                                        <div className="text-xl font-black text-slate-800">{String(log.max_temp ?? '')} <span className="text-[10px] font-normal text-slate-500">℃ (最高)</span></div>
+                                                        <div className="text-xs font-bold text-slate-500">{String(log.avg_temp ?? '')} <span className="text-[9px] font-normal">℃ (庫内平均)</span></div>
                                                     </div>
                                                 </div>
-                                            ))}
+                                                );
+                                            })}
                                         </div>
                                     ) : (
                                         <div className="p-6 text-center text-slate-400 text-xs font-bold flex flex-col items-center">
