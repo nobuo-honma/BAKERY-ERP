@@ -759,12 +759,22 @@ export default function InventoryPage() {
                 vertical-align: bottom;
                 padding-bottom: 4mm;
               }
+              @bottom-left {
+                content: "+N は入荷予定  -N は製造使用予定  背景薄赤は在庫不足(マイナス)警告";
+                font-size: 7pt;
+                font-family: sans-serif;
+                color: #555;
+                padding-top: 3mm;
+                border-top: 0.5pt solid #888;
+                vertical-align: top;
+              }
               @bottom-center {
                 content: counter(page) " / " counter(pages);
                 font-size: 9pt;
                 font-family: sans-serif;
                 padding-top: 3mm;
                 border-top: 0.5pt solid #888;
+                vertical-align: top;
               }
             }
             body { background-color: white !important; color: black !important; }
