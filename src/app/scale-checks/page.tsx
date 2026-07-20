@@ -238,29 +238,29 @@ export default function ScaleChecksPage() {
           </tr>
         </thead>
         <tbody>
-          <tr className="h-[22px]">
+          <tr className="h-5.5">
             <th className="border border-black font-medium text-left px-1 w-[8%] text-xs">設置状態の<br />確認</th>
             <th className="border border-black text-center font-medium w-[2%]">A</th>
             {daysArr.map(d => d > daysInMonth ? <td key={`A-${d}`} className="border border-black bg-white"></td> : <td key={`A-${d}`} className="border border-black text-center font-bold text-xs">{renderOkNg(monthlyData[`${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`]?.status_a)}</td>)}
           </tr>
-          <tr className="h-[22px]">
+          <tr className="h-5.5">
             <th className="border border-black font-medium text-center"></th>
             <th className="border border-black text-center font-medium">B</th>
             {daysArr.map(d => d > daysInMonth ? <td key={`B-${d}`} className="border border-black bg-white"></td> : <td key={`B-${d}`} className="border border-black text-center font-bold text-xs">{renderOkNg(monthlyData[`${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`]?.status_b)}</td>)}
           </tr>
-          <tr className="h-[22px]">
+          <tr className="h-5.5">
             <th className="border border-black font-medium text-left px-1 text-xs">ゼロ点の確<br />認</th>
             <th className="border border-black text-center font-medium">C</th>
             {daysArr.map(d => d > daysInMonth ? <td key={`C-${d}`} className="border border-black bg-white"></td> : <td key={`C-${d}`} className="border border-black text-center font-bold text-xs">{renderOkNg(monthlyData[`${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`]?.status_c)}</td>)}
           </tr>
 
-          <tr className="h-[22px]">
+          <tr className="h-5.5">
             {/* 左側の「重量表示の確認」とデジタル表示の図 */}
             <th rowSpan={10} className="border border-black bg-white p-0 relative align-top overflow-hidden">
               <div className="text-[10px] font-bold w-full text-left pl-1 pt-1 leading-tight tracking-wider">重量表示の<br />確認</div>
               <div className="mt-4 text-[8px] font-bold w-full text-left pl-1">※5点測定箇<br />所</div>
               {/* ▼ 修正: border-[2px] -> border-2, border-b-[2px] -> border-b-2, border-r-[2px] -> border-r-2 */}
-              <div className="mx-auto mt-1 w-[70px] h-[45px] border-2 border-black relative bg-white shrink-0">
+              <div className="mx-auto mt-1 w-17.5 h-11.25 border-2 border-black relative bg-white shrink-0">
                 <div className="absolute top-0 left-0 bg-white border-b-2 border-r-2 border-black text-[7px] font-bold px-1 py-0.5 z-10">デジタル表示</div>
                 <div className="absolute top-5 left-1 text-[10px] font-bold w-4 h-4 rounded-full border border-black flex items-center justify-center bg-white">1</div>
                 <div className="absolute top-5 left-1/2 -translate-x-1/2 text-[10px] font-bold w-4 h-4 rounded-full border border-black flex items-center justify-center bg-white">3</div>
@@ -276,7 +276,7 @@ export default function ScaleChecksPage() {
               return <td key={`D1-${d}`} className="border border-black text-center font-bold text-xs">{monthlyData[dStr]?.d1_weight || ""}</td>;
             })}
           </tr>
-          <tr className="h-[22px]">
+          <tr className="h-5.5">
             <th className="border border-black font-medium px-1 text-[9px]">(差)</th>
             {daysArr.map(d => {
               if (d > daysInMonth) return <td key={`Diff1-${d}`} className="border border-black bg-white"></td>;
@@ -287,7 +287,7 @@ export default function ScaleChecksPage() {
 
           {[2, 3, 4, 5].map((num) => (
             <React.Fragment key={`group-${num}`}>
-              <tr className="h-[22px]">
+              <tr className="h-5.5">
                 <th className="border border-black font-bold px-1 text-xs">D{num}</th>
                 {daysArr.map(d => {
                   if (d > daysInMonth) return <td key={`D${num}-${d}`} className="border border-black bg-white"></td>;
@@ -295,7 +295,7 @@ export default function ScaleChecksPage() {
                   return <td key={`D${num}-${d}`} className="border border-black text-center font-bold text-xs">{monthlyData[dStr]?.[`d${num}_weight` as keyof ScaleCheck] || ""}</td>;
                 })}
               </tr>
-              <tr className="h-[22px]">
+              <tr className="h-5.5">
                 <th className="border border-black font-medium px-1 text-[9px]">(差)</th>
                 {daysArr.map(d => {
                   if (d > daysInMonth) return <td key={`Diff${num}-${d}`} className="border border-black bg-white"></td>;
@@ -311,7 +311,7 @@ export default function ScaleChecksPage() {
             {daysArr.map(d => {
               if (d > daysInMonth) return <td key={`chk-${d}`} className="border border-black bg-white"></td>;
               const checker = monthlyData[`${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`]?.checker_name;
-              return <td key={`chk-${d}`} className="border border-black text-center p-0">{checker ? <div className="text-[10px] truncate max-w-[24px] mx-auto font-bold">{checker.slice(0, 2)}</div> : ""}</td>;
+              return <td key={`chk-${d}`} className="border border-black text-center p-0">{checker ? <div className="text-[10px] truncate max-w-6 mx-auto font-bold">{checker.slice(0, 2)}</div> : ""}</td>;
             })}
           </tr>
         </tbody>
@@ -350,7 +350,7 @@ export default function ScaleChecksPage() {
             <div className="absolute bottom-0 left-0 text-lg font-black tracking-widest mt-2">{y} <span className="text-sm font-bold">年</span></div>
 
             {/* ▼ 修正: border-[3px] -> border-2 に */}
-            <table className="border-collapse border-2 border-black text-[12px] text-center leading-none w-[280px]">
+            <table className="border-collapse border-2 border-black text-[12px] text-center leading-none w-70">
               <tbody>
                 <tr className="h-6">
                   <th className="border border-black font-medium w-24">文章No.</th>
@@ -361,8 +361,8 @@ export default function ScaleChecksPage() {
                 <tr className="h-6">
                   <th className="border border-black font-medium">制定日</th>
                   <td className="border border-black font-bold">2021/4/1</td>
-                  <td className="border border-black h-[70px]" rowSpan={3}></td>
-                  <td className="border border-black h-[70px]" rowSpan={3}></td>
+                  <td className="border border-black h-17.5" rowSpan={3}></td>
+                  <td className="border border-black h-17.5" rowSpan={3}></td>
                 </tr>
                 <tr className="h-6">
                   <th className="border border-black font-medium">改定日</th>
@@ -550,7 +550,7 @@ export default function ScaleChecksPage() {
             </CardHeader>
             <CardContent className="p-0">
               <div className="overflow-x-auto">
-                <Table className="w-full table-fixed min-w-[1200px] border-collapse text-xs">
+                <Table className="w-full table-fixed min-w-300 border-collapse text-xs">
                   <TableHeader className="bg-slate-100 sticky top-0 z-10 shadow-sm">
                     <TableRow>
                       <TableHead className="w-32 border-r font-bold text-slate-700 bg-slate-100 sticky left-0 z-20 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">点検項目</TableHead>
@@ -590,7 +590,7 @@ export default function ScaleChecksPage() {
                           {Array.from({ length: new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 0).getDate() }, (_, i) => i + 1).map(day => {
                             const dStr = `${calendarMonth.getFullYear()}-${String(calendarMonth.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
                             const checker = monthlyData[dStr]?.checker_name;
-                            return <TableCell key={`checker-${day}`} className="border-r text-center p-0.5">{checker ? <div className="text-[8px] truncate max-w-[28px] mx-auto text-slate-700">{checker.slice(0, 2)}</div> : ""}</TableCell>;
+                            return <TableCell key={`checker-${day}`} className="border-r text-center p-0.5">{checker ? <div className="text-[8px] truncate max-w-7 mx-auto text-slate-700">{checker.slice(0, 2)}</div> : ""}</TableCell>;
                           })}
                         </TableRow>
                       </>

@@ -398,9 +398,9 @@ export default function SensoryTestsPage() {
                         </tbody>
                     </table>
 
-                    <div className="mt-2 border-2 border-black flex flex-col min-h-[120px]">
+                    <div className="mt-2 border-2 border-black flex flex-col min-h-30">
                         <div className="text-center font-bold text-xs py-1 border-b border-black bg-gray-50">・各項目ごとに、チェックをして問題が無いかの確認</div>
-                        <div className="p-3 text-sm whitespace-pre-wrap flex-1 leading-[2.5em] bg-[linear-gradient(transparent_95%,#cbd5e1_95%)] bg-[length:100%_2.5em]">
+                        <div className="p-3 text-sm whitespace-pre-wrap flex-1 leading-[2.5em] bg-[linear-gradient(transparent_95%,#cbd5e1_95%)] bg-size-[100%_2.5em]">
                             {rec.notes || ""}
                         </div>
                     </div>
@@ -442,7 +442,7 @@ export default function SensoryTestsPage() {
                     </CardHeader>
                     <CardContent className="p-0">
                         <div className="overflow-x-auto">
-                            <Table className="w-full min-w-[800px] text-sm">
+                            <Table className="w-full min-w-200 text-sm">
                                 <TableHeader className="bg-slate-100">
                                     <TableRow>
                                         <TableHead className="w-28 pl-4">実施(製造)日</TableHead>

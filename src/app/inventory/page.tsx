@@ -458,7 +458,7 @@ export default function InventoryPage() {
   const renderItemTab = (itemList: ItemStock[]) => (
     <>
       <div className="hidden md:block bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-        <Table className="min-w-[1000px] w-full border-collapse">
+        <Table className="min-w-250 w-full border-collapse">
           <TableHeader className="bg-slate-50/80 border-b border-slate-200">
             <TableRow>
               <TableHead className="w-24 pl-4 text-slate-600 font-bold">品目 ID</TableHead>
@@ -820,12 +820,12 @@ export default function InventoryPage() {
                     const hasChange = day.inQty > 0 || day.outQty > 0;
                     return (
                       <td key={date} className={`border-r border-slate-300 p-0.5 text-center ${isShort ? 'bg-red-50' : ''}`}>
-                        <div className="flex flex-col justify-between h-full min-h-[40px] py-0.5">
+                        <div className="flex flex-col justify-between h-full min-h-10 py-0.5">
                           {/* 入出荷の変動表示 (重なりを防ぐために縦に並べる、幅が極小なのでtracking-tighterを適用) */}
                           <div className="flex flex-col text-[7px] leading-none tracking-tighter">
                             {day.inQty > 0 && <span className="text-blue-600 font-bold">+{formatQty(day.inQty, f.item.item_type)}</span>}
                             {day.outQty > 0 && <span className="text-red-500 font-bold">-{formatQty(day.outQty, f.item.item_type)}</span>}
-                            {!hasChange && <div className="h-[7px] opacity-0">-</div>}
+                            {!hasChange && <div className="h-1.75 opacity-0">-</div>}
                           </div>
                           {/* 最終在庫 (下部に固定して、トラッキングを詰める) */}
                           <div className={`font-mono text-[8px] font-bold tracking-tighter leading-none mt-auto ${isShort ? 'text-red-600 font-black' : 'text-slate-800'}`}>
@@ -975,7 +975,7 @@ export default function InventoryPage() {
         {/* 製品在庫タブ */}
         <TabsContent value="product" className="mt-0 focus-visible:outline-none focus-visible:ring-0">
           <div className="hidden md:block bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-            <Table className="min-w-[1000px] w-full border-collapse">
+            <Table className="min-w-250 w-full border-collapse">
               <TableHeader className="bg-slate-50/80 border-b border-slate-200">
                 <TableRow>
                   <TableHead className="w-32 pl-4 text-slate-600 font-bold">Lot 番号</TableHead>
@@ -1189,7 +1189,7 @@ export default function InventoryPage() {
             </div>
 
             <div className="overflow-x-auto border border-slate-200 rounded-lg">
-              <Table className="text-[11px] min-w-[1200px] table-fixed w-full border-collapse">
+              <Table className="text-[11px] min-w-300 table-fixed w-full border-collapse">
                 <TableHeader className="bg-slate-50 border-b border-slate-200">
                   <TableRow>
                     <TableHead className="w-48 font-bold pl-3 text-slate-600">品目名</TableHead>
@@ -1211,12 +1211,12 @@ export default function InventoryPage() {
                         const hasChange = day.inQty > 0 || day.outQty > 0;
                         return (
                           <td key={date} className={`text-center p-1 border-r border-slate-100 last:border-0 h-12 ${isShort ? 'bg-red-50/70' : ''}`}>
-                            <div className="flex flex-col justify-between h-full min-h-[40px] py-0.5">
+                            <div className="flex flex-col justify-between h-full min-h-10 py-0.5">
                               {/* 上部：入出荷の変動数値 */}
                               <div className="flex flex-col text-[7px] leading-none tracking-tighter">
                                 {day.inQty > 0 && <span className="text-blue-600 font-bold">+{formatQty(day.inQty, f.item.item_type)}</span>}
                                 {day.outQty > 0 && <span className="text-red-500 font-bold">-{formatQty(day.outQty, f.item.item_type)}</span>}
-                                {!hasChange && <div className="h-[7px] opacity-0">-</div>}
+                                {!hasChange && <div className="h-1.75 opacity-0">-</div>}
                               </div>
                               {/* 下部：計算後在庫数量 */}
                               <div className={`font-mono text-[8px] font-bold tracking-tighter leading-none mt-auto ${isShort ? 'text-red-600 font-black' : 'text-slate-700'}`}>
@@ -1231,13 +1231,19 @@ export default function InventoryPage() {
                 </TableBody>
               </Table>
             </div>
+            {/* 凡例 */}
+            <div className="mt-3 text-[10px] text-slate-500 flex flex-wrap gap-4 border-t border-slate-100 pt-3">
+              <div><span className="text-blue-600 font-bold">+N</span> は入荷予定</div>
+              <div><span className="text-red-500 font-bold">-N</span> は製造使用予定</div>
+              <div className="bg-red-50 px-1 border border-red-200 text-red-600 font-medium">背景薄赤は在庫不足(マイナス)警告</div>
+            </div>
           </div>
         </TabsContent>
       </Tabs>
 
       {/* 個別棚卸ダイアログ */}
       <Dialog open={adjustmentModal.isOpen} onOpenChange={(open) => !open && setAdjustmentModal({ ...adjustmentModal, isOpen: false })}>
-        <DialogContent className="sm:max-w-[425px]">
+        <DialogContent className="sm:max-w-106.25">
           <DialogHeader>
             <DialogTitle className="font-black text-slate-800 text-lg">実地棚卸・在庫調整</DialogTitle>
           </DialogHeader>
@@ -1302,7 +1308,7 @@ export default function InventoryPage() {
 
       {/* 新規 Lot 登録ダイアログ */}
       <Dialog open={newStockModalOpen} onOpenChange={setNewStockModalOpen}>
-        <DialogContent className="sm:max-w-[425px]">
+        <DialogContent className="sm:max-w-106.25">
           <DialogHeader><DialogTitle className="font-black text-slate-800">既存製品 Lot の追加登録</DialogTitle></DialogHeader>
           <div className="space-y-3 py-2 text-sm">
             <div className="space-y-1">

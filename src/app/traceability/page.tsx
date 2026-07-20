@@ -362,7 +362,7 @@ export default function TraceabilityPage() {
                                 <CardHeader className="bg-slate-50 border-b py-3 px-4">
                                     <CardTitle className="text-sm font-bold text-slate-700 flex items-center gap-2"><Factory className="w-4 h-4 text-amber-600" /> 使用された原材料 (BOM)</CardTitle>
                                 </CardHeader>
-                                <CardContent className="p-0 max-h-[300px] overflow-y-auto">
+                                <CardContent className="p-0 max-h-75 overflow-y-auto">
                                     {result.boms.length > 0 ? (
                                         <Table className="text-sm">
                                             <TableBody>
@@ -385,7 +385,7 @@ export default function TraceabilityPage() {
                         <div className="space-y-6">
 
                             {/* 官能検査 */}
-                            <Card className="border-slate-200 shadow-sm flex flex-col max-h-[500px]">
+                            <Card className="border-slate-200 shadow-sm flex flex-col max-h-125">
                                 <CardHeader className="bg-slate-50 border-b py-3 px-4 flex flex-row items-center justify-between shrink-0">
                                     <CardTitle className="text-sm font-bold text-slate-700 flex items-center gap-2"><Eye className="w-4 h-4 text-pink-600" /> 官能検査結果 (YO-30)</CardTitle>
                                     {result.sensoryTest && <Badge className="bg-green-100 text-green-700 shadow-none border-none">実施済</Badge>}
@@ -430,7 +430,7 @@ export default function TraceabilityPage() {
                                 </CardHeader>
                                 <CardContent className="p-0">
                                     {result.fujiSteamyLogs.length > 0 ? (
-                                        <div className="divide-y divide-slate-100 max-h-[300px] overflow-y-auto">
+                                        <div className="divide-y divide-slate-100 max-h-75 overflow-y-auto">
                                             {result.fujiSteamyLogs.map((log, i) => {
                                                 const startTime = log.start_time ?? '';
                                                 const reach80 = log.reach_80_time ?? '';

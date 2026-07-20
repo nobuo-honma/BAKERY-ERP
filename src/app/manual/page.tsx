@@ -73,7 +73,7 @@ const SWIM_STEPS: [number, string, string][] = [
 function SwimlaneChart() {
   return (
     <div className="overflow-x-auto pb-4">
-      <div className="min-w-[650px] bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+      <div className="min-w-162.5 bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
         <div className="grid grid-cols-4 gap-2 mb-3">
           {LANES.map((l) => (
             <div key={l.label} className={`border rounded-lg px-2 py-2 text-xs font-bold text-center whitespace-pre-line shadow-sm ${l.color}`}>
@@ -238,7 +238,7 @@ function Accordion({ title, children }: { title: string; children: React.ReactNo
         </span>
         <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
       </button>
-      <div className={`transition-all duration-300 ease-in-out overflow-hidden ${isOpen ? 'max-h-[1500px] opacity-100 border-t border-slate-100' : 'max-h-0 opacity-0'}`}>
+      <div className={`transition-all duration-300 ease-in-out overflow-hidden ${isOpen ? 'max-h-375 opacity-100 border-t border-slate-100' : 'max-h-0 opacity-0'}`}>
         <div className="p-5 bg-white text-sm text-slate-600 leading-relaxed space-y-4">
           {children}
         </div>

@@ -403,7 +403,7 @@ export default function ProductDescriptionsPage() {
                 </CardHeader>
                 <CardContent className="p-0">
                     <div className="overflow-x-auto">
-                        <Table className="w-full min-w-[700px] text-sm">
+                        <Table className="w-full min-w-175 text-sm">
                             <TableHeader className="bg-slate-100">
                                 <TableRow>
                                     <TableHead className="w-32 pl-4">製品ID</TableHead>

@@ -401,7 +401,7 @@ export default function Dashboard() {
             <h2 className="text-xl font-bold mb-4 flex items-center gap-2 text-slate-800"><Trash2 className="h-5 w-5 text-red-600" /> 廃棄対象のサンプル</h2>
             <Card className="border-red-200 shadow-sm overflow-hidden">
               {expiredSamples.length > 0 ? (
-                <div className="divide-y divide-red-100 max-h-[300px] overflow-y-auto">
+                <div className="divide-y divide-red-100 max-h-75 overflow-y-auto">
                   {expiredSamples.map(sample => (
                     <div key={sample.management_no} className="p-3 bg-red-50 hover:bg-red-100 transition-colors flex justify-between items-center">
                       <div>
@@ -426,14 +426,14 @@ export default function Dashboard() {
             <h2 className="text-xl font-bold mb-4 flex items-center gap-2 text-slate-800"><AlertTriangle className="h-5 w-5 text-amber-500" /> 賞味期限間近 (3ヶ月以内)</h2>
             <Card className="border-amber-200 shadow-sm overflow-hidden">
               {expiringProducts.length > 0 ? (
-                <div className="divide-y divide-amber-100 max-h-[300px] overflow-y-auto">
+                <div className="divide-y divide-amber-100 max-h-75 overflow-y-auto">
                   {expiringProducts.map(product => {
                     const cs = Math.floor(product.total_pieces / (product.products?.unit_per_cs || 24));
                     const p = Math.floor((product.total_pieces % (product.products?.unit_per_cs || 24)) / 2);
                     return (
                       <div key={product.lot_code} className="p-3 bg-amber-50 hover:bg-amber-100 transition-colors flex justify-between items-center">
                         <div>
-                          <div className="font-bold text-amber-900 text-sm truncate max-w-[150px]">{product.products?.name}</div>
+                          <div className="font-bold text-amber-900 text-sm truncate max-w-37.5">{product.products?.name}</div>
                           <div className="text-[10px] font-mono text-amber-700">Lot: {product.lot_code}</div>
                         </div>
                         <div className="text-right">

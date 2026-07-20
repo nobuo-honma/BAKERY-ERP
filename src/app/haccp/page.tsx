@@ -116,7 +116,7 @@ export default function HaccpPortalPage() {
                     <div className="flex flex-col"><span className="text-base text-blue-900">{doc.title}</span><span className="text-xs text-slate-500 font-normal md:hidden mt-1">{categoryDef.label}</span></div>
                 </TableCell>
                 <TableCell className="w-20 text-center font-mono text-slate-500 text-xs">v{doc.version}</TableCell>
-                <TableCell className="text-sm text-slate-600 truncate max-w-[200px]" title={doc.notes}>{doc.notes || "-"}</TableCell>
+                <TableCell className="text-sm text-slate-600 truncate max-w-50" title={doc.notes}>{doc.notes || "-"}</TableCell>
                 <TableCell className="w-28 text-slate-400 text-xs text-right hidden lg:table-cell">{new Date(doc.updated_at).toLocaleDateString()}</TableCell>
                 <TableCell className="w-48 text-right pr-4">
                     <div className="flex justify-end gap-2">
@@ -420,7 +420,7 @@ export default function HaccpPortalPage() {
                         {loading ? (
                             <div className="flex justify-center items-center h-64"><Loader2 className="animate-spin h-8 w-8 text-slate-400" /></div>
                         ) : (
-                            <Table className="min-w-[600px]">
+                            <Table className="min-w-150">
                                 <TableHeader className="bg-slate-50">
                                     <TableRow>
                                         <TableHead className="w-32 hidden md:table-cell pl-4">カテゴリ</TableHead>

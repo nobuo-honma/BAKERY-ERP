@@ -184,8 +184,8 @@ export default function VisitorLogsPage() {
                                 <tr className="h-6">
                                     <th className="border border-black font-medium">制定日</th>
                                     <td className="border border-black font-bold">2021/4/1</td>
-                                    <td className="border border-black h-[60px]" rowSpan={2}></td>
-                                    <td className="border border-black h-[60px]" rowSpan={2}></td>
+                                    <td className="border border-black h-15" rowSpan={2}></td>
+                                    <td className="border border-black h-15" rowSpan={2}></td>
                                 </tr>
                                 <tr className="h-6">
                                     <th className="border border-black font-medium">改定日</th>
@@ -194,7 +194,7 @@ export default function VisitorLogsPage() {
                             </tbody>
                         </table>
                     </div>
-                    <div className="text-right text-[10px] pr-[180px] mb-1">ワークセンター・やまびこ</div>
+                    <div className="text-right text-[10px] pr-45 mb-1">ワークセンター・やまびこ</div>
 
                     <div className="flex-1">
                         <table className="w-full border-collapse border-[2.5px] border-black text-[11px] table-fixed">
@@ -301,7 +301,7 @@ export default function VisitorLogsPage() {
                 </CardHeader>
                 <CardContent className="p-0">
                     <div className="overflow-x-auto">
-                        <Table className="w-full min-w-[1000px] text-sm">
+                        <Table className="w-full min-w-250 text-sm">
                             <TableHeader className="bg-slate-100">
                                 <TableRow>
                                     <TableHead className="w-24 pl-4">日付</TableHead>
@@ -335,7 +335,7 @@ export default function VisitorLogsPage() {
                                                         <div className="text-[10px] text-slate-500">爪:{log.nails_checked || "-"} / 飾:{log.accessories || "-"}</div>
                                                     </div>
                                                 </TableCell>
-                                                <TableCell className="text-xs text-slate-600 truncate max-w-[200px]" title={log.notes}>{log.notes || "-"}</TableCell>
+                                                <TableCell className="text-xs text-slate-600 truncate max-w-50" title={log.notes}>{log.notes || "-"}</TableCell>
                                                 <TableCell className="text-center pr-4">
                                                     {canEdit && (
                                                         <div className="flex justify-center gap-1">
