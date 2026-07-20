@@ -133,6 +133,7 @@ export default function InventoryPage() {
   const [pendingPlans, setPendingPlans] = useState<ProductionPlanRow[]>([]);
   const [pendingArrivals, setPendingArrivals] = useState<ArrivalRow[]>([]);
   const [forecastFilter, setForecastFilter] = useState<ForecastFilter>('all');
+  const [showOnlyScheduled, setShowOnlyScheduled] = useState(false);
   const [forecastPaperSize, setForecastPaperSize] = useState<'A4' | 'A3'>('A3');
 
   // 棚卸(調整)用
@@ -450,10 +451,15 @@ export default function InventoryPage() {
   }, [rawMaterials, materials, boms, pendingPlans, pendingArrivals]);
 
   const filteredForecastData = useMemo(() => {
-    const allData = Object.values(forecastResult.fData);
-    if (forecastFilter === 'all') return allData;
-    return allData.filter((f) => f.item.item_type === forecastFilter);
-  }, [forecastResult.fData, forecastFilter]);
+    let allData = Object.values(forecastResult.fData);
+    if (forecastFilter !== 'all') {
+      allData = allData.filter((f) => f.item.item_type === forecastFilter);
+    }
+    if (showOnlyScheduled) {
+      allData = allData.filter((f) => forecastResult.dates.some(date => f.days[date].outQty > 0));
+    }
+    return allData;
+  }, [forecastResult.fData, forecastFilter, showOnlyScheduled, forecastResult.dates]);
 
   // 原材料・資材テーブル
   const renderItemTab = (itemList: ItemStock[]) => (
@@ -759,15 +765,6 @@ export default function InventoryPage() {
                 font-family: monospace;
                 vertical-align: bottom;
                 padding-bottom: 4mm;
-              }
-              @bottom-left {
-                content: "+N は入荷予定  -N は製造使用予定  背景薄赤は在庫不足(マイナス)警告";
-                font-size: 7pt;
-                font-family: sans-serif;
-                color: #555;
-                padding-top: 3mm;
-                border-top: 0.5pt solid #888;
-                vertical-align: top;
               }
               @bottom-center {
                 content: counter(page) " / " counter(pages);
@@ -1188,17 +1185,28 @@ export default function InventoryPage() {
         <TabsContent value="forecast" className="mt-0 focus-visible:outline-none focus-visible:ring-0">
           <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <Filter className="w-4 h-4 text-slate-400" />
-                <select
-                  value={forecastFilter}
-                  onChange={(e: ChangeEvent<HTMLSelectElement>) => setForecastFilter(e.currentTarget.value as ForecastFilter)}
-                  className="border border-slate-200 rounded-lg p-1.5 text-xs font-bold bg-white text-slate-700 h-9"
-                >
-                  <option value="all">すべての品目</option>
-                  <option value="raw_material">原材料のみ</option>
-                  <option value="material">資材のみ</option>
-                </select>
+              <div className="flex flex-wrap items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <Filter className="w-4 h-4 text-slate-400" />
+                  <select
+                    value={forecastFilter}
+                    onChange={(e: ChangeEvent<HTMLSelectElement>) => setForecastFilter(e.currentTarget.value as ForecastFilter)}
+                    className="border border-slate-200 rounded-lg p-1.5 text-xs font-bold bg-white text-slate-700 h-9"
+                  >
+                    <option value="all">すべての品目</option>
+                    <option value="raw_material">原材料のみ</option>
+                    <option value="material">資材のみ</option>
+                  </select>
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg h-9 hover:bg-slate-100 transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={showOnlyScheduled}
+                    onChange={(e) => setShowOnlyScheduled(e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-600"
+                  />
+                  <span className="text-xs font-bold text-slate-700">使用予定の品目のみ表示</span>
+                </label>
               </div>
               <div className="flex gap-2">
                 <Button size="sm" variant="outline" onClick={() => setViewMode('print_forecast')} className="border-slate-200 font-bold text-xs h-9">
