@@ -133,6 +133,7 @@ export default function InventoryPage() {
   const [pendingPlans, setPendingPlans] = useState<ProductionPlanRow[]>([]);
   const [pendingArrivals, setPendingArrivals] = useState<ArrivalRow[]>([]);
   const [forecastFilter, setForecastFilter] = useState<ForecastFilter>('all');
+  const [forecastPaperSize, setForecastPaperSize] = useState<'A4' | 'A3'>('A3');
 
   // 棚卸(調整)用
   const [adjustmentModal, setAdjustmentModal] = useState<{
@@ -738,7 +739,7 @@ export default function InventoryPage() {
             header, nav { display: none !important; }
             main { padding: 0 !important; margin: 0 !important; max-width: 100% !important; background: white !important; }
             @page {
-              size: A4 landscape;
+              size: ${forecastPaperSize === 'A3' ? 'A3 portrait' : 'A4 landscape'};
               margin-top: 30mm;
               margin-bottom: 20mm;
               margin-left: 10mm;
@@ -784,13 +785,34 @@ export default function InventoryPage() {
             tfoot { display: table-footer-group !important; }
           }
         `}} />
-        <div className="w-[297mm] print:w-full flex justify-between mb-4 print-hide">
+        <div className="w-[297mm] print:w-full flex justify-between items-center mb-4 print-hide">
           <Button variant="outline" onClick={() => setViewMode('list')} className="bg-white text-slate-700 font-bold border-slate-300">
             <ArrowLeft className="h-4 w-4 mr-2" /> 戻る
           </Button>
-          <Button onClick={() => { safePrint(); }} className="bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-lg">
-            <Printer className="h-5 w-5 mr-2" /> 印刷する
-          </Button>
+          <div className="flex gap-2">
+            <div className="flex items-center gap-2 bg-white border border-slate-300 rounded-md p-1 shadow-sm mr-4">
+              <span className="text-xs font-bold text-slate-500 pl-2">用紙:</span>
+              <Button
+                variant={forecastPaperSize === 'A4' ? 'default' : 'ghost'}
+                size="sm"
+                onClick={() => setForecastPaperSize('A4')}
+                className={`h-7 px-3 text-xs ${forecastPaperSize === 'A4' ? 'bg-slate-700 hover:bg-slate-800' : 'text-slate-600'}`}
+              >
+                A4横
+              </Button>
+              <Button
+                variant={forecastPaperSize === 'A3' ? 'default' : 'ghost'}
+                size="sm"
+                onClick={() => setForecastPaperSize('A3')}
+                className={`h-7 px-3 text-xs ${forecastPaperSize === 'A3' ? 'bg-slate-700 hover:bg-slate-800' : 'text-slate-600'}`}
+              >
+                A3縦
+              </Button>
+            </div>
+            <Button onClick={() => { safePrint(); }} className="bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-lg">
+              <Printer className="h-5 w-5 mr-2" /> 印刷する
+            </Button>
+          </div>
         </div>
         <div className="w-[297mm] bg-white py-8 px-10 print:p-0 shadow-xl print:shadow-none text-black font-sans box-border flex flex-col justify-between">
           {/* 画面表示用ヘッダー（印刷時は @page margin-box で代替されるため非表示） */}
