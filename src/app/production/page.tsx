@@ -484,7 +484,7 @@ export default function ProductionPage() {
                   const dayEvents = dateStr ? calendarEvents.filter(e => e.event_date === dateStr) : [];
 
                   return (
-                    <div key={idx} className={`min-h-[140px] print:min-h-[100px] border-b border-slate-300 print:border-black p-1 ${idx % 7 !== 6 ? 'border-r print:border-black' : ''} ${!day ? 'bg-slate-50 print:bg-white' : 'bg-white'}`}>
+                    <div key={idx} className={`min-h-35 print:min-h-25 border-b border-slate-300 print:border-black p-1 ${idx % 7 !== 6 ? 'border-r print:border-black' : ''} ${!day ? 'bg-slate-50 print:bg-white' : 'bg-white'}`}>
                       {day && (
                         <>
                           <div className="flex justify-between items-start mb-1">
@@ -642,10 +642,10 @@ export default function ProductionPage() {
                   onChange={(e) => setMonthlyNote(e.target.value)}
                   onBlur={handleSaveMonthlyNote}
                   placeholder="クリックして今月の特記事項を入力...（入力後に別の場所をクリックすると自動保存されます）"
-                  className="w-full bg-white print:border-none print:shadow-none p-3 border border-slate-300 rounded-md text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[60px]"
+                  className="w-full bg-white print:border-none print:shadow-none p-3 border border-slate-300 rounded-md text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-15"
                 />
               ) : (
-                <div className="w-full bg-white print:border-none print:shadow-none p-3 border border-slate-300 rounded-md text-sm min-h-[60px] whitespace-pre-wrap">
+                <div className="w-full bg-white print:border-none print:shadow-none p-3 border border-slate-300 rounded-md text-sm min-h-15 whitespace-pre-wrap">
                   {monthlyNote || <span className="text-slate-400">備考なし</span>}
                 </div>
               )}
@@ -740,7 +740,7 @@ export default function ProductionPage() {
                           <div><label className="text-sm font-bold mb-2 text-slate-700 flex items-center gap-1"><CalendarIcon className="h-4 w-4" /> 製造予定日</label><Input type="date" value={planDate} onChange={e => setPlanDate(e.target.value)} className="text-lg bg-white h-12 border-blue-300 shadow-sm" /></div>
                           <div><label className="block text-sm font-bold mb-2 text-slate-700">この日の製造量 (kg)</label><div className="flex items-center gap-3"><Input type="number" min="0" value={planKg} onChange={e => setPlanKg(e.target.value === "" ? "" : Number(e.target.value))} className="text-xl font-bold bg-white h-12 text-right border-blue-300 shadow-sm" /><span className="text-lg font-bold text-slate-500">kg</span></div><div className="text-xs text-slate-500 mt-2 text-right">自動計算 👉 <span className="font-bold text-blue-700 text-sm">{calculatedCs} c/s</span></div></div>
                         </div>
-                        <div className="flex flex-col h-full"><label className="block text-sm font-bold mb-2 text-slate-700">備考 (任意)</label><textarea value={planNotes} onChange={e => setPlanNotes(e.target.value)} className="flex-1 w-full p-3 border rounded-md text-sm border-blue-300 shadow-sm min-h-[100px] resize-none" /></div>
+                        <div className="flex flex-col h-full"><label className="block text-sm font-bold mb-2 text-slate-700">備考 (任意)</label><textarea value={planNotes} onChange={e => setPlanNotes(e.target.value)} className="flex-1 w-full p-3 border rounded-md text-sm border-blue-300 shadow-sm min-h-25 resize-none" /></div>
                       </div>
                       <div className="bg-blue-50/50 border border-blue-200 rounded-lg p-5 relative">
                         <h3 className="font-bold text-blue-900 mb-3 flex items-center gap-2 text-md"><PackageCheck className="h-5 w-5" /> 発行されるLot情報</h3>

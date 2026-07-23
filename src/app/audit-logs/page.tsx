@@ -131,11 +131,11 @@ function DiffViewer({ action, oldData, newData }: { action: string; oldData: Rec
                             {diff.path}
                         </Badge>
                         <div className="flex-1 flex items-center gap-2 overflow-hidden">
-                            <div className="bg-slate-100 px-2 py-1 rounded line-through opacity-60 min-w-[40px] text-center shrink-0 border border-slate-200">
+                            <div className="bg-slate-100 px-2 py-1 rounded line-through opacity-60 min-w-10 text-center shrink-0 border border-slate-200">
                                 {renderValue(diff.oldVal)}
                             </div>
                             <ArrowRight className="w-4 h-4 text-amber-400 shrink-0" />
-                            <div className="bg-amber-50 px-2 py-1 rounded font-bold min-w-[40px] text-center border border-amber-300 text-amber-900 flex-1 truncate">
+                            <div className="bg-amber-50 px-2 py-1 rounded font-bold min-w-10 text-center border border-amber-300 text-amber-900 flex-1 truncate">
                                 {renderValue(diff.newVal)}
                             </div>
                         </div>
@@ -233,7 +233,7 @@ export default function AuditLogsPage() {
                 </CardHeader>
                 <CardContent className="p-0">
                     <div className="overflow-x-auto">
-                        <Table className="w-full table-fixed min-w-[1000px] text-sm">
+                        <Table className="w-full table-fixed min-w-250 text-sm">
                             <TableHeader className="bg-slate-100">
                                 <TableRow>
                                     <TableHead className="w-[12%] pl-4">変更日時</TableHead>

@@ -365,7 +365,7 @@ export default function CleaningChecksPage() {
                         </CardHeader>
                         <CardContent className="p-0">
                             <div className="overflow-x-auto">
-                                <Table className="w-full table-fixed min-w-[1200px] border-collapse">
+                                <Table className="w-full table-fixed min-w-300 border-collapse">
                                     <TableHeader className="bg-slate-100 sticky top-0 z-10 shadow-sm">
                                         <TableRow>
                                             <TableHead className="w-32 border-r font-bold text-slate-700 bg-slate-100 sticky left-0 z-20 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">清掃項目</TableHead>
@@ -406,7 +406,7 @@ export default function CleaningChecksPage() {
                                                 const checker = monthlyData[dateStr]?.checker_name;
                                                 return (
                                                     <TableCell key={`checker-${day}`} className="border-r text-center p-1">
-                                                        {checker ? <div className="text-[9px] truncate max-w-[32px] mx-auto text-slate-700" title={checker}>{checker.slice(0, 2)}</div> : ""}
+                                                        {checker ? <div className="text-[9px] truncate max-w-8 mx-auto text-slate-700" title={checker}>{checker.slice(0, 2)}</div> : ""}
                                                     </TableCell>
                                                 );
                                             })}

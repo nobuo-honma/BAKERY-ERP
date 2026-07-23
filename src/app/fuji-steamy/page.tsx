@@ -593,7 +593,7 @@ export default function FujiSteamyPage() {
                                     </div>
                                 ) : (
                                     <div className="overflow-x-auto">
-                                        <Table className="min-w-[1000px] text-sm">
+                                        <Table className="min-w-250 text-sm">
                                             <TableHeader className="bg-slate-100">
                                                 <TableRow>
                                                     <TableHead className="w-[12%] text-center">製造日(自動)</TableHead>
@@ -684,7 +684,7 @@ export default function FujiSteamyPage() {
                         </CardHeader>
 
                         <CardContent className="p-0">
-                            <Table className="w-full min-w-[900px] text-sm">
+                            <Table className="w-full min-w-225 text-sm">
                                 <TableHeader className="bg-slate-100">
                                     <TableRow>
                                         <TableHead className="w-[12%] pl-4">製造日</TableHead>
@@ -790,7 +790,7 @@ export default function FujiSteamyPage() {
                                                             {canEdit && <Edit2 className="h-3 w-3 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />}
                                                         </div>
                                                     )}
-                                                    <div className="text-[9px] text-slate-400 truncate max-w-[120px] mt-0.5" title={rec.batch_name ?? undefined}>{rec.batch_name ?? ""}</div>
+                                                    <div className="text-[9px] text-slate-400 truncate max-w-30 mt-0.5" title={rec.batch_name ?? undefined}>{rec.batch_name ?? ""}</div>
                                                 </TableCell>
 
                                                 <TableCell className="text-center">

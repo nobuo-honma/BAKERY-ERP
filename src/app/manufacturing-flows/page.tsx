@@ -378,7 +378,7 @@ export default function ManufacturingFlowsPage() {
                         <h1 className="text-xl font-bold tracking-widest">
                             製造工程フロー図 ({getProductName(editingProductId)})
                         </h1>
-                        <table className="border-collapse border border-black text-[9px] text-center w-[120px]">
+                        <table className="border-collapse border border-black text-[9px] text-center w-30">
                             <tbody>
                                 <tr>
                                     <td className="border-none bg-transparent"></td>
@@ -654,7 +654,7 @@ export default function ManufacturingFlowsPage() {
                 </CardHeader>
                 <CardContent className="p-0">
                     <div className="overflow-x-auto">
-                        <Table className="w-full min-w-[700px] text-sm">
+                        <Table className="w-full min-w-175 text-sm">
                             <TableHeader className="bg-slate-100">
                                 <TableRow>
                                     <TableHead className="w-32 pl-4">製品ID</TableHead>

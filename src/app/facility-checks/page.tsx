@@ -232,7 +232,7 @@ export default function FacilityChecksPage() {
                                     const checker = monthlyData[dateStr]?.checker_name;
                                     return (
                                         <td key={day} className="border border-black text-center p-0 w-[2%]">
-                                            {checker ? <div className="text-[7px] truncate max-w-[14px] mx-auto leading-none pt-0.5">{checker.slice(0, 2)}</div> : ""}
+                                            {checker ? <div className="text-[7px] truncate max-w-3.5 mx-auto leading-none pt-0.5">{checker.slice(0, 2)}</div> : ""}
                                         </td>
                                     );
                                 })}
@@ -386,7 +386,7 @@ export default function FacilityChecksPage() {
                         </CardHeader>
                         <CardContent className="p-0">
                             <div className="overflow-x-auto">
-                                <Table className="w-full table-fixed min-w-[1200px] border-collapse text-sm">
+                                <Table className="w-full table-fixed min-w-300 border-collapse text-sm">
                                     <TableHeader className="bg-slate-100 sticky top-0 z-10 shadow-sm">
                                         <TableRow>
                                             <TableHead className="w-10 border-r font-bold text-slate-700 bg-slate-100 text-center">No.</TableHead>
@@ -428,7 +428,7 @@ export default function FacilityChecksPage() {
                                                 const checker = monthlyData[dateStr]?.checker_name;
                                                 return (
                                                     <TableCell key={`checker-${day}`} className="border-r text-center p-0.5">
-                                                        {checker ? <div className="text-[8px] truncate max-w-[28px] mx-auto text-slate-700" title={checker}>{checker.slice(0, 2)}</div> : ""}
+                                                        {checker ? <div className="text-[8px] truncate max-w-7 mx-auto text-slate-700" title={checker}>{checker.slice(0, 2)}</div> : ""}
                                                     </TableCell>
                                                 );
                                             })}

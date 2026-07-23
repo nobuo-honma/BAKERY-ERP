@@ -386,7 +386,7 @@ export default function EcopackChecksPage() {
                     </CardHeader>
                     <CardContent className="p-0">
                         <div className="overflow-x-auto">
-                            <Table className="w-full min-w-[800px] text-sm">
+                            <Table className="w-full min-w-200 text-sm">
                                 <TableHeader className="bg-slate-100">
                                     <TableRow>
                                         <TableHead className="w-28 pl-4">製造日</TableHead>

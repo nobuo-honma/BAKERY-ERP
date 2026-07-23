@@ -173,7 +173,7 @@ export default function VisitorLogsPage() {
                             <h1 className="text-3xl font-black tracking-[0.5em] leading-none mb-1">来場者記録</h1>
                         </div>
 
-                        <table className="border-collapse border-2 border-black text-[12px] text-center leading-none w-[320px]">
+                        <table className="border-collapse border-2 border-black text-[12px] text-center leading-none w-80">
                             <tbody>
                                 <tr className="h-6">
                                     <th className="border border-black font-medium w-24">文書No.</th>

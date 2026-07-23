@@ -529,7 +529,7 @@ export default function KeepSamplesPage() {
                   </div>
 
                   {/* --- テーブルエリア（2列レイアウト） --- */}
-                  <div className="flex gap-3 flex-1 h-[45px]">
+                  <div className="flex gap-3 flex-1 h-11.25">
 
                     {/* 左側テーブル */}
                     <div className="flex-1 border border-slate-400 rounded-lg overflow-hidden h-full">
@@ -759,7 +759,7 @@ export default function KeepSamplesPage() {
             </div>
           )}
           <div className="bg-white border rounded-lg shadow-sm overflow-x-auto">
-            <Table className="min-w-[1100px]">
+            <Table className="min-w-275">
               <TableHeader className="bg-slate-50">
                 <TableRow>
                   <TableHead className="w-12 text-center border-r">
@@ -819,7 +819,7 @@ export default function KeepSamplesPage() {
                       <TableCell className="text-xs">
                         {sample.used_quantity > 0 ? (
                           <>
-                            <div className="font-bold text-slate-700 truncate max-w-[150px]" title={sample.usage_purpose}>{sample.usage_purpose}</div>
+                            <div className="font-bold text-slate-700 truncate max-w-37.5" title={sample.usage_purpose}>{sample.usage_purpose}</div>
                             <div className="text-slate-500">{new Date(sample.used_date).toLocaleDateString()}</div>
                           </>
                         ) : (
@@ -882,7 +882,7 @@ export default function KeepSamplesPage() {
                 <Button onClick={handleSaveBulkImport} disabled={isProcessing || parsedList.some(p => p._error)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold h-9 shadow-sm">{isProcessing ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Save className="w-4 h-4 mr-2" />} すべてDBに保存</Button>
               </CardHeader>
               <CardContent className="p-0 overflow-x-auto">
-                <Table className="min-w-[1000px] text-sm">
+                <Table className="min-w-250 text-sm">
                   <TableHeader className="bg-slate-100">
                     <TableRow>
                       <TableHead>製品ID</TableHead>

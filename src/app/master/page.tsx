@@ -47,7 +47,7 @@ function EditableCell({ value, onSave, type = "text", placeholder = "", alignRig
   return (
     <div
       onClick={() => canEdit && setIsEditing(true)}
-      className={`${canEdit ? 'cursor-pointer hover:bg-slate-100' : 'cursor-default'} p-1.5 -m-1.5 rounded flex items-center group min-h-[28px] transition-colors w-full ${isRightAligned ? "justify-end" : "justify-between"}`}
+      className={`${canEdit ? 'cursor-pointer hover:bg-slate-100' : 'cursor-default'} p-1.5 -m-1.5 rounded flex items-center group min-h-7 transition-colors w-full ${isRightAligned ? "justify-end" : "justify-between"}`}
       title={canEdit ? "クリックして編集" : "閲覧モードのため編集できません"}
     >
       {isRightAligned && canEdit && <Edit2 className="h-3 w-3 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity mr-2 shrink-0" />}
@@ -175,7 +175,7 @@ export default function MasterPage() {
 
         <TabsContent value="products">
           <div className="border rounded-md overflow-x-auto shadow-sm">
-            <Table className="w-full table-fixed min-w-[700px]">
+            <Table className="w-full table-fixed min-w-175">
               <TableHeader className="bg-slate-50">
                 <TableRow>
                   <TableHead className="w-[10%]">製品 ID</TableHead>
@@ -202,7 +202,7 @@ export default function MasterPage() {
 
         <TabsContent value="items">
           <div className="border rounded-md overflow-x-auto shadow-sm">
-            <Table className="w-full table-fixed min-w-[800px]">
+            <Table className="w-full table-fixed min-w-200">
               <TableHeader className="bg-slate-50">
                 <TableRow>
                   <TableHead className="w-[15%] pl-4">品目 ID</TableHead>
@@ -233,7 +233,7 @@ export default function MasterPage() {
 
         <TabsContent value="bom">
           <div className="border rounded-md overflow-x-auto shadow-sm">
-            <Table className="w-full table-fixed min-w-[800px]">
+            <Table className="w-full table-fixed min-w-200">
               <TableHeader className="bg-slate-50">
                 <TableRow>
                   <TableHead className="w-[25%] pl-4">対象製品</TableHead>
@@ -266,17 +266,17 @@ export default function MasterPage() {
 
         <TabsContent value="customers">
           <div className="border rounded-md overflow-x-auto shadow-sm">
-            <Table className="w-full table-fixed min-w-[1200px]">
+            <Table className="w-full table-fixed min-w-300">
               <TableHeader className="bg-slate-50">
                 <TableRow>
-                  <TableHead className="w-[100px] pl-4">出荷先 ID</TableHead>
-                  <TableHead className="w-[250px]">出荷先名</TableHead>
-                  <TableHead className="w-[150px]">担当者名</TableHead>
-                  <TableHead className="w-[120px]">郵便番号</TableHead>
-                  <TableHead className="w-[250px]">住所</TableHead>
-                  <TableHead className="w-[150px]">電話番号</TableHead>
-                  <TableHead className="w-[150px]">FAX</TableHead>
-                  <TableHead className="w-[200px]">備考</TableHead>
+                  <TableHead className="w-25 pl-4">出荷先 ID</TableHead>
+                  <TableHead className="w-62.5">出荷先名</TableHead>
+                  <TableHead className="w-37.5">担当者名</TableHead>
+                  <TableHead className="w-30">郵便番号</TableHead>
+                  <TableHead className="w-62.5">住所</TableHead>
+                  <TableHead className="w-37.5">電話番号</TableHead>
+                  <TableHead className="w-37.5">FAX</TableHead>
+                  <TableHead className="w-50">備考</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

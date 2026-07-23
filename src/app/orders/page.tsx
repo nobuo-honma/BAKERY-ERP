@@ -548,7 +548,7 @@ export default function OrdersPage() {
                       </Table>
                     </div>
                   ) : (
-                    <div className="flex flex-col items-center justify-center h-[300px] text-slate-400 bg-white/50 rounded-lg border-dashed border-blue-200">
+                    <div className="flex flex-col items-center justify-center h-75 text-slate-400 bg-white/50 rounded-lg border-dashed border-blue-200">
                       <Calculator className="h-12 w-12 mb-4 opacity-50" />
                       <p className="font-bold">製品と数量を入力してください</p>
                     </div>
@@ -614,7 +614,7 @@ export default function OrdersPage() {
                       <div key={item.id} className="px-4 py-3 flex justify-between items-center text-sm relative">
                         <div className="font-bold text-slate-700 truncate mr-2">
                           {item.products?.name} <span className="text-xs font-normal text-slate-500">({item.products?.variant_name})</span>
-                          {item.remarks && <span className="block text-[10px] text-slate-400 mt-0.5 truncate max-w-[200px]">摘要: {item.remarks}</span>}
+                          {item.remarks && <span className="block text-[10px] text-slate-400 mt-0.5 truncate max-w-50">摘要: {item.remarks}</span>}
                         </div>
                         <div className="font-black text-lg text-blue-600 shrink-0">
                           {cs > 0 && <>{cs} <span className="text-[10px] font-normal text-slate-500">c/s</span></>}

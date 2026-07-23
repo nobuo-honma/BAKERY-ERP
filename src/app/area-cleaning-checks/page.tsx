@@ -202,7 +202,7 @@ export default function AreaCleaningChecksPage() {
                                 {daysTop.map(day => {
                                     const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
                                     const checker = monthlyData[dateStr]?.checker_name;
-                                    return <td key={day} className="border border-black text-center p-0">{checker ? <div className="text-[9px] truncate max-w-[20px] mx-auto">{checker.slice(0, 2)}</div> : ""}</td>;
+                                    return <td key={day} className="border border-black text-center p-0">{checker ? <div className="text-[9px] truncate max-w-5 mx-auto">{checker.slice(0, 2)}</div> : ""}</td>;
                                 })}
                             </tr>
                         </tbody>
@@ -243,7 +243,7 @@ export default function AreaCleaningChecksPage() {
                                     if (day > daysInMonth) return <td key={day} className="border border-black bg-gray-200"></td>;
                                     const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
                                     const checker = monthlyData[dateStr]?.checker_name;
-                                    return <td key={day} className="border border-black text-center p-0">{checker ? <div className="text-[9px] truncate max-w-[20px] mx-auto">{checker.slice(0, 2)}</div> : ""}</td>;
+                                    return <td key={day} className="border border-black text-center p-0">{checker ? <div className="text-[9px] truncate max-w-5 mx-auto">{checker.slice(0, 2)}</div> : ""}</td>;
                                 })}
                             </tr>
                         </tbody>
@@ -349,7 +349,7 @@ export default function AreaCleaningChecksPage() {
                         </CardHeader>
                         <CardContent className="p-0">
                             <div className="overflow-x-auto">
-                                <Table className="w-full table-fixed min-w-[1200px] border-collapse text-sm">
+                                <Table className="w-full table-fixed min-w-300 border-collapse text-sm">
                                     <TableHeader className="bg-slate-100 sticky top-0 z-10 shadow-sm">
                                         <TableRow>
                                             <TableHead className="w-32 border-r font-bold text-slate-700 bg-slate-100 sticky left-0 z-20 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">清掃エリア</TableHead>
@@ -378,7 +378,7 @@ export default function AreaCleaningChecksPage() {
                                             {Array.from({ length: new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 0).getDate() }, (_, i) => i + 1).map(day => {
                                                 const dateStr = `${calendarMonth.getFullYear()}-${String(calendarMonth.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
                                                 const checker = monthlyData[dateStr]?.checker_name;
-                                                return <TableCell key={`checker-${day}`} className="border-r text-center p-1">{checker ? <div className="text-[9px] truncate max-w-[32px] mx-auto text-slate-700" title={checker}>{checker.slice(0, 2)}</div> : ""}</TableCell>;
+                                                return <TableCell key={`checker-${day}`} className="border-r text-center p-1">{checker ? <div className="text-[9px] truncate max-w-8 mx-auto text-slate-700" title={checker}>{checker.slice(0, 2)}</div> : ""}</TableCell>;
                                             })}
                                         </TableRow>
                                     </TableBody>

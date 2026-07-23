@@ -628,7 +628,7 @@ export default function ArrivalsPage() {
                                 const dayArrivals = dateStr ? calendarData.filter((a) => normalizeDateKey(a.expected_date) === dateStr) : [];
 
                                 return (
-                                    <div key={idx} className={`min-h-[140px] print:min-h-[100px] border-b border-slate-300 print:border-black p-1 ${idx % 7 !== 6 ? "border-r print:border-black" : ""} ${!day ? "bg-slate-50 print:bg-white" : "bg-white"}`}>
+                                    <div key={idx} className={`min-h-35 print:min-h-25 border-b border-slate-300 print:border-black p-1 ${idx % 7 !== 6 ? "border-r print:border-black" : ""} ${!day ? "bg-slate-50 print:bg-white" : "bg-white"}`}>
                                         {day && (
                                             <>
                                                 <div className={`text-right font-bold text-sm mb-1 ${idx % 7 === 0 ? "text-red-600" : idx % 7 === 6 ? "text-blue-600" : "text-slate-700 print:text-black"}`}>
@@ -825,7 +825,7 @@ export default function ArrivalsPage() {
                 <div className="w-full lg:w-[65%]">
                     <h2 className="font-bold text-slate-700 mb-3">直近の入荷予定・実績</h2>
                     <div className="bg-white border rounded-lg shadow-sm overflow-hidden">
-                        <Table className="min-w-[700px]">
+                        <Table className="min-w-175">
                             <TableHeader className="bg-slate-50">
                                 <TableRow>
                                     <TableHead>入荷予定日</TableHead>
@@ -987,7 +987,7 @@ export default function ArrivalsPage() {
                                 <Button variant="outline" onClick={() => setShowHaccpCheck(false)} disabled={isProcessing} className="flex-1 font-bold h-12">
                                     <ArrowLeft className="w-4 h-4 mr-2" /> 戻る
                                 </Button>
-                                <Button onClick={handleCompleteArrival} disabled={isProcessing} className="flex-[2] bg-indigo-600 hover:bg-indigo-700 text-white font-bold h-12 shadow-md">
+                                <Button onClick={handleCompleteArrival} disabled={isProcessing} className="flex-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold h-12 shadow-md">
                                     {isProcessing ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : <CheckCircle2 className="w-5 h-5 mr-2" />}
                                     確定して在庫加算
                                 </Button>
