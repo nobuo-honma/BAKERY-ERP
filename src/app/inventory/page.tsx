@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback, type ChangeEvent } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef, type ChangeEvent } from "react";
 import { supabase } from "@/lib/supabase";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -11,7 +11,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import {
   Package, ClipboardEdit, Save, Loader2, AlertCircle,
-  CheckCircle2, Filter, Lock, Printer, ArrowLeft, Plus
+  CheckCircle2, Filter, Lock, Printer, ArrowLeft, Plus,
+  UploadCloud, Download, FileSpreadsheet
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -118,6 +119,20 @@ type ProductOption = {
   variant: string;
   unit: number;
 };
+type ParsedProductCsvRow = {
+  lineNo: number;
+  rawProduct: string;
+  rawVariant: string;
+  rawLot: string;
+  rawExpiry: string;
+  rawCs: number;
+  rawP: number;
+  matchedProductId?: string;
+  matchedProductName?: string;
+  unitPerCs?: number;
+  totalPieces: number;
+  error?: string;
+};
 
 export default function InventoryPage() {
   const { canEdit } = useAuth();
@@ -162,6 +177,13 @@ export default function InventoryPage() {
   const [newStockModalOpen, setNewStockModalOpen] = useState(false);
   const [productsList, setProductsList] = useState<ProductOption[]>([]);
   const [newStockData, setNewStockData] = useState({ lotCode: "", productId: "", expiryDate: "", cs: 0, p: 0 });
+
+  // CSV 一括登録用
+  const [csvModalOpen, setCsvModalOpen] = useState(false);
+  const [csvParsedRows, setCsvParsedRows] = useState<ParsedProductCsvRow[]>([]);
+  const [duplicateMode, setDuplicateMode] = useState<'add' | 'overwrite'>('add');
+  const [csvLoading, setCsvLoading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 数値フォーマットヘルパー
   const formatQty = useCallback((qty: number, itemType?: 'raw_material' | 'material' | 'product') => {
@@ -389,6 +411,260 @@ export default function InventoryPage() {
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "不明なエラー";
       safeAlert("エラーが発生しました:" + message);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // CSV テンプレートダウンロード
+  const downloadCsvTemplate = () => {
+    const templateHeader = "製品名,バリエーション,Lot番号,賞味期限,ケース数,バラ数\n";
+    let sampleRows = "";
+    if (productsList.length > 0) {
+      const p1 = productsList[0];
+      const p2 = productsList[1] || productsList[0];
+      sampleRows += `"${p1.name}","${p1.variant}","260723A","2026-08-15",10,0\n`;
+      sampleRows += `"${p2.name}","${p2.variant}","260723B","2026-08-20",5,12\n`;
+    } else {
+      sampleRows += `"食パン","角食 2斤","260723A","2026-08-15",10,0\n`;
+      sampleRows += `"フランスパン","バゲット","260723B","2026-08-20",5,12\n`;
+    }
+
+    const bom = new Uint8Array([0xEF, 0xBB, 0xBF]); // UTF-8 BOM
+    const blob = new Blob([bom, templateHeader + sampleRows], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", "製品在庫一括登録テンプレート.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // CSV 読込処理 (Shift_JIS / UTF-8 対応)
+  const readFileAsText = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const text = e.target?.result as string;
+        if (text.includes("")) {
+          const utf8Reader = new FileReader();
+          utf8Reader.onload = (e2) => resolve(e2.target?.result as string);
+          utf8Reader.onerror = () => resolve(text);
+          utf8Reader.readAsText(file, "UTF-8");
+        } else {
+          resolve(text);
+        }
+      };
+      reader.onerror = (e) => reject(e);
+      reader.readAsText(file, "Shift_JIS");
+    });
+  };
+
+  const handleCsvFileUpload = async (e: ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    setCsvLoading(true);
+
+    try {
+      const text = await readFileAsText(files[0]);
+      const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+      if (lines.length < 2) {
+        safeAlert("CSVファイルにデータ行が含まれていません。");
+        setCsvLoading(false);
+        return;
+      }
+
+      const parseCsvLine = (line: string) => {
+        const result: string[] = [];
+        let current = "";
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i++) {
+          const char = line[i];
+          if (char === '"') {
+            inQuotes = !inQuotes;
+          } else if (char === ',' && !inQuotes) {
+            result.push(current.trim().replace(/^"(.*)"$/, '$1'));
+            current = "";
+          } else {
+            current += char;
+          }
+        }
+        result.push(current.trim().replace(/^"(.*)"$/, '$1'));
+        return result;
+      };
+
+      const headers = parseCsvLine(lines[0]);
+
+      const idxProductId = headers.findIndex(h => /製品ID|product_id|ID/i.test(h));
+      const idxProductName = headers.findIndex(h => /製品名|品名|product_name|product/i.test(h));
+      const idxVariant = headers.findIndex(h => /バリエーション|規格|変種|variant|variant_name/i.test(h));
+      const idxLot = headers.findIndex(h => /Lot|ロット|lot_code|lot_number/i.test(h));
+      const idxExpiry = headers.findIndex(h => /賞味期限|有効期限|期限|expiry_date|expiry/i.test(h));
+      const idxCs = headers.findIndex(h => /ケース|ケース数|cs|cs_qty/i.test(h));
+      const idxP = headers.findIndex(h => /バラ|バラ数|個数|p|p_qty|piece/i.test(h));
+
+      const parsed: ParsedProductCsvRow[] = [];
+
+      for (let i = 1; i < lines.length; i++) {
+        const cols = parseCsvLine(lines[i]);
+        if (cols.length === 0 || cols.every(c => c === "")) continue;
+
+        const rawProductId = idxProductId >= 0 ? cols[idxProductId] || "" : "";
+        const rawProduct = idxProductName >= 0 ? cols[idxProductName] || "" : "";
+        const rawVariant = idxVariant >= 0 ? cols[idxVariant] || "" : "";
+        const rawLot = idxLot >= 0 ? cols[idxLot] || "" : "";
+        const rawExpiry = idxExpiry >= 0 ? cols[idxExpiry] || "" : "";
+        const rawCsStr = idxCs >= 0 ? cols[idxCs] || "0" : "0";
+        const rawPStr = idxP >= 0 ? cols[idxP] || "0" : "0";
+
+        const csVal = Number(rawCsStr.replace(/[^0-9.]/g, '')) || 0;
+        const pVal = Number(rawPStr.replace(/[^0-9.]/g, '')) || 0;
+
+        let matchedProduct = productsList.find(p => p.id === rawProductId);
+
+        if (!matchedProduct && rawProduct) {
+          matchedProduct = productsList.find(p => {
+            const nameMatch = p.name.trim().toLowerCase() === rawProduct.trim().toLowerCase();
+            const variantMatch = !rawVariant || p.variant.trim().toLowerCase() === rawVariant.trim().toLowerCase();
+            return nameMatch && variantMatch;
+          });
+
+          if (!matchedProduct) {
+            matchedProduct = productsList.find(p => {
+              const fullName = `${p.name} (${p.variant})`.toLowerCase();
+              const fullName2 = `${p.name}${p.variant}`.toLowerCase();
+              const target = rawProduct.toLowerCase();
+              return fullName === target || fullName2 === target || p.name.trim().toLowerCase() === target;
+            });
+          }
+        }
+
+        let formattedExpiry = rawExpiry.replace(/\//g, '-').trim();
+        if (/^\d{8}$/.test(formattedExpiry)) {
+          formattedExpiry = `${formattedExpiry.substring(0, 4)}-${formattedExpiry.substring(4, 6)}-${formattedExpiry.substring(6, 8)}`;
+        }
+
+        let error = "";
+        if (!matchedProduct) {
+          error = `製品が見つかりません (${rawProduct || rawProductId || '未指定'})`;
+        } else if (!rawLot) {
+          error = "Lot番号が未入力です";
+        } else if (!formattedExpiry || isNaN(Date.parse(formattedExpiry))) {
+          error = `賞味期限が不正です (${rawExpiry})`;
+        } else if (csVal <= 0 && pVal <= 0) {
+          error = "ケース数またはバラ数を入力してください";
+        }
+
+        const unitPerCs = matchedProduct?.unit || 24;
+        const totalPieces = Math.round((csVal * unitPerCs) + pVal);
+
+        parsed.push({
+          lineNo: i + 1,
+          rawProduct,
+          rawVariant,
+          rawLot,
+          rawExpiry: formattedExpiry,
+          rawCs: csVal,
+          rawP: pVal,
+          matchedProductId: matchedProduct?.id,
+          matchedProductName: matchedProduct ? `${matchedProduct.name} (${matchedProduct.variant})` : undefined,
+          unitPerCs,
+          totalPieces,
+          error
+        });
+      }
+
+      setCsvParsedRows(parsed);
+    } catch (err) {
+      console.error(err);
+      safeAlert("CSVファイルの解析中にエラーが発生しました。");
+    } finally {
+      setCsvLoading(false);
+    }
+  };
+
+  const handleCsvSubmit = async () => {
+    const validRows = csvParsedRows.filter(r => !r.error);
+    if (validRows.length === 0) {
+      safeAlert("登録可能な有効データがありません。");
+      return;
+    }
+
+    if (!safeConfirm(`${validRows.length} 件の製品在庫を一括登録しますか?\n(重複Lot処理: ${duplicateMode === 'add' ? '既存在庫へ加算' : '既存在庫を上書き'})`)) {
+      return;
+    }
+
+    setIsProcessing(true);
+    try {
+      let successCount = 0;
+
+      for (const row of validRows) {
+        if (!row.matchedProductId || !row.rawLot || !row.rawExpiry) continue;
+
+        const { data: existingStock } = await supabase
+          .from('product_stocks')
+          .select('id, total_pieces')
+          .eq('lot_code', row.rawLot)
+          .maybeSingle();
+
+        if (existingStock) {
+          if (duplicateMode === 'add') {
+            const newTotal = existingStock.total_pieces + row.totalPieces;
+            await supabase.from('product_stocks').update({
+              total_pieces: newTotal,
+              expiry_date: row.rawExpiry
+            }).eq('id', existingStock.id);
+
+            await supabase.from('inventory_adjustments').insert({
+              lot_code: row.rawLot,
+              product_id: row.matchedProductId,
+              before_qty: existingStock.total_pieces,
+              after_qty: newTotal,
+              reason: `CSV一括登録 (既存Lot加算)`
+            });
+          } else {
+            await supabase.from('product_stocks').update({
+              total_pieces: row.totalPieces,
+              expiry_date: row.rawExpiry
+            }).eq('id', existingStock.id);
+
+            await supabase.from('inventory_adjustments').insert({
+              lot_code: row.rawLot,
+              product_id: row.matchedProductId,
+              before_qty: existingStock.total_pieces,
+              after_qty: row.totalPieces,
+              reason: `CSV一括登録 (既存Lot上書き)`
+            });
+          }
+        } else {
+          await supabase.from('product_stocks').insert({
+            lot_code: row.rawLot,
+            product_id: row.matchedProductId,
+            total_pieces: row.totalPieces,
+            expiry_date: row.rawExpiry
+          });
+
+          await supabase.from('inventory_adjustments').insert({
+            lot_code: row.rawLot,
+            product_id: row.matchedProductId,
+            before_qty: 0,
+            after_qty: row.totalPieces,
+            reason: `CSV一括登録 (新規Lot)`
+          });
+        }
+
+        successCount++;
+      }
+
+      safeAlert(`${successCount} 件の製品在庫一括登録が完了しました!`);
+      setCsvModalOpen(false);
+      setCsvParsedRows([]);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      fetchInventory();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "不明なエラー";
+      safeAlert("一括登録中にエラーが発生しました: " + message);
     } finally {
       setIsProcessing(false);
     }
@@ -935,9 +1211,14 @@ export default function InventoryPage() {
         </div>
         <div className="flex gap-2 w-full md:w-auto">
           {canEdit && (
-            <Button onClick={() => setNewStockModalOpen(true)} className="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-sm h-11 md:h-10 text-sm">
-              <Plus className="h-4 w-4 mr-1.5" /> 新規 Lot 登録
-            </Button>
+            <>
+              <Button onClick={() => setCsvModalOpen(true)} className="w-full md:w-auto bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-sm h-11 md:h-10 text-sm">
+                <UploadCloud className="h-4 w-4 mr-1.5" /> CSV一括登録
+              </Button>
+              <Button onClick={() => setNewStockModalOpen(true)} className="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-sm h-11 md:h-10 text-sm">
+                <Plus className="h-4 w-4 mr-1.5" /> 新規 Lot 登録
+              </Button>
+            </>
           )}
           <Button onClick={() => setViewMode('print')} className="w-full md:w-auto bg-slate-800 hover:bg-slate-900 text-white font-bold shadow-sm h-11 md:h-10 text-sm">
             <Printer className="h-4 w-4 mr-1.5" /> 在庫表印刷(PDF)
@@ -1374,6 +1655,134 @@ export default function InventoryPage() {
           <DialogFooter className="border-t border-slate-100 pt-3">
             <Button variant="outline" onClick={() => setNewStockModalOpen(false)} className="font-bold h-10">閉じる</Button>
             <Button onClick={handleAddNewStock} disabled={isProcessing} className="bg-blue-600 hover:bg-blue-700 text-white font-bold h-10">登録保存</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 製品在庫 CSV 一括登録ダイアログ */}
+      <Dialog open={csvModalOpen} onOpenChange={(open) => {
+        if (!open) {
+          setCsvModalOpen(false);
+          setCsvParsedRows([]);
+          if (fileInputRef.current) fileInputRef.current.value = "";
+        }
+      }}>
+        <DialogContent className="sm:max-w-4xl max-h-[90vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="font-black text-slate-800 flex items-center justify-between text-lg border-b pb-3 pr-6">
+              <span className="flex items-center gap-2">
+                <FileSpreadsheet className="h-5 w-5 text-emerald-600" />
+                製品在庫 CSV一括登録
+              </span>
+              <Button variant="outline" size="sm" onClick={downloadCsvTemplate} className="text-xs font-bold text-slate-600 border-slate-300">
+                <Download className="w-3.5 h-3.5 mr-1 text-emerald-600" /> CSVテンプレート（雛形）をダウンロード
+              </Button>
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2 overflow-y-auto flex-1 pr-1 text-sm">
+            <div className="border-2 border-dashed border-slate-300 hover:border-emerald-500 rounded-xl p-6 text-center bg-slate-50/50 transition-colors cursor-pointer" onClick={() => fileInputRef.current?.click()}>
+              <input
+                type="file"
+                accept=".csv"
+                ref={fileInputRef}
+                onChange={handleCsvFileUpload}
+                className="hidden"
+              />
+              <UploadCloud className="w-10 h-10 mx-auto text-emerald-600 mb-2 animate-bounce" />
+              <div className="font-bold text-slate-700 text-base">
+                {csvLoading ? "ファイルを読み込み中..." : "ここをクリックしてCSVファイルを選択"}
+              </div>
+              <p className="text-xs text-slate-400 mt-1">Excel等から書き出したCSV（Shift_JIS / UTF-8）に対応しています</p>
+            </div>
+
+            {csvParsedRows.length > 0 && (
+              <div className="space-y-3">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-slate-100 p-3 rounded-lg border border-slate-200 gap-2">
+                  <div className="flex items-center gap-2">
+                    <Badge className="bg-blue-600 text-white font-bold">総行数: {csvParsedRows.length} 件</Badge>
+                    <Badge className="bg-emerald-600 text-white font-bold">登録可能: {csvParsedRows.filter(r => !r.error).length} 件</Badge>
+                    {csvParsedRows.some(r => r.error) && (
+                      <Badge className="bg-red-600 text-white font-bold">エラー: {csvParsedRows.filter(r => r.error).length} 件</Badge>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
+                    <span>同一Lotが存在する場合:</span>
+                    <select
+                      value={duplicateMode}
+                      onChange={(e) => setDuplicateMode(e.target.value as 'add' | 'overwrite')}
+                      className="border border-slate-300 rounded p-1 bg-white font-bold text-slate-800"
+                    >
+                      <option value="add">既存在庫に加算する</option>
+                      <option value="overwrite">既存在庫を上書きする</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="border border-slate-200 rounded-lg overflow-hidden max-h-64 overflow-y-auto">
+                  <Table className="text-xs w-full">
+                    <TableHeader className="bg-slate-100 sticky top-0 z-10">
+                      <TableRow>
+                        <TableHead className="w-12 text-center">行</TableHead>
+                        <TableHead className="w-24 text-center">判定</TableHead>
+                        <TableHead className="w-28 font-bold">Lot番号</TableHead>
+                        <TableHead className="font-bold">対象製品</TableHead>
+                        <TableHead className="w-24 text-center font-bold">賞味期限</TableHead>
+                        <TableHead className="w-24 text-right font-bold">ケース/バラ</TableHead>
+                        <TableHead className="w-24 text-right font-bold">換算総数</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {csvParsedRows.map((r, idx) => (
+                        <TableRow key={idx} className={r.error ? "bg-red-50/70" : "hover:bg-slate-50"}>
+                          <TableCell className="text-center font-mono text-slate-400">{r.lineNo}</TableCell>
+                          <TableCell className="text-center">
+                            {r.error ? (
+                              <Badge className="bg-red-500 text-white text-[10px] px-1.5 py-0.5">{r.error}</Badge>
+                            ) : (
+                              <Badge className="bg-emerald-500 text-white text-[10px] px-1.5 py-0.5">正常</Badge>
+                            )}
+                          </TableCell>
+                          <TableCell className="font-mono font-bold">{r.rawLot}</TableCell>
+                          <TableCell className="font-bold text-slate-800">
+                            {r.matchedProductName ? (
+                              r.matchedProductName
+                            ) : (
+                              <span className="text-red-500">{r.rawProduct || '未指定'}</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-center font-mono">{r.rawExpiry}</TableCell>
+                          <TableCell className="text-right font-mono">
+                            {r.rawCs}cs / {r.rawP}p
+                          </TableCell>
+                          <TableCell className="text-right font-mono font-bold text-blue-700">
+                            {r.totalPieces.toLocaleString()} P
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="mt-2 border-t border-slate-100 pt-3 flex justify-between items-center">
+            <Button variant="outline" onClick={() => {
+              setCsvModalOpen(false);
+              setCsvParsedRows([]);
+              if (fileInputRef.current) fileInputRef.current.value = "";
+            }} className="font-bold h-10">
+              キャンセル
+            </Button>
+            <Button
+              onClick={handleCsvSubmit}
+              disabled={isProcessing || csvParsedRows.filter(r => !r.error).length === 0}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold h-10 px-6 shadow-md"
+            >
+              {isProcessing ? <Loader2 className="animate-spin w-4 h-4 mr-2" /> : <Save className="w-4 h-4 mr-2" />}
+              {csvParsedRows.filter(r => !r.error).length} 件を一括登録する
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
