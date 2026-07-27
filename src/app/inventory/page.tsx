@@ -985,8 +985,8 @@ export default function InventoryPage() {
                       <td className="border border-slate-300 px-2 font-medium">
                         {item.name}{item.expiry && <span className="text-[10px] font-normal ml-2 text-gray-500">(期限: {item.expiry})</span>}
                       </td>
-                      <td className="border border-slate-300 px-2 text-right font-mono font-medium">{item.qty}</td>
-                      <td className="border border-slate-400 px-2 bg-slate-50/30"></td>
+                      <td className="border-slate-300 px-2 text-right font-mono font-medium">{item.qty}</td>
+                      <td className="border-slate-400 px-2 bg-slate-50/30"></td>
                     </tr>
                   ))}
                   {Array.from({ length: Math.max(0, 35 - chunk.length) }).map((_, idx) => (
@@ -1016,7 +1016,8 @@ export default function InventoryPage() {
     const printDate = new Date().toLocaleDateString('ja-JP');
     return (
       <div className="bg-slate-200 min-h-screen py-8 print:p-0 print:bg-white flex flex-col items-center">
-        <style dangerouslySetInnerHTML={{ __html: `
+        <style dangerouslySetInnerHTML={{
+          __html: `
           @media print {
             header, nav { display: none !important; }
             main { padding: 0 !important; margin: 0 !important; max-width: 100% !important; background: white !important; }
@@ -1088,7 +1089,6 @@ export default function InventoryPage() {
           </div>
         </div>
         <div className="w-[297mm] bg-white py-8 px-10 print:p-0 shadow-xl print:shadow-none text-black font-sans box-border flex flex-col justify-between">
-          {/* 画面表示用ヘッダー（印刷時は @page margin-box で代替されるため非表示） */}
           <div className="print-doc-header flex justify-between items-end mb-4 border-b-2 border-black pb-2">
             <h1 className="text-xl font-bold tracking-widest">在庫推移予測 (MRP カレンダー)</h1>
             <div className="text-xs font-mono">作成日: {printDate}</div>
@@ -1116,13 +1116,11 @@ export default function InventoryPage() {
                     return (
                       <td key={date} className={`border-r border-slate-300 p-0.5 text-center ${isShort ? 'bg-red-50' : ''}`}>
                         <div className="flex flex-col justify-between h-full min-h-10 py-0.5">
-                          {/* 入出荷の変動表示 (重なりを防ぐために縦に並べる、幅が極小なのでtracking-tighterを適用) */}
                           <div className="flex flex-col text-[7px] leading-none tracking-tighter">
                             {day.inQty > 0 && <span className="text-blue-600 font-bold">+{formatQty(day.inQty, f.item.item_type)}</span>}
                             {day.outQty > 0 && <span className="text-red-500 font-bold">-{formatQty(day.outQty, f.item.item_type)}</span>}
                             {!hasChange && <div className="h-1.75 opacity-0">-</div>}
                           </div>
-                          {/* 最終在庫 (下部に固定して、トラッキングを詰める) */}
                           <div className={`font-mono text-[8px] font-bold tracking-tighter leading-none mt-auto ${isShort ? 'text-red-600 font-black' : 'text-slate-800'}`}>
                             {formatQty(day.endQty, f.item.item_type)}
                           </div>
@@ -1144,7 +1142,7 @@ export default function InventoryPage() {
     );
   }
 
-  // 使用予定(消費予定のみ) PDF (A4 横)
+  // 使用予定(消費予定のみ) PDF (A4 横) - ★下ボーダー（横線）を各セルに徹底追加
   if (viewMode === 'print_usage') {
     return (
       <div className="bg-slate-200 min-h-screen py-8 print:p-0 print:bg-white flex flex-col items-center">
@@ -1164,33 +1162,40 @@ export default function InventoryPage() {
           </div>
           <table className="w-full border-collapse border border-slate-800 text-[10px] flex-1 table-fixed">
             <thead>
-              <tr className="bg-slate-100 h-8">
-                <th className="border border-slate-800 py-1 w-[14%] font-bold text-center">品目名</th>
+              <tr className="bg-slate-100 h-8 border-b-2 border-slate-800">
+                <th className="border border-slate-800 py-1 w-[12%] font-bold text-center">品目名</th>
                 <th className="border border-slate-800 py-1 w-[4%] font-bold text-center bg-white">単位</th>
+                <th className="border border-slate-800 py-1 w-[6%] font-bold text-center bg-slate-50 text-red-700">使用総量</th>
                 {forecastResult.dates.map(date => {
                   const d = new Date(date);
                   const isWeekend = d.getDay() === 0 || d.getDay() === 6;
-                  return <th key={date} className={`border border-slate-800 py-0.5 leading-tight font-bold text-center w-[2.7%] ${isWeekend ? 'bg-red-50 text-red-600' : 'text-slate-800'}`}>{d.getMonth() + 1}/{d.getDate()}</th>;
+                  return <th key={date} className={`border border-slate-800 py-0.5 leading-tight font-bold text-center w-[2.6%] ${isWeekend ? 'bg-red-50 text-red-600' : 'text-slate-800'}`}>{d.getMonth() + 1}/{d.getDate()}</th>;
                 })}
               </tr>
             </thead>
             <tbody>
               {filteredForecastData.filter((f) => {
                 return forecastResult.dates.some(date => f.days[date].outQty > 0);
-              }).map((f) => (
-                <tr key={f.item.id} className="h-8 hover:bg-slate-50">
-                  <td className="border-r border-slate-300 px-1.5 font-medium truncate whitespace-nowrap text-slate-800">{f.item.name}</td>
-                  <td className="border-r border-slate-300 text-center text-[10px] text-slate-500 bg-slate-50/50">{f.item.unit}</td>
-                  {forecastResult.dates.map(date => {
-                    const outQty = f.days[date].outQty;
-                    return (
-                      <td key={date} className="border-r border-slate-300 text-center font-mono font-bold tracking-tighter text-[9px]">
-                        {outQty > 0 ? <span className="text-red-600">{formatQty(outQty, f.item.item_type)}</span> : ""}
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
+              }).map((f) => {
+                const totalOutQty = forecastResult.dates.reduce((sum, dStr) => sum + f.days[dStr].outQty, 0);
+                return (
+                  <tr key={f.item.id} className="h-8 hover:bg-slate-50 border-b border-slate-300">
+                    <td className="border-r border-b border-slate-300 px-1.5 font-medium truncate whitespace-nowrap text-slate-800">{f.item.name}</td>
+                    <td className="border-r border-b border-slate-300 text-center text-[10px] text-slate-500 bg-slate-50/50">{f.item.unit}</td>
+                    <td className="border-r border-b border-slate-300 text-right px-1.5 font-mono font-bold text-red-700 bg-red-50/20">
+                      {formatQty(totalOutQty, f.item.item_type)}
+                    </td>
+                    {forecastResult.dates.map(date => {
+                      const outQty = f.days[date].outQty;
+                      return (
+                        <td key={date} className="border-r border-b border-slate-300 text-center font-mono font-bold tracking-tighter text-[9px]">
+                          {outQty > 0 ? <span className="text-red-600">{formatQty(outQty, f.item.item_type)}</span> : ""}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           <div className="mt-2 text-[10px] text-slate-500">※ この表には、製造計画に基づいて「消費(使用)」される数量のみが印字されています。</div>
@@ -1462,7 +1467,7 @@ export default function InventoryPage() {
           </div>
         </TabsContent>
 
-        {/* 在庫推移予測タブ (画面表示用) - ★フレックス構成による重なりバグ解消 */}
+        {/* 在庫推移予測タブ (画面表示用) - ★使用総量（期間使用量）を現在庫の左に追加 */}
         <TabsContent value="forecast" className="mt-0 focus-visible:outline-none focus-visible:ring-0">
           <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
@@ -1503,7 +1508,9 @@ export default function InventoryPage() {
               <Table className="text-[11px] min-w-300 table-fixed w-full border-collapse">
                 <TableHeader className="bg-slate-50 border-b border-slate-200">
                   <TableRow>
-                    <TableHead className="w-48 font-bold pl-3 text-slate-600">品目名</TableHead>
+                    <TableHead className="w-44 font-bold pl-3 text-slate-600">品目名</TableHead>
+                    <TableHead className="w-16 text-center font-bold text-slate-600">単位</TableHead>
+                    <TableHead className="w-24 text-right font-bold bg-slate-50 pr-3 text-red-700">期間使用量</TableHead>
                     <TableHead className="w-24 text-right font-bold bg-slate-100/60 pr-3 text-slate-700 border-r border-slate-200">現在庫</TableHead>
                     {forecastResult.dates.map(date => {
                       const d = new Date(date);
@@ -1512,33 +1519,38 @@ export default function InventoryPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredForecastData.map((f) => (
-                    <TableRow key={f.item.id} className="hover:bg-slate-50/80 border-b border-slate-100 last:border-none transition-colors">
-                      <td className="font-bold text-slate-800 truncate pl-3">{f.item.name}</td>
-                      <td className="text-right font-mono font-bold bg-slate-50/50 pr-3 text-blue-800 border-r border-slate-200">{formatQty(f.item.current_qty, f.item.item_type)}</td>
-                      {forecastResult.dates.map(date => {
-                        const day = f.days[date];
-                        const isShort = day.endQty < 0;
-                        const hasChange = day.inQty > 0 || day.outQty > 0;
-                        return (
-                          <td key={date} className={`text-center p-1 border-r border-slate-100 last:border-0 h-12 ${isShort ? 'bg-red-50/70' : ''}`}>
-                            <div className="flex flex-col justify-between h-full min-h-10 py-0.5">
-                              {/* 上部：入出荷の変動数値 */}
-                              <div className="flex flex-col text-[7px] leading-none tracking-tighter">
-                                {day.inQty > 0 && <span className="text-blue-600 font-bold">+{formatQty(day.inQty, f.item.item_type)}</span>}
-                                {day.outQty > 0 && <span className="text-red-500 font-bold">-{formatQty(day.outQty, f.item.item_type)}</span>}
-                                {!hasChange && <div className="h-1.75 opacity-0">-</div>}
+                  {filteredForecastData.map((f) => {
+                    const totalOutQty = forecastResult.dates.reduce((sum, dStr) => sum + f.days[dStr].outQty, 0);
+                    return (
+                      <TableRow key={f.item.id} className="hover:bg-slate-50/80 border-b border-slate-100 last:border-none transition-colors">
+                        <td className="font-bold text-slate-800 truncate pl-3">{f.item.name}</td>
+                        <td className="text-center text-slate-500">{f.item.unit}</td>
+                        <td className="text-right font-mono font-bold text-red-600 bg-red-50/20 pr-3">
+                          {formatQty(totalOutQty, f.item.item_type)}
+                        </td>
+                        <td className="text-right font-mono font-bold bg-slate-50/50 pr-3 text-blue-800 border-r border-slate-200">{formatQty(f.item.current_qty, f.item.item_type)}</td>
+                        {forecastResult.dates.map(date => {
+                          const day = f.days[date];
+                          const isShort = day.endQty < 0;
+                          const hasChange = day.inQty > 0 || day.outQty > 0;
+                          return (
+                            <td key={date} className={`text-center p-1 border-r border-slate-100 last:border-0 h-12 ${isShort ? 'bg-red-50/70' : ''}`}>
+                              <div className="flex flex-col justify-between h-full min-h-10 py-0.5">
+                                <div className="flex flex-col text-[7px] leading-none tracking-tighter">
+                                  {day.inQty > 0 && <span className="text-blue-600 font-bold">+{formatQty(day.inQty, f.item.item_type)}</span>}
+                                  {day.outQty > 0 && <span className="text-red-500 font-bold">-{formatQty(day.outQty, f.item.item_type)}</span>}
+                                  {!hasChange && <div className="h-1.75 opacity-0">-</div>}
+                                </div>
+                                <div className={`font-mono text-[8px] font-bold tracking-tighter leading-none mt-auto ${isShort ? 'text-red-600 font-black' : 'text-slate-700'}`}>
+                                  {formatQty(day.endQty, f.item.item_type)}
+                                </div>
                               </div>
-                              {/* 下部：計算後在庫数量 */}
-                              <div className={`font-mono text-[8px] font-bold tracking-tighter leading-none mt-auto ${isShort ? 'text-red-600 font-black' : 'text-slate-700'}`}>
-                                {formatQty(day.endQty, f.item.item_type)}
-                              </div>
-                            </div>
-                          </td>
-                        );
-                      })}
-                    </TableRow>
-                  ))}
+                            </td>
+                          );
+                        })}
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>
