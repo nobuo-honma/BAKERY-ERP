@@ -209,7 +209,7 @@ export default function ArrivalsPage() {
     const [newItemId, setNewItemId] = useState("");
     const [newOrderDate, setNewOrderDate] = useState("");
     const [newExpectedDate, setNewExpectedDate] = useState("");
-    const [newQuantity, setNewQuantity] = useState<number | " text-slate-800">("");
+    const [newQuantity, setNewQuantity] = useState<number | "">("");
     const [newNotes, setNewNotes] = useState("");
 
     const [editingArrival, setEditingArrival] = useState<Arrival | null>(null);
