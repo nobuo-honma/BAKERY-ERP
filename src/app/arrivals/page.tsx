@@ -48,6 +48,7 @@ type Item = {
     name: string;
     item_type: string;
     unit: string;
+    safety_stock: number; // 安全在庫フィールド
     item_stocks?: { quantity: number }[] | { quantity: number } | null;
 };
 
@@ -108,6 +109,19 @@ type Arrival = {
     };
 };
 
+// 未来の入荷予定予測用の型
+type RecommendedArrival = {
+    itemId: string;
+    itemName: string;
+    itemType: string;
+    unit: string;
+    recommendedDate: string; // 予測入荷日 (欠品日の2日前)
+    shortageDate: string;    // 予測欠品日
+    recommendedQty: number;  // 補填が必要な予測数量
+    currentStock: number;
+    safetyStock: number;
+};
+
 type Supplier = "hashiya" | "nexus";
 
 // ===== 発注書印刷用のマスタデータ =====
@@ -119,7 +133,7 @@ const hashiyaItems = [
     { code: "", maker: "川西製餡", name: "かのこ黒豆", spec: "2kg×1p", unit: "1袋" },
     { code: "", maker: "", name: "かのこ黒豆", spec: "2kg×2p", unit: "1ケース" },
     { code: "", maker: "森永商事", name: "キャラメル チョコチップ", spec: "5kg×2p", unit: "1ケース" },
-    { code: "", maker: "理研", name: "Eオイルスーパー60", spec: "5kg", unit: "1缶" },
+    { code: "", maker: "理研", name: "Eオイルスーパー60", spec: "5kg", inline: "1缶" },
     { code: "", maker: "", name: "ミックスフルーツ", spec: "1kg×12p", unit: "1ケース" },
     { code: "", maker: "", name: "アップルチップ", spec: "2kg×6ｐ", unit: "1ケース" },
     { code: "", maker: "", name: "ホワイトチョコチップ", spec: "5kg×2p", unit: "1ケース" },
@@ -209,7 +223,7 @@ export default function ArrivalsPage() {
     const [newItemId, setNewItemId] = useState("");
     const [newOrderDate, setNewOrderDate] = useState("");
     const [newExpectedDate, setNewExpectedDate] = useState("");
-    const [newQuantity, setNewQuantity] = useState<number | "">("");
+    const [newQuantity, setNewQuantity] = useState<number | " text-slate-800">("");
     const [newNotes, setNewNotes] = useState("");
 
     const [editingArrival, setEditingArrival] = useState<Arrival | null>(null);
@@ -394,29 +408,148 @@ export default function ArrivalsPage() {
             });
     }, [shortageList]);
 
+    // 未来20日間の在庫推移予測をリアルタイムシミュレーションし、予防的な推奨発注（入荷予定）を自動予測
+    const recommendedArrivals = useMemo<RecommendedArrival[]>(() => {
+        if (!items.length) return [];
+
+        const dates = Array.from({ length: 20 }, (_, i) => {
+            const d = new Date();
+            d.setDate(d.getDate() + i);
+            return d.toISOString().split('T')[0];
+        });
+        const todayStr = dates[0];
+
+        const list: RecommendedArrival[] = [];
+
+        items.forEach((item) => {
+            const isMaterial = item.item_type === "material";
+            const stockArr = Array.isArray(item.item_stocks)
+                ? item.item_stocks
+                : item.item_stocks
+                    ? [item.item_stocks]
+                    : [];
+            const initialStock = stockArr[0]?.quantity || 0;
+
+            // 安全在庫値を取得（デフォルト:0）
+            const safetyStock = item.safety_stock || 0;
+
+            let currentStock = initialStock;
+
+            // 20日間の日次需要マッピング
+            const dailyChanges: Record<string, { inQty: number; outQty: number }> = {};
+            dates.forEach((d) => {
+                dailyChanges[d] = { inQty: 0, outQty: 0 };
+            });
+
+            // 1. 入荷予定のプラスをマージ
+            arrivals
+                .filter((a) => a.item_id === item.id && a.status === "pending")
+                .forEach((a) => {
+                    const dKey = normalizeDateKey(a.expected_date);
+                    const targetD = dKey < todayStr ? todayStr : dKey;
+                    if (dailyChanges[targetD]) {
+                        dailyChanges[targetD].inQty += a.quantity;
+                    }
+                });
+
+            // 2. 製造による消費( plans / orders )のマイナスをマージ
+            if (calculationSource === "order") {
+                const unshippedOrders = orders.filter((o) => !isShippedStatus(o.status));
+                unshippedOrders.forEach((ord) => {
+                    if (!ord.product_id || !ord.quantity) return;
+                    const prod = ord.products;
+                    const unitCs = prod?.unit_per_cs || 1;
+                    const unitKg = prod?.unit_per_kg || 0;
+                    const totalPcs = ord.quantity * unitCs;
+                    const productionKg = unitKg ? totalPcs / unitKg : 0;
+                    const csCount = ord.quantity;
+
+                    const productBoms = boms.filter((b) => b.product_id === ord.product_id);
+                    productBoms.forEach((bom) => {
+                        if (bom.item_id !== item.id) return;
+                        const req = bom.basis_type === "production_qty"
+                            ? productionKg * bom.usage_rate
+                            : csCount * bom.usage_rate;
+
+                        // 受注分は初日にすべて消費されると仮定
+                        if (dailyChanges[todayStr]) {
+                            dailyChanges[todayStr].outQty += req;
+                        }
+                    });
+                });
+            } else {
+                plans.forEach((plan) => {
+                    if (!plan.product_id || !plan.production_date) return;
+                    const dKey = normalizeDateKey(plan.production_date);
+                    const targetD = dKey < todayStr ? todayStr : dKey;
+                    if (!dailyChanges[targetD]) return;
+
+                    const productBoms = boms.filter((b) => b.product_id === plan.product_id);
+                    productBoms.forEach((bom) => {
+                        if (bom.item_id !== item.id) return;
+                        const req = bom.basis_type === "production_qty"
+                            ? plan.production_kg * bom.usage_rate
+                            : plan.planned_cs * bom.usage_rate;
+
+                        dailyChanges[targetD].outQty += req;
+                    });
+                });
+            }
+
+            // 在庫推移をループして、初めて「安全在庫水準」を下回る欠品予定日を特定
+            let detectedShortageDate: string | null = null;
+            let shortageQty = 0;
+
+            for (const d of dates) {
+                const day = dailyChanges[d];
+                currentStock = currentStock + day.inQty - day.outQty;
+
+                if (!isMaterial) {
+                    currentStock = Math.round(currentStock * 100) / 100;
+                } else {
+                    currentStock = Math.round(currentStock);
+                }
+
+                // 欠品、または安全在庫割れを探知
+                if (currentStock < safetyStock && !detectedShortageDate) {
+                    detectedShortageDate = d;
+                    shortageQty = safetyStock - currentStock; // 不足を解決して安全在庫水準へ復帰させる数量
+                    break;
+                }
+            }
+
+            if (detectedShortageDate) {
+                // 最適推奨日：欠品予定日の2日前 (今日より過去になる場合は今日をセット)
+                const shortDObj = new Date(detectedShortageDate);
+                shortDObj.setDate(shortDObj.getDate() - 2);
+                let recDateStr = shortDObj.toISOString().split('T')[0];
+                if (recDateStr < todayStr) {
+                    recDateStr = todayStr;
+                }
+
+                list.push({
+                    itemId: item.id,
+                    itemName: item.name,
+                    itemType: item.item_type,
+                    unit: item.unit,
+                    recommendedDate: recDateStr,
+                    shortageDate: detectedShortageDate,
+                    recommendedQty: isMaterial ? Math.ceil(shortageQty) : Math.ceil(shortageQty * 10) / 10,
+                    currentStock: initialStock,
+                    safetyStock: safetyStock,
+                });
+            }
+        });
+
+        // 直近で欠品するリスクが高い品目からソート
+        return list.sort((a, b) => a.shortageDate.localeCompare(b.shortageDate));
+    }, [items, arrivals, orders, plans, boms, calculationSource]);
+
     // フォームで選択中の品目の不足情報
     const selectedItemShortage = useMemo(() => {
         if (!newItemId) return null;
         return shortageList.find((i) => i.itemId === newItemId) || null;
     }, [newItemId, shortageList]);
-
-    // 不足資材のワンクリック自動入力
-    const fillArrivalFormForShortage = (itemInfo: ItemShortageInfo) => {
-        setNewItemId(itemInfo.itemId);
-        const targetQty = itemInfo.shortageWithArrival > 0 ? itemInfo.shortageWithArrival : itemInfo.shortageWithStock;
-        const roundedQty = itemInfo.itemType === "raw_material" ? Math.ceil(targetQty * 10) / 10 : Math.ceil(targetQty);
-        setNewQuantity(roundedQty);
-        setNewNotes(
-            calculationSource === "plan"
-                ? `製造計画補給 (${itemInfo.orderCount}件の製造)`
-                : `受注不足補給 (${itemInfo.orderCount}件の受注)`
-        );
-
-        const formElement = document.getElementById("new-arrival-form");
-        if (formElement) {
-            formElement.scrollIntoView({ behavior: "smooth" });
-        }
-    };
 
     const selectedItemUnit = items.find((i) => i.id === newItemId)?.unit || "";
 
@@ -761,7 +894,7 @@ export default function ArrivalsPage() {
     }
 
     // =======================================================================
-    // カレンダー表示
+    // カレンダー表示 (今まで通り、予定と入荷済のみ)
     // =======================================================================
     if (viewMode === "calendar") {
         const daysArray = getCalendarDays();
@@ -814,6 +947,7 @@ export default function ArrivalsPage() {
                 </div>
 
                 <div className="border border-slate-300 rounded-lg md:rounded-sm overflow-hidden print:border-black print:border-2">
+                    {/* PC表示 */}
                     <div className="hidden md:block print:block">
                         <div className="grid grid-cols-7 bg-slate-100 print:bg-gray-200 border-b border-slate-300 print:border-black">
                             {["日", "月", "火", "水", "木", "金", "土"].map((d, i) => (
@@ -863,6 +997,7 @@ export default function ArrivalsPage() {
                         </div>
                     </div>
 
+                    {/* スマホ表示 */}
                     <div className="block md:hidden print:hidden divide-y divide-slate-200 bg-slate-50">
                         {daysArray.filter((d) => d !== null).map((day) => {
                             const dateStr = `${currentYear}-${currentMonthStr}-${String(day).padStart(2, "0")}`;
@@ -1138,8 +1273,8 @@ export default function ArrivalsPage() {
                     </div>
                 </div>
 
-                {/* 右一列：必要・消費状況サイドバー (4カラム) */}
-                <div className="xl:col-span-4">
+                {/* 右一列：必要・消費状況および、未来の自動欠品予測サイドバー (4カラム) */}
+                <div className="xl:col-span-4 space-y-4">
                     <Card className="border-slate-200 shadow-sm h-full flex flex-col max-h-[85vh] sticky top-24">
                         <CardHeader className="bg-slate-50/80 pb-3 border-b space-y-2 sticky top-0 z-10">
                             <div className="flex items-center justify-between">
@@ -1157,8 +1292,8 @@ export default function ArrivalsPage() {
                                 <button
                                     onClick={() => setCalculationSource("plan")}
                                     className={`flex-1 text-[11px] py-1 px-2 rounded font-bold transition-all ${calculationSource === "plan"
-                                            ? "bg-white text-slate-800 shadow-sm"
-                                            : "text-slate-500 hover:text-slate-700"
+                                        ? "bg-white text-slate-800 shadow-sm"
+                                        : "text-slate-500 hover:text-slate-700"
                                         }`}
                                 >
                                     消費予定 (計画)
@@ -1166,8 +1301,8 @@ export default function ArrivalsPage() {
                                 <button
                                     onClick={() => setCalculationSource("order")}
                                     className={`flex-1 text-[11px] py-1 px-2 rounded font-bold transition-all ${calculationSource === "order"
-                                            ? "bg-white text-slate-800 shadow-sm"
-                                            : "text-slate-500 hover:text-slate-700"
+                                        ? "bg-white text-slate-800 shadow-sm"
+                                        : "text-slate-500 hover:text-slate-700"
                                         }`}
                                 >
                                     受注ベース
@@ -1175,97 +1310,120 @@ export default function ArrivalsPage() {
                             </div>
                         </CardHeader>
 
-                        <CardContent className="p-3 overflow-y-auto space-y-3 flex-1 scrollbar-thin scrollbar-thumb-slate-200">
-                            {neededItems.length === 0 ? (
-                                <div className="text-center py-12 text-xs text-slate-400 font-medium">
-                                    {calculationSource === "plan"
-                                        ? "現在登録されている製造計画に必要な品目はありません。"
-                                        : "現在登録されている未出荷の受注に必要な品目はありません。"}
-                                </div>
-                            ) : (
-                                neededItems.map((item) => {
-                                    const isCritical = item.shortageWithArrival > 0;
-                                    const isShort = item.shortageWithStock > 0;
+                        <CardContent className="p-3 overflow-y-auto space-y-4 flex-1 scrollbar-thin scrollbar-thumb-slate-200">
 
-                                    return (
-                                        <div
-                                            key={item.itemId}
-                                            className={`p-3 rounded-lg border transition-all duration-200 text-xs ${isCritical
+                            {/* 1. 未来の欠品予測 (自動入荷予定推奨リスト) の表示 */}
+                            {recommendedArrivals.length > 0 && (
+                                <div className="border-b pb-4">
+                                    <h3 className="text-xs font-bold text-amber-900 mb-2.5 flex items-center gap-1.5">
+                                        <Sparkles className="w-4 h-4 text-amber-600 animate-pulse shrink-0" />
+                                        未来の欠品予測 (自動予定推奨)
+                                    </h3>
+                                    <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
+                                        {recommendedArrivals.map((rec) => (
+                                            <div key={rec.itemId} className="p-2.5 bg-amber-50/40 border border-amber-200 rounded-lg text-[11px] space-y-1">
+                                                <div className="flex justify-between font-bold text-slate-800">
+                                                    <span className="truncate pr-1">{rec.itemName}</span>
+                                                    <span className="text-red-600 shrink-0">{formatDateJP(rec.shortageDate)} 欠品予定</span>
+                                                </div>
+                                                <div className="text-slate-500 text-[10px]">
+                                                    現在庫: {rec.currentStock}{rec.unit} / 安全在庫: {rec.safetyStock}{rec.unit}
+                                                </div>
+                                                <div className="flex justify-between items-center pt-1.5 border-t border-amber-200/50 mt-1.5 gap-2">
+                                                    <span className="text-amber-800 font-bold text-[10px] leading-tight">
+                                                        推奨: {formatDateJP(rec.recommendedDate)} に +{rec.recommendedQty}{rec.unit}入荷
+                                                    </span>
+                                                    <Button
+                                                        size="sm"
+                                                        onClick={() => {
+                                                            setNewItemId(rec.itemId);
+                                                            setNewQuantity(rec.recommendedQty);
+                                                            setNewExpectedDate(rec.recommendedDate); // 推奨される最適入荷日を自動セット！
+                                                            setNewNotes(`欠品予防補給予定 (欠品日予測: ${formatDateJP(rec.shortageDate)})`);
+                                                        }}
+                                                        className="h-6 text-[10px] bg-amber-600 hover:bg-amber-700 text-white px-2 py-0 shrink-0 font-bold shadow-none"
+                                                    >
+                                                        予定をセット
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* 2. 現在の必要状況一覧 */}
+                            <div className="space-y-2.5">
+                                <h3 className="text-xs font-bold text-slate-700">現在の必要資材・原材料</h3>
+                                {neededItems.length === 0 ? (
+                                    <div className="text-center py-6 text-xs text-slate-400 font-medium">
+                                        {calculationSource === "plan"
+                                            ? "現在登録されている製造計画に必要な品目はありません。"
+                                            : "現在登録されている未出荷の受注に必要な品目はありません。"}
+                                    </div>
+                                ) : (
+                                    neededItems.map((item) => {
+                                        const isCritical = item.shortageWithArrival > 0;
+                                        const isShort = item.shortageWithStock > 0;
+
+                                        return (
+                                            <div
+                                                key={item.itemId}
+                                                className={`p-3 rounded-lg border transition-all duration-200 text-xs ${isCritical
                                                     ? "bg-red-50/30 border-red-200 hover:border-red-300 shadow-sm"
                                                     : isShort
                                                         ? "bg-amber-50/30 border-amber-200 hover:border-amber-300 shadow-sm"
                                                         : "bg-white border-slate-200 hover:border-slate-300"
-                                                }`}
-                                        >
-                                            <div className="flex items-start justify-between gap-2 mb-1.5">
-                                                <div className="truncate">
-                                                    <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 mr-1.5">
-                                                        {item.itemType === "raw_material" ? "原料" : "資材"}
-                                                    </span>
-                                                    <span className="font-bold text-slate-800 text-xs truncate" title={item.itemName}>
-                                                        {item.itemName}
-                                                    </span>
-                                                </div>
-                                                {isCritical ? (
-                                                    <Badge className="bg-red-500 text-white text-[9px] px-1.5 h-4 font-bold shrink-0 shadow-none">
-                                                        欠品警戒
-                                                    </Badge>
-                                                ) : isShort ? (
-                                                    <Badge className="bg-amber-500 text-white text-[9px] px-1.5 h-4 font-bold shrink-0 shadow-none">
-                                                        予定で補填可
-                                                    </Badge>
-                                                ) : (
-                                                    <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 text-[9px] px-1.5 h-4 font-bold shrink-0 shadow-none">
-                                                        確保済
-                                                    </Badge>
-                                                )}
-                                            </div>
-
-                                            <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px] text-slate-600 mb-2.5 bg-slate-50/50 p-2 rounded border border-slate-100">
-                                                <div className="flex justify-between">
-                                                    <span>必要量:</span>
-                                                    <span className="font-bold text-slate-800">
-                                                        {formatNumber(item.requiredQty, item.itemType)} {item.unit}
-                                                    </span>
-                                                </div>
-                                                <div className="flex justify-between">
-                                                    <span>現在庫数:</span>
-                                                    <span className={`font-bold ${item.stockQty < item.requiredQty ? "text-amber-700" : "text-slate-800"}`}>
-                                                        {formatNumber(item.stockQty, item.itemType)} {item.unit}
-                                                    </span>
-                                                </div>
-                                                <div className="flex justify-between">
-                                                    <span>入荷予定:</span>
-                                                    <span className="font-bold text-blue-600">
-                                                        +{formatNumber(item.pendingQty, item.itemType)}
-                                                    </span>
-                                                </div>
-                                                <div className="flex justify-between font-bold">
-                                                    <span className={isCritical ? "text-red-700" : "text-emerald-800"}>最終状況:</span>
+                                                    }`}
+                                            >
+                                                <div className="flex items-start justify-between gap-2 mb-1.5">
+                                                    <div className="truncate">
+                                                        <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 mr-1.5">
+                                                            {item.itemType === "raw_material" ? "原料" : "資材"}
+                                                        </span>
+                                                        <span className="font-bold text-slate-800 text-xs truncate" title={item.itemName}>
+                                                            {item.itemName}
+                                                        </span>
+                                                    </div>
                                                     {isCritical ? (
-                                                        <span className="text-red-600">不足 {formatNumber(item.shortageWithArrival, item.itemType)}</span>
+                                                        <Badge className="bg-red-500 text-white text-[9px] px-1.5 h-4 font-bold shrink-0 shadow-none">
+                                                            欠品警戒
+                                                        </Badge>
+                                                    ) : isShort ? (
+                                                        <Badge className="bg-amber-500 text-white text-[9px] px-1.5 h-4 font-bold shrink-0 shadow-none">
+                                                            予定で補填可
+                                                        </Badge>
                                                     ) : (
-                                                        <span className="text-emerald-700">充足</span>
+                                                        <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 text-[9px] px-1.5 h-4 font-bold shrink-0 shadow-none">
+                                                            確保済
+                                                        </Badge>
                                                     )}
                                                 </div>
-                                            </div>
 
-                                            {canEdit && (isShort || isCritical) && (
-                                                <Button
-                                                    onClick={() => fillArrivalFormForShortage(item)}
-                                                    size="sm"
-                                                    className={`w-full text-[10px] h-7 font-bold gap-1 ${isCritical
+                                                <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px] text-slate-600 mb-2.5 bg-slate-50/50 p-2 rounded border border-slate-100">
+                                                    <div>必要量: <span className="font-bold text-slate-800">{formatNumber(item.requiredQty, item.itemType)} {item.unit}</span></div>
+                                                    <div>現在庫: <span className={`font-bold ${item.stockQty < item.requiredQty ? "text-amber-700" : "text-slate-800"}`}>{formatNumber(item.stockQty, item.itemType)} {item.unit}</span></div>
+                                                    <div>入荷予定: <span className="font-bold text-blue-600">+{formatNumber(item.pendingQty, item.itemType)}</span></div>
+                                                    <div className="font-bold">最終状況: <span className={isCritical ? "text-red-600" : "text-emerald-700"}>{isCritical ? `不足 ${formatNumber(item.shortageWithArrival, item.itemType)}` : "充足"}</span></div>
+                                                </div>
+
+                                                {canEdit && (isShort || isCritical) && (
+                                                    <Button
+                                                        onClick={() => fillArrivalFormForShortage(item)}
+                                                        size="sm"
+                                                        className={`w-full text-[10px] h-7 font-bold gap-1 ${isCritical
                                                             ? "bg-red-600 hover:bg-red-700 text-white shadow-none"
                                                             : "bg-amber-600 hover:bg-amber-700 text-white shadow-none"
-                                                        }`}
-                                                >
-                                                    <PackagePlus className="w-3 h-3" /> 補給数量をセット
-                                                </Button>
-                                            )}
-                                        </div>
-                                    );
-                                })
-                            )}
+                                                            }`}
+                                                    >
+                                                        <PackagePlus className="w-3 h-3" /> 補給数量をセット
+                                                    </Button>
+                                                )}
+                                            </div>
+                                        );
+                                    })
+                                )}
+                            </div>
                         </CardContent>
                     </Card>
                 </div>
@@ -1364,14 +1522,14 @@ export default function ArrivalsPage() {
                                     <label className="block text-xs font-bold text-slate-600 mb-2">外観 (状態)</label>
                                     <div className="flex bg-slate-100 rounded-lg p-1 h-12 shadow-inner">
                                         <button onClick={() => setHaccpData({ ...haccpData, appearance: 'ok' })} className={`flex-1 text-sm font-bold rounded-md transition-colors ${haccpData.appearance === 'ok' ? 'bg-emerald-500 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-200'}`}>良</button>
-                                        <button onClick={() => setHaccpData({ ...haccpData, appearance: 'ng' })} className={`flex-1 text-sm font-bold rounded-md transition-colors ${haccpData.appearance === 'ng' ? 'bg-red-500 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-200'}`}>不良</button>
+                                        <button onClick={() => setHaccpData({ ...haccpData, appearance: 'ng' })} className={`flex-1 text-sm font-bold rounded-md transition-colors ${haccpData.appearance === 'ng' ? 'bg-red-50' : 'text-slate-500 hover:bg-slate-200'}`}>不良</button>
                                     </div>
                                 </div>
                                 <div>
                                     <label className="block text-xs font-bold text-slate-600 mb-2">臭い</label>
                                     <div className="flex bg-slate-100 rounded-lg p-1 h-12 shadow-inner">
                                         <button onClick={() => setHaccpData({ ...haccpData, smell: 'ok' })} className={`flex-1 text-sm font-bold rounded-md transition-colors ${haccpData.smell === 'ok' ? 'bg-emerald-500 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-200'}`}>良</button>
-                                        <button onClick={() => setHaccpData({ ...haccpData, smell: 'ng' })} className={`flex-1 text-sm font-bold rounded-md transition-colors ${haccpData.smell === 'ng' ? 'bg-red-500 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-200'}`}>不良</button>
+                                        <button onClick={() => setHaccpData({ ...haccpData, smell: 'ng' })} className={`flex-1 text-sm font-bold rounded-md transition-colors ${haccpData.smell === 'ng' ? 'bg-red-50' : 'text-slate-500 hover:bg-slate-200'}`}>不良</button>
                                     </div>
                                 </div>
                             </div>

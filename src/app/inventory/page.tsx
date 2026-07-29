@@ -39,6 +39,26 @@ const safePrint = () => {
   }
 };
 
+// ===== 日付を YYYY-MM-DD 形式に完全に統一するための正規化ユーティリティ =====
+const normalizeDateStr = (val?: string | null) => {
+  if (!val) return "";
+  const match = val.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (match) return `${match[1]}-${match[2]}-${match[3]}`;
+  const d = new Date(val);
+  if (isNaN(d.getTime())) return "";
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+};
+
+const getLocalDateStr = (date: Date) => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+};
+
 type ItemStock = {
   id: string;
   name: string;
@@ -76,8 +96,9 @@ type AdjustmentHistory = {
 type ForecastFilter = 'all' | 'raw_material' | 'material';
 type ForecastDay = {
   date: string;
-  inQty: number;
-  outQty: number;
+  inQty: number;       // 入荷予定 (status = pending)
+  arrivedQty: number;  // 入荷済 (status = arrived)
+  outQty: number;      // 使用消費予定 (plans)
   endQty: number;
 };
 type ForecastItemData = {
@@ -101,7 +122,7 @@ type ArrivalRow = {
   item_id: string;
   expected_date: string;
   quantity: number;
-  status?: string;
+  status?: string; // pending or arrived
 };
 type ItemRecordFromDb = {
   id: string;
@@ -146,7 +167,7 @@ export default function InventoryPage() {
   // 予測(MRP)用
   const [boms, setBoms] = useState<BomRow[]>([]);
   const [pendingPlans, setPendingPlans] = useState<ProductionPlanRow[]>([]);
-  const [pendingArrivals, setPendingArrivals] = useState<ArrivalRow[]>([]);
+  const [allArrivals, setAllArrivals] = useState<ArrivalRow[]>([]); // 予定・完了の両方を含む入荷データ
   const [forecastFilter, setForecastFilter] = useState<ForecastFilter>('all');
   const [showOnlyScheduled, setShowOnlyScheduled] = useState(false);
   const [forecastPaperSize, setForecastPaperSize] = useState<'A4' | 'A3'>('A3');
@@ -201,7 +222,8 @@ export default function InventoryPage() {
       const { data: histData } = await supabase.from("inventory_adjustments").select(`*, items(name), products(name)`).order("adjusted_at", { ascending: false }).limit(50);
       const { data: bData } = await supabase.from("bom").select("*");
       const { data: plData } = await supabase.from("production_plans").select("*").eq("status", "planned");
-      const { data: aData } = await supabase.from("arrivals").select("*").eq("status", "pending");
+      // 予定(pending) と 完了(arrived) の両方を含めて取得
+      const { data: aData } = await supabase.from("arrivals").select("*").in("status", ["pending", "arrived"]);
       const { data: prData } = await supabase.from("products").select("id, name, variant_name, unit_per_cs");
 
       if (itemsData) {
@@ -226,11 +248,12 @@ export default function InventoryPage() {
       if (histData) setHistories(histData as AdjustmentHistory[]);
       if (bData) setBoms(bData as BomRow[]);
       if (plData) setPendingPlans(plData as ProductionPlanRow[]);
-      if (aData) setPendingArrivals(aData as ArrivalRow[]);
+      if (aData) setAllArrivals(aData as ArrivalRow[]);
       if (prData) setProductsList(prData.map((p) => ({ id: p.id, name: p.name, variant: p.variant_name, unit: p.unit_per_cs })));
     } catch (error) {
       console.error(error);
     } finally {
+      setViewMode('list');
       setLoading(false);
     }
   }, []);
@@ -670,12 +693,12 @@ export default function InventoryPage() {
     }
   };
 
-  // MRP 計算ロジック
+  // MRP 計算ロジック (日付ズレを排除して確実に日ごとにマージ表示)
   const forecastResult = useMemo(() => {
     const dates = Array.from({ length: 30 }, (_, i) => {
       const d = new Date();
       d.setDate(d.getDate() + i);
-      return d.toISOString().split('T')[0];
+      return getLocalDateStr(d); // ローカル時間ベースに完全統一
     });
     const todayStr = dates[0];
     const fData: Record<string, ForecastItemData> = {};
@@ -683,22 +706,39 @@ export default function InventoryPage() {
     [...rawMaterials, ...materials].forEach(item => {
       fData[item.id] = { item, days: {} };
       dates.forEach(date => {
-        fData[item.id].days[date] = { date, inQty: 0, outQty: 0, endQty: 0 };
+        fData[item.id].days[date] = { date, inQty: 0, arrivedQty: 0, outQty: 0, endQty: 0 };
       });
     });
 
-    pendingArrivals.forEach(arr => {
+    // タイムゾーンのズレを解消して日ごとに入荷予定(黄)・実績(青)をマージ
+    allArrivals.forEach(arr => {
       const itemF = fData[arr.item_id];
       if (itemF) {
-        const targetDate = arr.expected_date < todayStr ? todayStr : arr.expected_date;
-        if (itemF.days[targetDate]) {
-          itemF.days[targetDate].inQty += itemF.item.item_type === 'raw_material' ? arr.quantity : Math.round(arr.quantity);
+        const arrDate = normalizeDateStr(arr.expected_date);
+        if (!arrDate) return;
+
+        const qty = itemF.item.item_type === 'raw_material' ? arr.quantity : Math.round(arr.quantity);
+
+        if (arr.status === "arrived") {
+          // 入荷済の実績: 今日以降の日付に属するものだけをカレンダー上にプロット(現在庫には既に加算済のため、推移計算には含めず実績表示のみ)
+          if (arrDate >= todayStr && itemF.days[arrDate]) {
+            itemF.days[arrDate].arrivedQty += qty;
+          }
+        } else {
+          // 未完了の入荷予定: 過去の遅延分も含めて、今日以降の未来日に日ごとに正確にマッピング
+          const targetDate = arrDate < todayStr ? todayStr : arrDate;
+          if (itemF.days[targetDate]) {
+            itemF.days[targetDate].inQty += qty;
+          }
         }
       }
     });
 
     pendingPlans.forEach(plan => {
-      const targetDate = plan.production_date < todayStr ? todayStr : plan.production_date;
+      const planDate = normalizeDateStr(plan.production_date);
+      if (!planDate) return;
+
+      const targetDate = planDate < todayStr ? todayStr : planDate;
       const productBoms = boms.filter(b => b.product_id === plan.product_id);
       productBoms.forEach(bom => {
         const itemF = fData[bom.item_id];
@@ -708,7 +748,7 @@ export default function InventoryPage() {
             : plan.planned_cs * bom.usage_rate;
 
           const outQty = itemF.item.item_type === 'raw_material' ? calculatedOut : Math.round(calculatedOut);
-          itemF.days[targetDate].outQty += outQty;
+          itemF.days[targetDate].outQty += outQty; // 製造使用消費
         }
       });
     });
@@ -717,6 +757,8 @@ export default function InventoryPage() {
       let current = itemF.item.current_qty;
       dates.forEach(date => {
         const day = itemF.days[date];
+        // arrivedQty(入荷済) は既に現在庫 current に組み込まれているため、推移の二重計上を防ぐため加算しません。
+        // 未完了の予定 inQty と 消費 outQty だけで正しい在庫の予測推移 endQty を算出します。
         const rawNext = current + day.inQty - day.outQty;
         current = itemF.item.item_type === 'raw_material' ? rawNext : Math.round(rawNext);
         day.endQty = current;
@@ -724,7 +766,7 @@ export default function InventoryPage() {
     });
 
     return { dates, fData };
-  }, [rawMaterials, materials, boms, pendingPlans, pendingArrivals]);
+  }, [rawMaterials, materials, boms, pendingPlans, allArrivals]);
 
   const filteredForecastData = useMemo(() => {
     let allData = Object.values(forecastResult.fData);
@@ -985,8 +1027,8 @@ export default function InventoryPage() {
                       <td className="border border-slate-300 px-2 font-medium">
                         {item.name}{item.expiry && <span className="text-[10px] font-normal ml-2 text-gray-500">(期限: {item.expiry})</span>}
                       </td>
-                      <td className="border border-slate-300 px-2 text-right font-mono font-medium">{item.qty}</td>
-                      <td className="border border-slate-400 px-2 bg-slate-50/30"></td>
+                      <td className="border-slate-300 px-2 text-right font-mono font-medium">{item.qty}</td>
+                      <td className="border-slate-400 px-2 bg-slate-50/30"></td>
                     </tr>
                   ))}
                   {Array.from({ length: Math.max(0, 35 - chunk.length) }).map((_, idx) => (
@@ -1096,7 +1138,6 @@ export default function InventoryPage() {
           <table className="w-full border-collapse border border-slate-800 text-[9px] table-fixed">
             <thead>
               <tr className="bg-slate-100 h-8">
-                {/* 固定列のパーセンテージを極小化して日付の列幅比率を最大化 */}
                 <th className="border border-slate-800 py-1 w-[11%] font-bold text-center text-[10px]">品目名</th>
                 <th className="border border-slate-800 py-1 w-[5%] font-bold text-right px-1 text-[9px]">現在庫</th>
                 {forecastResult.dates.map(date => {
@@ -1108,19 +1149,19 @@ export default function InventoryPage() {
             <tbody>
               {filteredForecastData.map((f) => (
                 <tr key={f.item.id} className="h-12 hover:bg-slate-50 border-b border-slate-300">
-                  <td className="border-r border-slate-300 px-1 font-semibold truncate whitespace-nowrap text-slate-800 text-[10px]">{f.item.name}</td>
+                  <td className="border-r border-slate-300 px-1.5 font-semibold truncate whitespace-nowrap text-slate-800 text-[10px]">{f.item.name}</td>
                   <td className="border-r border-slate-300 text-right pr-1 font-sans font-bold bg-slate-50/50 text-slate-900 text-[9px]">{formatQty(f.item.current_qty, f.item.item_type)}</td>
                   {forecastResult.dates.map(date => {
                     const day = f.days[date];
                     const isShort = day.endQty < 0;
-                    const hasChange = day.inQty > 0 || day.outQty > 0;
+                    const hasChange = day.inQty > 0 || day.arrivedQty > 0 || day.outQty > 0;
                     return (
                       <td key={date} className={`border-r border-slate-300 p-0 text-center ${isShort ? 'bg-red-50' : ''}`}>
                         <div className="flex flex-col justify-between h-full min-h-10 py-0.5">
-                          {/* 等幅フォント(font-mono)からプロポーショナルフォント(font-sans)に変更し、数字がセルの枠内に綺麗に収まるよう調整 */}
                           <div className="flex flex-col text-[7px] leading-none tracking-tighter font-sans">
-                            {day.inQty > 0 && <span className="text-blue-600 font-bold">+{formatQty(day.inQty, f.item.item_type)}</span>}
-                            {day.outQty > 0 && <span className="text-red-500 font-bold">-{formatQty(day.outQty, f.item.item_type)}</span>}
+                            {day.arrivedQty > 0 && <span className="text-blue-600 font-bold">済+{formatQty(day.arrivedQty, f.item.item_type)}</span>} {/* 実績入荷: 青 */}
+                            {day.inQty > 0 && <span className="text-amber-600 font-bold">予+{formatQty(day.inQty, f.item.item_type)}</span>}    {/* 予定入荷: 黄 */}
+                            {day.outQty > 0 && <span className="text-red-500 font-bold">使-{formatQty(day.outQty, f.item.item_type)}</span>}     {/* 消費: 赤 */}
                             {!hasChange && <div className="h-1.75 opacity-0">-</div>}
                           </div>
                           <div className={`font-sans text-[8px] font-bold tracking-tighter leading-none mt-auto ${isShort ? 'text-red-600 font-black' : 'text-slate-800'}`}>
@@ -1135,8 +1176,9 @@ export default function InventoryPage() {
             </tbody>
           </table>
           <div className="mt-4 text-[10px] text-slate-500 flex gap-4 border-t pt-3">
-            <div><span className="text-blue-600 font-bold">+N</span> は入荷予定</div>
-            <div><span className="text-red-500 font-bold">-N</span> は製造使用予定</div>
+            <div><span className="text-blue-600 font-bold">済+N</span> は入荷済実績</div>
+            <div><span className="text-amber-600 font-bold">予+N</span> は入荷予定</div>
+            <div><span className="text-red-500 font-bold">使-N</span> は製造使用予定</div>
             <div className="bg-red-50 px-1 border border-red-200 text-red-600 font-medium">背景薄赤は在庫不足(マイナス)警告</div>
           </div>
         </div>
@@ -1182,7 +1224,7 @@ export default function InventoryPage() {
                 const totalOutQty = forecastResult.dates.reduce((sum, dStr) => sum + f.days[dStr].outQty, 0);
                 return (
                   <tr key={f.item.id} className="h-8 hover:bg-slate-50 border-b border-slate-300">
-                    <td className="border-r border-b border-slate-300 px-1 font-medium truncate whitespace-nowrap text-slate-800">{f.item.name}</td>
+                    <td className="border-r border-b border-slate-300 px-1.5 font-medium truncate whitespace-nowrap text-slate-800">{f.item.name}</td>
                     <td className="border-r border-b border-slate-300 text-center text-[10px] text-slate-500 bg-slate-50/50">{f.item.unit}</td>
                     <td className="border-r border-b border-slate-300 text-right px-1 font-sans font-bold text-red-700 bg-red-50/20">
                       {formatQty(totalOutQty, f.item.item_type)}
@@ -1536,15 +1578,16 @@ export default function InventoryPage() {
                         {forecastResult.dates.map(date => {
                           const day = f.days[date];
                           const isShort = day.endQty < 0;
-                          const hasChange = day.inQty > 0 || day.outQty > 0;
+                          const hasChange = day.inQty > 0 || day.arrivedQty > 0 || day.outQty > 0;
                           return (
                             /* w-20 枠を適用 */
                             <td key={date} className={`text-center p-1 border-r border-slate-100 last:border-0 h-12 w-20 ${isShort ? 'bg-red-50/70' : ''}`}>
                               <div className="flex flex-col justify-between h-full min-h-10 py-0.5">
-                                {/* font-monoからfont-sansへ移行、文字幅をプロポーショナル化してはみ出し対策 */}
+                                {/* 3色数値インジケーター（青：実績入荷、黄：予定入荷、赤：消費予定） */}
                                 <div className="flex flex-col text-[8px] leading-none tracking-tighter font-sans font-bold">
-                                  {day.inQty > 0 && <span className="text-blue-600">+{formatQty(day.inQty, f.item.item_type)}</span>}
-                                  {day.outQty > 0 && <span className="text-red-500">-{formatQty(day.outQty, f.item.item_type)}</span>}
+                                  {day.arrivedQty > 0 && <span className="text-blue-600">済+{formatQty(day.arrivedQty, f.item.item_type)}</span>}
+                                  {day.inQty > 0 && <span className="text-amber-500">予+{formatQty(day.inQty, f.item.item_type)}</span>}
+                                  {day.outQty > 0 && <span className="text-red-500">使-{formatQty(day.outQty, f.item.item_type)}</span>}
                                   {!hasChange && <div className="h-1.75 opacity-0">-</div>}
                                 </div>
                                 <div className={`font-sans text-[10px] font-bold tracking-tighter leading-none mt-auto ${isShort ? 'text-red-600 font-black' : 'text-slate-700'}`}>
@@ -1560,10 +1603,11 @@ export default function InventoryPage() {
                 </TableBody>
               </Table>
             </div>
-            {/* 凡例 */}
+            {/* 凡例の表記を3色の実態に合わせてアップデート */}
             <div className="mt-3 text-[10px] text-slate-500 flex flex-wrap gap-4 border-t border-slate-100 pt-3">
-              <div><span className="text-blue-600 font-bold">+N</span> は入荷予定</div>
-              <div><span className="text-red-500 font-bold">-N</span> は製造使用予定</div>
+              <div><span className="text-blue-600 font-bold">済+N</span> は入荷済実績</div>
+              <div><span className="text-amber-500 font-bold">予+N</span> は入荷予定</div>
+              <div><span className="text-red-500 font-bold">使-N</span> は製造使用予定</div>
               <div className="bg-red-50 px-1 border border-red-200 text-red-600 font-medium">背景薄赤は在庫不足(マイナス)警告</div>
             </div>
           </div>
