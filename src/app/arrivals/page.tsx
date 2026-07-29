@@ -109,7 +109,6 @@ type Arrival = {
     };
 };
 
-// 未来の入荷予定予測用の型
 type RecommendedArrival = {
     itemId: string;
     itemName: string;
@@ -223,7 +222,9 @@ export default function ArrivalsPage() {
     const [newItemId, setNewItemId] = useState("");
     const [newOrderDate, setNewOrderDate] = useState("");
     const [newExpectedDate, setNewExpectedDate] = useState("");
-    const [newQuantity, setNewQuantity] = useState<number | " text-slate-800">("");
+
+    // 型定義のエラーを綺麗に解消
+    const [newQuantity, setNewQuantity] = useState<number | "">("");
     const [newNotes, setNewNotes] = useState("");
 
     const [editingArrival, setEditingArrival] = useState<Arrival | null>(null);
@@ -550,6 +551,24 @@ export default function ArrivalsPage() {
         if (!newItemId) return null;
         return shortageList.find((i) => i.itemId === newItemId) || null;
     }, [newItemId, shortageList]);
+
+    // 不足資材のワンクリック自動入力
+    const fillArrivalFormForShortage = (itemInfo: ItemShortageInfo) => {
+        setNewItemId(itemInfo.itemId);
+        const targetQty = itemInfo.shortageWithArrival > 0 ? itemInfo.shortageWithArrival : itemInfo.shortageWithStock;
+        const roundedQty = itemInfo.itemType === "raw_material" ? Math.ceil(targetQty * 10) / 10 : Math.ceil(targetQty);
+        setNewQuantity(roundedQty);
+        setNewNotes(
+            calculationSource === "plan"
+                ? `製造計画補給 (${itemInfo.orderCount}件の製造)`
+                : `受注不足補給 (${itemInfo.orderCount}件の受注)`
+        );
+
+        const formElement = document.getElementById("new-arrival-form");
+        if (formElement) {
+            formElement.scrollIntoView({ behavior: "smooth" });
+        }
+    };
 
     const selectedItemUnit = items.find((i) => i.id === newItemId)?.unit || "";
 
