@@ -245,6 +245,25 @@ export default function CleaningChecksPage() {
                                     })}
                                 </tr>
                             ))}
+                            {/* 担当者行 */}
+                            <tr className="h-6 bg-gray-50">
+                                <td className="border border-black text-center font-bold px-1 text-[10px]" colSpan={2}>
+                                    担当者
+                                </td>
+                                {daysArray.map(day => {
+                                    const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                                    const checker = monthlyData[dateStr]?.checker_name;
+                                    return (
+                                        <td key={`checker-${day}`} className="border border-black text-center p-0">
+                                            {checker ? (
+                                                <span className="text-[8px] font-bold text-gray-800 leading-none" title={checker}>
+                                                    {checker.slice(0, 2)}
+                                                </span>
+                                            ) : ''}
+                                        </td>
+                                    );
+                                })}
+                            </tr>
                         </tbody>
                     </table>
                 </div>
