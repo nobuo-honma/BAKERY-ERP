@@ -31,13 +31,37 @@ type WasteRecord = {
     notes?: string | null;
 };
 
+// タイムゾーンによる日付のズレを完全に防ぎ、ローカル時間(JST)で日付文字列を生成・正規化する
+function normalizeDateStr(val?: string | null) {
+    if (!val) return "";
+    const d = new Date(val);
+    if (Number.isNaN(d.getTime())) {
+        const match = val.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (match) return `${match[1]}-${match[2]}-${match[3]}`;
+        return "";
+    }
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+}
+
+// 日本時間の今日の日付を正しく生成する関数
+function getTodayString() {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+}
+
 export default function WasteChecksPage() {
     const { canEdit } = useAuth();
     const [loading, setLoading] = useState(false);
     const [viewMode, setViewMode] = useState<'input' | 'monthly' | 'print'>('input');
 
     // 日次入力用State
-    const [checkDate, setCheckDate] = useState(() => new Date().toISOString().split('T')[0]);
+    const [checkDate, setCheckDate] = useState(getTodayString);
     const [results, setResults] = useState<Record<string, CheckResult>>({});
     const [checkerName, setCheckerName] = useState("");
     const [notes, setNotes] = useState("");
@@ -49,7 +73,8 @@ export default function WasteChecksPage() {
 
     const fetchDailyData = useCallback(async (dateStr: string) => {
         setLoading(true);
-        const { data } = await supabase.from('waste_checks').select('*').eq('check_date', dateStr).maybeSingle();
+        const targetDate = normalizeDateStr(dateStr);
+        const { data } = await supabase.from('waste_checks').select('*').eq('check_date', targetDate).maybeSingle();
         if (data) {
             const record = data as WasteRecord | null;
             setResults(record?.results || {}); setCheckerName(record?.checker_name || ""); setNotes(record?.notes || "");
@@ -63,12 +88,20 @@ export default function WasteChecksPage() {
         setLoading(true);
         const y = dateObj.getFullYear(); const m = String(dateObj.getMonth() + 1).padStart(2, '0');
         const startDate = `${y}-${m}-01`;
-        const endDate = new Date(y, dateObj.getMonth() + 1, 0).toISOString().split('T')[0];
+
+        // 時差(ISO)の影響を排除した、ローカル日付での安全な末日の算出
+        const lastDayVal = new Date(y, dateObj.getMonth() + 1, 0).getDate();
+        const endDate = `${y}-${m}-${String(lastDayVal).padStart(2, '0')}`;
 
         const { data } = await supabase.from('waste_checks').select('*').gte('check_date', startDate).lte('check_date', endDate);
         if (data) {
             const dataMap: Record<string, WasteRecord> = {};
-            data.forEach((row: WasteRecord) => { dataMap[row.check_date] = row; });
+            (data as WasteRecord[]).forEach((row) => {
+                const key = normalizeDateStr(row.check_date);
+                if (key) {
+                    dataMap[key] = row;
+                }
+            });
             setMonthlyData(dataMap);
         }
         setLoading(false);
@@ -108,7 +141,8 @@ export default function WasteChecksPage() {
     const handleSaveDaily = async () => {
         if (!checkDate) return;
         setIsSaving(true);
-        const payload = { check_date: checkDate, results: results, checker_name: checkerName, notes: notes, updated_at: new Date().toISOString() };
+        const targetDate = normalizeDateStr(checkDate);
+        const payload = { check_date: targetDate, results: results, checker_name: checkerName, notes: notes, updated_at: new Date().toISOString() };
         const { error } = await supabase.from('waste_checks').upsert(payload, { onConflict: 'check_date' });
         setIsSaving(false);
         if (error) alert("保存に失敗しました: " + error.message);
@@ -126,7 +160,6 @@ export default function WasteChecksPage() {
 
         // 1日〜16日
         const daysTop = Array.from({ length: 16 }, (_, i) => i + 1);
-        // その月の最終入力日の備考を取得（月末のまとめとして印字）
         const lastInputDateStr = Object.keys(monthlyData).sort().pop();
         const printNotes = lastInputDateStr ? monthlyData[lastInputDateStr].notes : "";
 

@@ -12,7 +12,6 @@ import { CheckCircle2, XCircle, MinusCircle, Save, Loader2, CalendarDays, Printe
 import { useAuth } from "@/contexts/AuthContext";
 import HaccpPrintHeader from "@/components/HaccpPrintHeader";
 
-// 元のPDF帳票（YO-22）に合わせた点検項目の定義
 const CLEANING_ITEMS = [
     { id: "mixer", name: "ミキサー", freq: "使用毎", method: "作業終了後に清掃後に水気をよく拭き取る" },
     { id: "oven", name: "オーブン", freq: "年4回", method: "内部のゴミを取り除き、水洗い" },
@@ -42,13 +41,37 @@ type CleaningCheckRow = {
 
 type MonthlyDataMap = Record<string, CleaningCheckRow>;
 
+// タイムゾーンによる日付のズレを完全に防ぎ、ローカル時間(JST)で日付文字列を生成・正規化する
+function normalizeDateStr(val?: string | null) {
+    if (!val) return "";
+    const d = new Date(val);
+    if (Number.isNaN(d.getTime())) {
+        const match = val.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (match) return `${match[1]}-${match[2]}-${match[3]}`;
+        return "";
+    }
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+}
+
+// 日本時間の今日の日付を正しく生成する関数
+function getTodayString() {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+}
+
 export default function CleaningChecksPage() {
     const { canEdit } = useAuth();
     const [loading, setLoading] = useState(false);
     const [viewMode, setViewMode] = useState<'input' | 'monthly' | 'print'>('input');
 
     // 日次入力用State
-    const [checkDate, setCheckDate] = useState(() => new Date().toISOString().split('T')[0]);
+    const [checkDate, setCheckDate] = useState(getTodayString);
     const [results, setResults] = useState<Record<string, CheckResult>>({});
     const [checkerName, setCheckerName] = useState("");
     const [notes, setNotes] = useState("");
@@ -60,7 +83,8 @@ export default function CleaningChecksPage() {
 
     const fetchDailyData = useCallback(async (dateStr: string) => {
         setLoading(true);
-        const { data } = await supabase.from('cleaning_checks').select('*').eq('check_date', dateStr).maybeSingle();
+        const targetDate = normalizeDateStr(dateStr);
+        const { data } = await supabase.from('cleaning_checks').select('*').eq('check_date', targetDate).maybeSingle();
         const row = data as CleaningCheckRow | null;
         if (row) {
             setResults(row.results || {});
@@ -79,7 +103,10 @@ export default function CleaningChecksPage() {
         const y = dateObj.getFullYear();
         const m = String(dateObj.getMonth() + 1).padStart(2, '0');
         const startDate = `${y}-${m}-01`;
-        const endDate = new Date(y, dateObj.getMonth() + 1, 0).toISOString().split('T')[0];
+
+        // 時差(ISO)の影響を排除した、ローカル日付での安全な末日の算出
+        const lastDayVal = new Date(y, dateObj.getMonth() + 1, 0).getDate();
+        const endDate = `${y}-${m}-${String(lastDayVal).padStart(2, '0')}`;
 
         const { data } = await supabase.from('cleaning_checks')
             .select('*').gte('check_date', startDate).lte('check_date', endDate);
@@ -87,7 +114,10 @@ export default function CleaningChecksPage() {
         const rows = (data as CleaningCheckRow[] | null) ?? [];
         const dataMap: MonthlyDataMap = {};
         rows.forEach((row) => {
-            dataMap[row.check_date] = row;
+            const key = normalizeDateStr(row.check_date);
+            if (key) {
+                dataMap[key] = row;
+            }
         });
         setMonthlyData(dataMap);
         setLoading(false);
@@ -119,7 +149,7 @@ export default function CleaningChecksPage() {
             const current = prev[itemId];
             let next: CheckResult = 'ok';
             if (current === 'ok') next = 'ng';
-            else if (current === 'ng') next = null; // ngの次はリセット
+            else if (current === 'ng') next = null;
             return { ...prev, [itemId]: next };
         });
     };
@@ -127,8 +157,9 @@ export default function CleaningChecksPage() {
     const handleSaveDaily = async () => {
         if (!checkDate) return;
         setIsSaving(true);
+        const targetDate = normalizeDateStr(checkDate);
         const payload = {
-            check_date: checkDate,
+            check_date: targetDate,
             results: results,
             checker_name: checkerName,
             notes: notes,
@@ -191,8 +222,6 @@ export default function CleaningChecksPage() {
                                 <th className="border border-black py-1 w-[8%] font-medium">項目</th>
                                 <th className="border border-black py-1 w-[20%] font-medium">清掃・点検方法</th>
                                 {daysArray.map(day => {
-                                    // ※要件「平日の日付のみ表示」だが、ここでは全日付枠を用意しつつ、土日は背景色を変えるなどで対応可能
-                                    // シンプルに全日付を表示する
                                     return <th key={day} className="border border-black py-1 font-medium w-[2.3%]">{day}</th>;
                                 })}
                             </tr>
@@ -279,7 +308,7 @@ export default function CleaningChecksPage() {
                                             この日の記録を保存
                                         </Button>
                                     ) : (
-                                        <div className="text-center text-sm font-bold text-slate-500 bg-slate-50 py-3 rounded-md border border-slate-200 mt-4">
+                                        <div className="text-center text-sm font-bold text-slate-500 bg-slate-50 py-3 rounded-md border border-emerald-200 mt-4">
                                             <Lock className="w-4 h-4 inline mr-1" /> 閲覧モードのため保存不可
                                         </div>
                                     )}
@@ -307,7 +336,6 @@ export default function CleaningChecksPage() {
                                                 const isOk = res === 'ok';
                                                 const isNg = res === 'ng';
 
-                                                // 頻度によるバッジの色分け
                                                 let freqColor = "bg-slate-100 text-slate-600";
                                                 if (item.freq.includes("毎") || item.freq.includes("随時")) freqColor = "bg-blue-100 text-blue-700";
                                                 if (item.freq.includes("週")) freqColor = "bg-amber-100 text-amber-700";
@@ -323,7 +351,6 @@ export default function CleaningChecksPage() {
                                                             <p className="text-xs text-slate-500 whitespace-pre-wrap leading-relaxed">{item.method}</p>
                                                         </div>
 
-                                                        {/* スマホ・タブレットで押しやすい大型トグルボタン */}
                                                         <div className="shrink-0 flex sm:justify-end">
                                                             <button
                                                                 onClick={() => toggleResult(item.id)}
@@ -406,7 +433,7 @@ export default function CleaningChecksPage() {
                                                 const checker = monthlyData[dateStr]?.checker_name;
                                                 return (
                                                     <TableCell key={`checker-${day}`} className="border-r text-center p-1">
-                                                        {checker ? <div className="text-[9px] truncate max-w-8 mx-auto text-slate-700" title={checker}>{checker.slice(0, 2)}</div> : ""}
+                                                        {checker ? <div className="text-[8px] truncate max-w-8 mx-auto text-slate-700" title={checker}>{checker.slice(0, 2)}</div> : ""}
                                                     </TableCell>
                                                 );
                                             })}

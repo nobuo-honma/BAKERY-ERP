@@ -10,7 +10,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CheckCircle2, XCircle, MinusCircle, Save, Loader2, CalendarDays, Printer, ArrowLeft, Sparkles, Lock } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-// ★共通ヘッダー部品をインポート
 import HaccpPrintHeader from "@/components/HaccpPrintHeader";
 
 // YO-21 の項目定義 (全8項目)
@@ -36,8 +35,28 @@ type AreaCleaningCheckRow = {
 
 type MonthlyDataMap = Record<string, AreaCleaningCheckRow>;
 
+// タイムゾーンによる日付のズレを完全に防ぎ、ローカル時間(JST)で日付文字列を生成・正規化する
+function normalizeDateStr(val?: string | null) {
+    if (!val) return "";
+    const d = new Date(val);
+    if (Number.isNaN(d.getTime())) {
+        const match = val.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (match) return `${match[1]}-${match[2]}-${match[3]}`;
+        return "";
+    }
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+}
+
+// 日本時間の今日の日付を正しく生成する関数
 function getTodayString() {
-    return new Date().toISOString().split('T')[0];
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
 }
 
 export default function AreaCleaningChecksPage() {
@@ -58,7 +77,8 @@ export default function AreaCleaningChecksPage() {
 
     const fetchDailyData = useCallback(async (dateStr: string) => {
         setLoading(true);
-        const { data } = await supabase.from('area_cleaning_checks').select('*').eq('check_date', dateStr).maybeSingle();
+        const targetDate = normalizeDateStr(dateStr);
+        const { data } = await supabase.from('area_cleaning_checks').select('*').eq('check_date', targetDate).maybeSingle();
         const row = data as AreaCleaningCheckRow | null;
         if (row) {
             setResults(row.results || {});
@@ -76,13 +96,19 @@ export default function AreaCleaningChecksPage() {
         setLoading(true);
         const y = dateObj.getFullYear(); const m = String(dateObj.getMonth() + 1).padStart(2, '0');
         const startDate = `${y}-${m}-01`;
-        const endDate = new Date(y, dateObj.getMonth() + 1, 0).toISOString().split('T')[0];
+
+        // 時差(ISO)の影響を排除した、ローカル日付での安全な末日の算出
+        const lastDayVal = new Date(y, dateObj.getMonth() + 1, 0).getDate();
+        const endDate = `${y}-${m}-${String(lastDayVal).padStart(2, '0')}`;
 
         const { data } = await supabase.from('area_cleaning_checks').select('*').gte('check_date', startDate).lte('check_date', endDate);
         const rows = (data as AreaCleaningCheckRow[] | null) ?? [];
         const dataMap: MonthlyDataMap = {};
         rows.forEach((row) => {
-            dataMap[row.check_date] = row;
+            const key = normalizeDateStr(row.check_date);
+            if (key) {
+                dataMap[key] = row;
+            }
         });
         setMonthlyData(dataMap);
         setLoading(false);
@@ -122,7 +148,8 @@ export default function AreaCleaningChecksPage() {
     const handleSaveDaily = async () => {
         if (!checkDate) return;
         setIsSaving(true);
-        const payload = { check_date: checkDate, results: results, checker_name: checkerName, notes: notes, updated_at: new Date().toISOString() };
+        const targetDate = normalizeDateStr(checkDate);
+        const payload = { check_date: targetDate, results: results, checker_name: checkerName, notes: notes, updated_at: new Date().toISOString() };
         const { error } = await supabase.from('area_cleaning_checks').upsert(payload, { onConflict: 'check_date' });
         setIsSaving(false);
         if (error) alert("保存に失敗しました: " + error.message);
@@ -133,7 +160,6 @@ export default function AreaCleaningChecksPage() {
     // 印刷（PDF帳票）ビュー
     // =======================================================================
     if (viewMode === 'print') {
-        // ★ 変数 y と m をここで定義しているので、このブロック内なら使えます
         const y = calendarMonth.getFullYear();
         const m = calendarMonth.getMonth() + 1;
         const daysInMonth = new Date(y, m, 0).getDate();
@@ -164,7 +190,6 @@ export default function AreaCleaningChecksPage() {
 
                 <div className="w-[297mm] h-[210mm] bg-white pt-8 pb-4 px-12 print:p-0 shadow-xl print:shadow-none text-black font-sans box-border flex flex-col justify-start gap-8">
 
-                    {/* ★共通ヘッダーを使用 */}
                     <HaccpPrintHeader
                         title="清掃チェック表"
                         subtitle={<>令和 {y - 2018} <span className="font-normal text-sm">年</span> {m} <span className="font-normal text-sm">月</span></>}
