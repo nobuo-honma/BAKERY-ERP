@@ -1072,6 +1072,124 @@ export default function ArrivalsPage() {
                         })}
                     </div>
                 </div>
+
+            {/* カレンダービュー用：入荷詳細ダイアログ ＋ HACCPチェック */}
+            <Dialog open={!!editingArrival} onOpenChange={(open) => !open && setEditingArrival(null)}>
+                <DialogContent className="max-w-md bg-white">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-slate-800">
+                            {showHaccpCheck ? <ClipboardCheck className="w-5 h-5 text-indigo-600" /> : <PackageCheck className="w-5 h-5 text-blue-600" />}
+                            {showHaccpCheck ? "HACCP 受入状態チェック" : "入荷予定の詳細 / 処理"}
+                        </DialogTitle>
+                    </DialogHeader>
+
+                    {/* 入荷詳細画面 */}
+                    {editingArrival && !showHaccpCheck && (
+                        <div className="space-y-4 mt-2">
+                            <div className="bg-slate-50 p-3 rounded border text-sm">
+                                <div className="text-slate-500 text-xs mb-1">発注日: {formatDateJP(editingArrival.order_date)}</div>
+                                <div className="font-bold text-lg text-blue-900 leading-tight">{editingArrival.items?.name}</div>
+                                <div className="text-slate-500 text-xs mt-1">{editingArrival.items?.item_type === "raw_material" ? "原材料" : "資材"}</div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-500 mb-1">入荷予定日</label>
+                                    <Input type="date" value={editExpectedDate} onChange={(e) => setEditExpectedDate(e.target.value)} disabled={editingArrival.status === "arrived" || !canEdit} className="h-10 md:h-9" />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-500 mb-1">数量 ({editingArrival.unit})</label>
+                                    <Input type="number" value={editQuantity} onChange={(e) => setEditQuantity(e.target.value === "" ? "" : Number(e.target.value))} disabled={editingArrival.status === "arrived" || !canEdit} className="h-10 md:h-9 text-right font-bold text-lg text-blue-700" />
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1">備考</label>
+                                <Input value={editNotes} onChange={(e) => setEditNotes(e.target.value)} disabled={editingArrival.status === "arrived" || !canEdit} className="h-10 md:h-9" placeholder="備考を入力..." />
+                            </div>
+
+                            {canEdit && (
+                                <div className="pt-4 border-t flex flex-col gap-3">
+                                    {editingArrival.status === "pending" && (
+                                        <div className="flex gap-2">
+                                            <Button onClick={handleUpdateArrival} disabled={isProcessing} className="flex-1 bg-slate-800 text-white h-10 md:h-9"><Edit className="h-4 w-4 mr-2" />内容更新</Button>
+                                            <Button onClick={handleDeleteArrival} disabled={isProcessing} variant="outline" className="text-red-600 h-10 md:h-9"><Trash2 className="h-4 w-4" /></Button>
+                                        </div>
+                                    )}
+
+                                    {editingArrival.status === "pending" && (
+                                        <Button onClick={handleProceedToHaccpCheck} disabled={isProcessing} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold h-12 shadow-sm text-base">
+                                            <ArrowDownToLine className="h-5 w-5 mr-2" />入荷済にする (受入チェックへ)
+                                        </Button>
+                                    )}
+                                </div>
+                            )}
+
+                            {editingArrival.status === "arrived" && (
+                                <div className="text-center text-sm font-bold text-green-700 bg-green-50 py-3 rounded-md border border-green-200">
+                                    このデータは入荷済のため、在庫へ加算されています。
+                                </div>
+                            )}
+
+                            {!canEdit && editingArrival.status !== "arrived" && (
+                                <div className="text-center text-sm font-bold text-slate-500 bg-slate-50 py-3 rounded-md">
+                                    <Lock className="w-4 h-4 inline mr-1" /> 閲覧モードのため処理はできません
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* HACCP 受入チェック画面 */}
+                    {editingArrival && showHaccpCheck && (
+                        <div className="space-y-4 mt-2">
+                            <div className="bg-indigo-50 p-3 rounded-lg border border-indigo-100 text-sm">
+                                <div className="font-bold text-indigo-900 leading-tight flex items-center gap-2"><PackageCheck className="w-4 h-4" /> {editingArrival.items?.name}</div>
+                                <div className="text-indigo-700 text-xs mt-1 font-bold">入荷数: {editingArrival.quantity} {editingArrival.unit}</div>
+                            </div>
+
+                            <p className="text-xs text-slate-500 font-bold">※入力した情報は自動的に HACCP原材料受入台帳 (YO-14) に記録されます。</p>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-600 mb-1">賞味期限 (任意)</label>
+                                    <Input type="date" value={haccpData.expiry} onChange={e => setHaccpData({ ...haccpData, expiry: e.target.value })} className="bg-white h-10" />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-600 mb-1">Lot番号 (任意)</label>
+                                    <Input value={haccpData.lot} onChange={e => setHaccpData({ ...haccpData, lot: e.target.value })} className="bg-white h-10" placeholder="ロット記号..." />
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4 pt-2">
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-600 mb-2">外観 (状態)</label>
+                                    <div className="flex bg-slate-100 rounded-lg p-1 h-12 shadow-inner">
+                                        <button onClick={() => setHaccpData({ ...haccpData, appearance: 'ok' })} className={`flex-1 text-sm font-bold rounded-md transition-colors ${haccpData.appearance === 'ok' ? 'bg-emerald-500 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-200'}`}>良</button>
+                                        <button onClick={() => setHaccpData({ ...haccpData, appearance: 'ng' })} className={`flex-1 text-sm font-bold rounded-md transition-colors ${haccpData.appearance === 'ng' ? 'bg-red-500 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-200'}`}>不良</button>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-600 mb-2">臭い</label>
+                                    <div className="flex bg-slate-100 rounded-lg p-1 h-12 shadow-inner">
+                                        <button onClick={() => setHaccpData({ ...haccpData, smell: 'ok' })} className={`flex-1 text-sm font-bold rounded-md transition-colors ${haccpData.smell === 'ok' ? 'bg-emerald-500 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-200'}`}>良</button>
+                                        <button onClick={() => setHaccpData({ ...haccpData, smell: 'ng' })} className={`flex-1 text-sm font-bold rounded-md transition-colors ${haccpData.smell === 'ng' ? 'bg-red-500 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-200'}`}>不良</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="pt-4 border-t flex gap-2">
+                                <Button variant="outline" onClick={() => setShowHaccpCheck(false)} disabled={isProcessing} className="flex-1 font-bold h-12">
+                                    <ArrowLeft className="w-4 h-4 mr-2" /> 戻る
+                                </Button>
+                                <Button onClick={handleCompleteArrival} disabled={isProcessing} className="flex-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold h-12 shadow-md">
+                                    {isProcessing ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : <CheckCircle2 className="w-5 h-5 mr-2" />}
+                                    確定して在庫加算
+                                </Button>
+                            </div>
+                        </div>
+                    )}
+                </DialogContent>
+            </Dialog>
             </div>
         );
     }
