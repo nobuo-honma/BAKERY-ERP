@@ -1027,8 +1027,8 @@ export default function InventoryPage() {
                       <td className="border border-slate-300 px-2 font-medium">
                         {item.name}{item.expiry && <span className="text-[10px] font-normal ml-2 text-gray-500">(期限: {item.expiry})</span>}
                       </td>
-                      <td className="border-slate-300 px-2 text-right font-mono font-medium">{item.qty}</td>
-                      <td className="border-slate-400 px-2 bg-slate-50/30"></td>
+                      <td className="border border-slate-300 px-2 text-right font-mono font-medium">{item.qty}</td>
+                      <td className="border border-slate-400 px-2 bg-slate-50/30"></td>
                     </tr>
                   ))}
                   {Array.from({ length: Math.max(0, 35 - chunk.length) }).map((_, idx) => (
@@ -1550,7 +1550,7 @@ export default function InventoryPage() {
 
             <div className="overflow-x-auto border border-slate-200 rounded-lg">
               {/* 日付列数が多いためテーブル全体の最小幅(min-w)を w-20 * 30列 = 2400px に適した2450pxへ拡大 */}
-              <Table className="text-[11px] min-w-[2450px] table-fixed w-full border-collapse">
+              <Table className="text-[11px] min-w-612.5 table-fixed w-full border-collapse">
                 <TableHeader className="bg-slate-50 border-b border-slate-200">
                   <TableRow>
                     <TableHead className="w-44 font-bold pl-3 text-slate-600">品目名</TableHead>
