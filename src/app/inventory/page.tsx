@@ -948,49 +948,78 @@ export default function InventoryPage() {
     </>
   );
 
-  // 実地棚卸票 PDF (在庫一覧)
+  // 実地棚卸票 PDF (在庫一覧) - 資材・原材料・製品を区分別セクションで表示
   if (viewMode === 'print') {
     const todayStr = new Date().toLocaleDateString('ja-JP');
-    const printItems = [
-      ...rawMaterials.map(i => ({
+
+    // --- 区分別データ準備 ---
+    type PrintSection = {
+      sectionLabel: string;
+      bgColor: string;
+      items: { id: string; name: string; qty: string; expiry?: string }[];
+    };
+
+    const materialSection: PrintSection = {
+      sectionLabel: '■ 資材',
+      bgColor: 'bg-teal-50',
+      items: materials.map(i => ({
         id: i.id,
-        category: ' 原材料 ',
-        name: i.name,
-        qty: `${formatQty(i.current_qty, 'raw_material')} ${i.unit}`,
-        rawQty: i.current_qty,
-        expiry: undefined
-      })),
-      ...materials.map(i => ({
-        id: i.id,
-        category: ' 資材 ',
         name: i.name,
         qty: `${formatQty(i.current_qty, 'material')} ${i.unit}`,
-        rawQty: i.current_qty,
-        expiry: undefined
       })),
-      ...productStocks.map(p => {
+    };
+
+    const rawMaterialSection: PrintSection = {
+      sectionLabel: '■ 原材料',
+      bgColor: 'bg-amber-50',
+      items: rawMaterials.map(i => ({
+        id: i.id,
+        name: i.name,
+        qty: `${formatQty(i.current_qty, 'raw_material')} ${i.unit}`,
+      })),
+    };
+
+    const productSection: PrintSection = {
+      sectionLabel: '■ 製品（Lot 別）',
+      bgColor: 'bg-blue-50',
+      items: productStocks.map(p => {
         const u = p.products.unit_per_cs || 24;
         const cs = Math.floor(p.total_pieces / u);
         const pc = Math.round(p.total_pieces % u);
         return {
           id: p.lot_code,
-          category: '製品 (Lot 別)',
           name: `${p.products.name} (${p.products.variant_name})`,
           qty: `${cs.toLocaleString()} c/s${pc > 0 ? ` ${pc.toLocaleString()} p` : ''}`,
-          rawQty: p.total_pieces,
-          expiry: new Date(p.expiry_date).toLocaleDateString('ja-JP')
+          expiry: new Date(p.expiry_date).toLocaleDateString('ja-JP'),
         };
-      })
-    ];
+      }),
+    };
 
-    const chunkedItems = [];
-    for (let i = 0; i < printItems.length; i += 35) {
-      chunkedItems.push(printItems.slice(i, i + 35));
+    const sections = [materialSection, rawMaterialSection, productSection];
+
+    // --- 全行をフラット化（セクションヘッダー行 + アイテム行）---
+    type FlatRow =
+      | { type: 'header'; label: string; bgColor: string }
+      | { type: 'item'; id: string; name: string; qty: string; expiry?: string };
+
+    const flatRows: FlatRow[] = [];
+    for (const sec of sections) {
+      flatRows.push({ type: 'header', label: sec.sectionLabel, bgColor: sec.bgColor });
+      for (const it of sec.items) {
+        flatRows.push({ type: 'item', id: it.id, name: it.name, qty: it.qty, expiry: it.expiry });
+      }
     }
+
+    const ROWS_PER_PAGE = 38;
+    const chunkedRows: FlatRow[][] = [];
+    for (let i = 0; i < flatRows.length; i += ROWS_PER_PAGE) {
+      chunkedRows.push(flatRows.slice(i, i + ROWS_PER_PAGE));
+    }
+    if (chunkedRows.length === 0) chunkedRows.push([]);
 
     return (
       <div className="bg-slate-200 min-h-screen py-8 print:p-0 print:bg-white flex flex-col items-center">
-        <style dangerouslySetInnerHTML={{ __html: `@media print { header, nav { display: none !important; } main { padding: 0 !important; margin: 0 !important; max-width: 100% !important; background: white !important; } @page { size: A4 portrait; margin: 10mm; } body { background-color: white !important; color: black !important; } .print-hide { display: none !important; } .page-break { page-break-after: always; } }` }} />
+        <style dangerouslySetInnerHTML={{ __html: `@media print { header, nav { display: none !important; } main { padding: 0 !important; margin: 0 !important; max-width: 100% !important; background: white !important; } @page { size: A4 portrait; margin: 10mm; } body { background-color: white !important; color: black !important; } .print-hide { display: none !important; } .page-break { page-break-after: always; } .section-header-row { background-color: #e2e8f0 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; } .section-header-material { background-color: #ccfbf1 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; } .section-header-raw { background-color: #fef3c7 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; } .section-header-product { background-color: #dbeafe !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; } }` }} />
         <div className="w-[210mm] print:w-full flex justify-between mb-4 print-hide">
           <Button variant="outline" onClick={() => setViewMode('list')} className="bg-white text-slate-700 font-bold border-slate-300">
             <ArrowLeft className="h-4 w-4 mr-2" /> 戻る
@@ -1000,55 +1029,71 @@ export default function InventoryPage() {
           </Button>
         </div>
 
-        {chunkedItems.length === 0 ? (
-          <div className="w-[210mm] bg-white p-8 text-center text-slate-500 font-bold shadow-xl">データがありません</div>
-        ) : (
-          chunkedItems.map((chunk, pageIdx) => (
-            <div key={pageIdx} className={`w-[210mm] min-h-[297mm] bg-white p-10 print:p-0 shadow-xl print:shadow-none text-black font-sans box-border flex flex-col ${pageIdx < chunkedItems.length - 1 ? 'page-break mb-8 print:mb-0' : ''}`}>
-              <div className="flex justify-between items-end mb-4 border-b-2 border-black pb-2">
-                <h1 className="text-xl font-bold tracking-widest">在庫一覧 兼 実地棚卸表</h1>
-                <div className="text-xs font-mono">作成日: {todayStr} ({pageIdx + 1} / {chunkedItems.length} ページ)</div>
-              </div>
-              <table className="w-full border-collapse border border-slate-800 text-xs flex-1">
-                <thead>
-                  <tr className="bg-slate-100">
-                    <th className="border border-slate-800 py-2 w-[18%] font-bold text-center">ID / Lot</th>
-                    <th className="border border-slate-800 py-2 w-[12%] font-bold text-center">区分</th>
-                    <th className="border border-slate-800 py-2 w-[35%] font-bold text-left px-2">品目名 / 製品名</th>
-                    <th className="border border-slate-800 py-2 w-[15%] font-bold text-right px-2">帳簿現在庫</th>
-                    <th className="border border-slate-800 py-2 w-[20%] font-bold text-center">実数記入欄</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {chunk.map((item, idx) => (
-                    <tr key={idx} className="h-7 text-[12px] hover:bg-slate-50/50">
-                      <td className="border border-slate-300 px-2 text-center font-mono">{item.id}</td>
-                      <td className="border border-slate-300 px-1 text-center text-[10px] text-slate-600">{item.category}</td>
-                      <td className="border border-slate-300 px-2 font-medium">
-                        {item.name}{item.expiry && <span className="text-[10px] font-normal ml-2 text-gray-500">(期限: {item.expiry})</span>}
-                      </td>
-                      <td className="border border-slate-300 px-2 text-right font-mono font-medium">{item.qty}</td>
-                      <td className="border border-slate-400 px-2 bg-slate-50/30"></td>
-                    </tr>
-                  ))}
-                  {Array.from({ length: Math.max(0, 35 - chunk.length) }).map((_, idx) => (
-                    <tr key={`empty-${idx}`} className="h-7 border-b border-slate-300">
-                      <td className="border-r border-slate-300"></td>
-                      <td className="border-r border-slate-300"></td>
-                      <td className="border-r border-slate-300"></td>
-                      <td className="border-r border-slate-300"></td>
-                      <td className="border-r border-slate-300"></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div className="mt-4 flex justify-end gap-6 text-xs">
-                <div className="border border-slate-800 w-44 h-16 flex flex-col"><div className="border-b border-slate-800 text-center py-0.5 bg-slate-100 font-bold">棚卸 担当者</div></div>
-                <div className="border border-slate-800 w-44 h-16 flex flex-col"><div className="border-b border-slate-800 text-center py-0.5 bg-slate-100 font-bold">システム入力 担当者</div></div>
-              </div>
+        {chunkedRows.map((chunk, pageIdx) => (
+          <div key={pageIdx} className={`w-[210mm] min-h-[297mm] bg-white p-10 print:p-0 shadow-xl print:shadow-none text-black font-sans box-border flex flex-col ${pageIdx < chunkedRows.length - 1 ? 'page-break mb-8 print:mb-0' : ''}`}>
+            <div className="flex justify-between items-end mb-4 border-b-2 border-black pb-2">
+              <h1 className="text-xl font-bold tracking-widest">在庫一覧 兼 実地棚卸表</h1>
+              <div className="text-xs font-mono">作成日: {todayStr} ({pageIdx + 1} / {chunkedRows.length} ページ)</div>
             </div>
-          ))
-        )}
+            <table className="w-full border-collapse border border-slate-800 text-xs flex-1">
+              <thead>
+                <tr className="bg-slate-100">
+                  <th className="border border-slate-800 py-2 w-[18%] font-bold text-center">ID / Lot</th>
+                  <th className="border border-slate-800 py-2 w-[37%] font-bold text-left px-2">品目名 / 製品名</th>
+                  <th className="border border-slate-800 py-2 w-[20%] font-bold text-right px-2">帳簿現在庫</th>
+                  <th className="border border-slate-800 py-2 w-[10%] font-bold text-center">賞味期限</th>
+                  <th className="border border-slate-800 py-2 w-[15%] font-bold text-center">実数記入欄</th>
+                </tr>
+              </thead>
+              <tbody>
+                {chunk.map((row, idx) => {
+                  if (row.type === 'header') {
+                    // セクションごとに色分け
+                    const isM = row.label.includes('資材');
+                    const isR = row.label.includes('原材料');
+                    const sectionClass = isM
+                      ? 'section-header-material'
+                      : isR
+                      ? 'section-header-raw'
+                      : 'section-header-product';
+                    return (
+                      <tr key={`h-${idx}`} className={`h-7 ${sectionClass}`}>
+                        <td colSpan={5} className="border border-slate-700 px-3 font-black text-sm tracking-wide">
+                          {row.label}
+                        </td>
+                      </tr>
+                    );
+                  }
+                  return (
+                    <tr key={`r-${idx}`} className="h-7 text-[11px]">
+                      <td className="border border-slate-300 px-2 text-center font-mono text-[10px] text-slate-600">{row.id}</td>
+                      <td className="border border-slate-300 px-2 font-medium">{row.name}</td>
+                      <td className="border border-slate-300 px-2 text-right font-mono font-medium">{row.qty}</td>
+                      <td className="border border-slate-300 px-1 text-center font-mono text-[10px] text-slate-500">
+                        {row.expiry ?? ''}
+                      </td>
+                      <td className="border border-slate-400 bg-slate-50/30"></td>
+                    </tr>
+                  );
+                })}
+                {/* 余白行 */}
+                {Array.from({ length: Math.max(0, ROWS_PER_PAGE - chunk.length) }).map((_, idx) => (
+                  <tr key={`empty-${idx}`} className="h-7">
+                    <td className="border border-slate-200"></td>
+                    <td className="border border-slate-200"></td>
+                    <td className="border border-slate-200"></td>
+                    <td className="border border-slate-200"></td>
+                    <td className="border border-slate-200"></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="mt-4 flex justify-end gap-6 text-xs">
+              <div className="border border-slate-800 w-44 h-16 flex flex-col"><div className="border-b border-slate-800 text-center py-0.5 bg-slate-100 font-bold">棚卸 担当者</div></div>
+              <div className="border border-slate-800 w-44 h-16 flex flex-col"><div className="border-b border-slate-800 text-center py-0.5 bg-slate-100 font-bold">システム入力 担当者</div></div>
+            </div>
+          </div>
+        ))}
       </div>
     );
   }
