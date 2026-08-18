@@ -406,12 +406,21 @@ export default function KeepSamplesPage() {
 
   const chunkedSamples = useMemo(() => {
     if (viewMode !== 'print') return [];
+    
+    // 選択された月 (YYYY-MM形式の文字列) を作成してフィルタリング
+    const targetYearMonth = `${printMonth.getFullYear()}-${String(printMonth.getMonth() + 1).padStart(2, '0')}`;
+    
+    const filtered = samples.filter(s => {
+      if (!s.production_date) return false;
+      return s.production_date.startsWith(targetYearMonth);
+    });
+
     const chunks = [];
-    for (let i = 0; i < samples.length; i += 4) {
-      chunks.push(samples.slice(i, i + 4));
+    for (let i = 0; i < filtered.length; i += 4) {
+      chunks.push(filtered.slice(i, i + 4));
     }
     return chunks;
-  }, [samples, viewMode]);
+  }, [samples, viewMode, printMonth]);
 
   // =======================================================================
   // ラベル印刷画面 (横20cm × 縦9cm, A4縦に3枚配置)
