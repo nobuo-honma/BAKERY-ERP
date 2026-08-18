@@ -32,6 +32,9 @@ import {
     ClipboardCheck,
     PackagePlus,
     Sparkles,
+    Trash,
+    Wrench,
+    AlertTriangle,
 } from "lucide-react";
 import {
     Table,
@@ -121,6 +124,14 @@ type RecommendedArrival = {
     safetyStock: number;
 };
 
+// 製造シミュレーター用の行定義
+type SimulatorRow = {
+    id: string;
+    productId: string;
+    qty: number | "";
+    basisType: "production_qty" | "planned_cs";
+};
+
 type Supplier = "hashiya" | "nexus";
 
 // ===== 発注書印刷用のマスタデータ =====
@@ -206,8 +217,13 @@ const isShippedStatus = (status?: string | null) => {
 export default function ArrivalsPage() {
     const { canEdit } = useAuth();
 
-    const [viewMode, setViewMode] = useState<"list" | "calendar" | "order_sheet">("list");
+    const [viewMode, setViewMode] = useState<"list" | "calendar" | "order_sheet" | "simulator">("list");
     const [loading, setLoading] = useState(true);
+
+    // 製造シミュレーター用の製造予定リスト (初期状態で1行空データを用意)
+    const [simulatorRows, setSimulatorRows] = useState<SimulatorRow[]>([
+        { id: "init-1", productId: "", qty: "", basisType: "production_qty" }
+    ]);
 
     const [items, setItems] = useState<Item[]>([]);
     const [arrivals, setArrivals] = useState<Arrival[]>([]);
@@ -545,6 +561,114 @@ export default function ArrivalsPage() {
         // 直近で欠品するリスクが高い品目からソート
         return list.sort((a, b) => a.shortageDate.localeCompare(b.shortageDate));
     }, [items, arrivals, orders, plans, boms, calculationSource]);
+
+    // 選択された製品 (BOMが登録されているユニークな製品名の一覧)
+    const availableProductIds = useMemo(() => {
+        const ids = boms.map(b => b.product_id);
+        return Array.from(new Set(ids));
+    }, [boms]);
+
+    // =======================================================================
+    // 製造予定シミュレータ計算ロジック
+    // =======================================================================
+    const simulatorResult = useMemo(() => {
+        const requiredMap: Record<string, number> = {};
+        items.forEach(item => {
+            requiredMap[item.id] = 0;
+        });
+
+        // 製造予定に基づいて各原材料・資材の必要総量を集計
+        simulatorRows.forEach(row => {
+            if (!row.productId || !row.qty || Number(row.qty) <= 0) return;
+            const productBoms = boms.filter(b => b.product_id === row.productId);
+
+            productBoms.forEach(bom => {
+                const req = bom.basis_type === "production_qty"
+                    ? Number(row.qty) * bom.usage_rate // kg基準
+                    : Number(row.qty) * bom.usage_rate; // cs基準 (BOM定義に依存)
+
+                if (requiredMap[bom.item_id] !== undefined) {
+                    requiredMap[bom.item_id] += req;
+                }
+            });
+        });
+
+        // 最終的な必要量と現在庫を照らし合わせて、過不足および不足分を算出
+        return items.map(item => {
+            const required = requiredMap[item.id] || 0;
+            const stockArr = Array.isArray(item.item_stocks)
+                ? item.item_stocks
+                : item.item_stocks
+                    ? [item.item_stocks]
+                    : [];
+            const stock = stockArr[0]?.quantity || 0;
+
+            const isMaterial = item.item_type === "material";
+            const roundedRequired = isMaterial ? Math.round(required) : Math.round(required * 100) / 100;
+            const roundedStock = isMaterial ? Math.round(stock) : Math.round(stock * 100) / 100;
+            const balance = roundedStock - roundedRequired;
+            const shortage = balance < 0 ? Math.abs(balance) : 0;
+
+            return {
+                itemId: item.id,
+                itemName: item.name,
+                itemType: item.item_type,
+                unit: item.unit,
+                stock: roundedStock,
+                required: roundedRequired,
+                balance: isMaterial ? Math.round(balance) : Math.round(balance * 100) / 100,
+                shortage: isMaterial ? Math.round(shortage) : Math.round(shortage * 100) / 100
+            };
+        }).filter(res => res.required > 0); // 今回の製造計画で必要が発生した品目のみに絞る
+    }, [items, boms, simulatorRows]);
+
+    // シミュレーター用の行操作関数
+    const addSimulatorRow = () => {
+        const newRow: SimulatorRow = {
+            id: Date.now().toString(),
+            productId: "",
+            qty: "",
+            basisType: "production_qty"
+        };
+        setSimulatorRows(prev => [...prev, newRow]);
+    };
+
+    const removeSimulatorRow = (id: string) => {
+        if (simulatorRows.length <= 1) {
+            setSimulatorRows([{ id: "init-1", productId: "", qty: "", basisType: "production_qty" }]);
+            return;
+        }
+        setSimulatorRows(prev => prev.filter(r => r.id !== id));
+    };
+
+    const updateSimulatorRow = (id: string, field: keyof SimulatorRow, value: any) => {
+        setSimulatorRows(prev => prev.map(row => {
+            if (row.id === id) {
+                const updated = { ...row, [field]: value };
+                // 製品選択時、BOMのbasis_typeを自動で判別してセット
+                if (field === "productId") {
+                    const firstBom = boms.find(b => b.product_id === value);
+                    if (firstBom) {
+                        updated.basisType = firstBom.basis_type;
+                    }
+                }
+                return updated;
+            }
+            return row;
+        }));
+    };
+
+    const fillArrivalFormForSimulatorShortage = (item: { itemId: string; itemName: string; itemType: string; shortage: number; unit: string }) => {
+        setNewItemId(item.itemId);
+        setNewQuantity(item.shortage);
+        setNewNotes(`シミュレーション不足補給 (必要量に対する不足)`);
+        setViewMode("list"); // 通常リスト画面に切り替え
+        
+        const formElement = document.getElementById("new-arrival-form");
+        if (formElement) {
+            formElement.scrollIntoView({ behavior: "smooth" });
+        }
+    };
 
     // フォームで選択中の品目の不足情報
     const selectedItemShortage = useMemo(() => {
@@ -1195,6 +1319,203 @@ export default function ArrivalsPage() {
     }
 
     // =======================================================================
+    // 製造予定シミュレーター画面（ビュー）
+    // =======================================================================
+    if (viewMode === "simulator") {
+        return (
+            <div className="bg-transparent pb-12">
+                <style dangerouslySetInnerHTML={{ __html: `
+                    @media print {
+                        header, nav, .print-hide { display: none !important; }
+                        main { padding: 0 !important; margin: 0 !important; max-width: 100% !important; background: white !important; }
+                        .print-full { grid-column: span 12 / span 12 !important; width: 100% !important; }
+                        .print-no-border { border: none !important; box-shadow: none !important; }
+                        .print-action-col { display: none !important; }
+                        body { background-color: white !important; color: black !important; }
+                        @page { size: portrait; margin: 15mm; }
+                    }
+                `}} />
+
+                {/* 印刷用ヘッダー（通常画面では非表示） */}
+                <div className="hidden print:block mb-6 border-b-2 border-black pb-2">
+                    <h1 className="text-2xl font-bold text-black">
+                        製造シミュレーション 在庫過不足一覧
+                    </h1>
+                    <div className="text-sm font-bold text-right mt-1">
+                        出力日時: {new Date().toLocaleString('ja-JP')}
+                    </div>
+                </div>
+
+                <div className="flex items-center justify-between gap-4 mb-6 print-hide">
+                    <h1 className="text-2xl font-bold flex items-center gap-2 text-slate-800">
+                        <Wrench className="h-6 w-6 text-purple-600" />
+                        製造シミュレーター (必要量 兼 在庫不足計算)
+                    </h1>
+                    <div className="flex items-center gap-2">
+                        <Button onClick={() => window.print()} className="gap-2 font-bold bg-blue-600 hover:bg-blue-700 text-white shadow-sm">
+                            <Printer className="h-4 w-4" /> 印刷する
+                        </Button>
+                        <Button variant="outline" onClick={() => setViewMode("list")} className="gap-2 font-bold border-slate-300 bg-white">
+                            <ArrowLeft className="h-4 w-4" /> 入力画面に戻る
+                        </Button>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                    {/* 左側：製造予定の入力フォーム (5カラム) */}
+                    <div className="lg:col-span-5 space-y-4 print-hide">
+                        <Card className="border-slate-200 shadow-sm">
+                            <CardHeader className="bg-purple-50/50 pb-4 border-b">
+                                <CardTitle className="text-base font-bold text-purple-900 flex items-center gap-2">
+                                    <Plus className="h-4 w-4 text-purple-600" /> 製造予定の入力
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent className="pt-6 space-y-4">
+                                <p className="text-xs text-slate-500 font-medium">シミュレーションしたい製品と、予定数量をその場で入力してください。必要となるBOM配合量が自動計算されます。</p>
+
+                                <div className="space-y-3">
+                                    {simulatorRows.map((row, idx) => (
+                                        <div key={row.id} className="flex items-start gap-2 bg-slate-50 p-3 rounded-lg border border-slate-200 relative group">
+                                            <div className="flex-1 space-y-2">
+                                                <div>
+                                                    <label className="block text-[10px] font-bold text-slate-500 mb-1">製品</label>
+                                                    <select
+                                                        value={row.productId}
+                                                        onChange={e => updateSimulatorRow(row.id, "productId", e.target.value)}
+                                                        className="w-full border rounded-md p-1.5 text-xs bg-white font-bold text-slate-800 focus:ring-1 focus:ring-purple-400"
+                                                    >
+                                                        <option value="">製品を選択...</option>
+                                                        {availableProductIds.map(id => (
+                                                            <option key={id} value={id}>{id}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    <div>
+                                                        <label className="block text-[10px] font-bold text-slate-500 mb-1">製造量</label>
+                                                        <Input
+                                                            type="number"
+                                                            min="0"
+                                                            placeholder="数量"
+                                                            value={row.qty}
+                                                            onChange={e => updateSimulatorRow(row.id, "qty", e.target.value === "" ? "" : Number(e.target.value))}
+                                                            className="h-8 text-xs font-bold text-right border-slate-300 bg-white"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-[10px] font-bold text-slate-500 mb-1">単位</label>
+                                                        <Badge variant="outline" className="h-8 w-full justify-center bg-white text-slate-600 border-slate-200 text-[10px]">
+                                                            {row.basisType === "production_qty" ? "kg (製造量)" : "ケース (完成数)"}
+                                                        </Badge>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            {/* 削除ボタン */}
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                onClick={() => removeSimulatorRow(row.id)}
+                                                className="h-8 w-8 text-slate-400 hover:text-red-600 self-center"
+                                            >
+                                                <Trash className="h-4 w-4" />
+                                            </Button>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                <Button
+                                    onClick={addSimulatorRow}
+                                    variant="outline"
+                                    className="w-full border-dashed border-2 border-purple-200 text-purple-700 bg-purple-50 hover:bg-purple-100 font-bold h-10 text-xs"
+                                >
+                                    <Plus className="w-4 h-4 mr-1.5" /> 別の製造予定を追加
+                                </Button>
+                            </CardContent>
+                        </Card>
+                    </div>
+
+                    {/* 右側：必要量と在庫過不足判定 (7カラム) */}
+                    <div className="lg:col-span-7 print-full">
+                        <Card className="border-slate-200 shadow-sm print-no-border">
+                            <CardHeader className="bg-slate-50 pb-4 border-b">
+                                <CardTitle className="text-base font-bold text-slate-800 flex items-center gap-2 print-hide">
+                                    <Sparkles className="h-4 w-4 text-purple-600 animate-pulse" /> 計算結果 (現在在庫との突き合わせ)
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent className="p-0">
+                                {simulatorResult.length === 0 ? (
+                                    <div className="p-16 text-center text-slate-400">
+                                        <Wrench className="h-12 w-12 text-slate-300 mx-auto mb-3 opacity-60" />
+                                        <p className="text-sm font-bold">左側に製造予定と数量を入力すると、<br />必要な資材・原材料の過不足状況がここに自動集計されます。</p>
+                                    </div>
+                                ) : (
+                                    <div className="overflow-x-auto">
+                                        <Table className="text-xs">
+                                            <TableHeader className="bg-slate-100">
+                                                <TableRow>
+                                                    <TableHead className="pl-4">品目名</TableHead>
+                                                    <TableHead className="text-right">総必要量</TableHead>
+                                                    <TableHead className="text-right bg-slate-50">現在在庫数</TableHead>
+                                                    <TableHead className="text-right">過不足</TableHead>
+                                                    <TableHead className="w-32 text-center print-action-col">補給アクション</TableHead>
+                                                </TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                                {simulatorResult.map(res => {
+                                                    const isShort = res.balance < 0;
+                                                    return (
+                                                        <TableRow key={res.itemId} className={`hover:bg-slate-50/50 ${isShort ? 'bg-red-50/20' : ''}`}>
+                                                            <TableCell className="pl-4">
+                                                                <div className="font-bold text-slate-800">{res.itemName}</div>
+                                                                <div className="text-[10px] text-slate-400 font-medium">
+                                                                    {res.itemType === "raw_material" ? "原材料" : "資材"} / ID: {res.itemId}
+                                                                </div>
+                                                            </TableCell>
+                                                            <TableCell className="text-right font-bold text-slate-700">
+                                                                {res.required} <span className="text-[10px] font-normal text-slate-400">{res.unit}</span>
+                                                            </TableCell>
+                                                            <TableCell className="text-right font-bold text-blue-700 bg-slate-50/30">
+                                                                {res.stock} <span className="text-[10px] font-normal text-slate-400">{res.unit}</span>
+                                                            </TableCell>
+                                                            <TableCell className={`text-right font-black ${isShort ? 'text-red-600 text-sm' : 'text-emerald-700'}`}>
+                                                                {isShort ? (
+                                                                    <span>不足 {res.shortage}</span>
+                                                                ) : (
+                                                                    <span>充足 +{res.balance}</span>
+                                                                )}
+                                                                <span className="text-[10px] font-normal text-slate-400 ml-0.5">{res.unit}</span>
+                                                            </TableCell>
+                                                            <TableCell className="text-center print-action-col">
+                                                                {isShort ? (
+                                                                    <Button
+                                                                        onClick={() => fillArrivalFormForSimulatorShortage(res)}
+                                                                        size="sm"
+                                                                        className="h-7 text-[10px] bg-red-600 hover:bg-red-700 text-white font-bold gap-1 shadow-none"
+                                                                    >
+                                                                        <PackagePlus className="w-3.5 h-3.5" /> 補給予定をセット
+                                                                    </Button>
+                                                                ) : (
+                                                                    <span className="text-[10px] text-emerald-600 font-bold bg-emerald-50 px-2 py-1 rounded-full border border-emerald-100">
+                                                                        在庫OK
+                                                                    </span>
+                                                                )}
+                                                            </TableCell>
+                                                        </TableRow>
+                                                    );
+                                                })}
+                                            </TableBody>
+                                        </Table>
+                                    </div>
+                                )}
+                            </CardContent>
+                        </Card>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    // =======================================================================
     // 通常のリスト入力画面
     // =======================================================================
     return (
@@ -1213,6 +1534,10 @@ export default function ArrivalsPage() {
                 </div>
 
                 <div className="flex flex-wrap gap-2 w-full xl:w-auto">
+                    {/* シミュレーター画面への遷移ボタンを配置 */}
+                    <Button onClick={() => setViewMode("simulator")} className="w-full sm:w-auto bg-purple-600 hover:bg-purple-700 text-white font-bold shadow-sm h-12 md:h-10">
+                        <Wrench className="h-4 w-4 mr-2" /> 製造シミュレーター
+                    </Button>
                     <Button onClick={() => window.open("https://tano.mu/item?page=1", "_blank", "noopener,noreferrer")} className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-sm h-12 md:h-10">
                         <ExternalLink className="h-4 w-4 mr-2" /> 大槻食材へ
                     </Button>
