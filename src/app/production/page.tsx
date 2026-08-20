@@ -107,7 +107,8 @@ export default function ProductionPage() {
     const y = calendarMonth.getFullYear(); const m = calendarMonth.getMonth() + 1;
     const currentMonthStr = `${y}-${String(m).padStart(2, '0')}`;
     const startDate = `${currentMonthStr}-01`;
-    const endDate = new Date(y, m, 0).toISOString().split('T')[0];
+    const lastDay = new Date(y, m, 0).getDate();
+    const endDate = `${currentMonthStr}-${String(lastDay).padStart(2, '0')}`;
 
     const { data: pData } = await supabase.from("production_plans").select("*, products(name, variant_name, unit_per_kg, unit_per_cs)").gte("production_date", startDate).lte("production_date", endDate).order("production_date", { ascending: true });
     if (pData) setCalendarPlans(pData as Plan[]);
