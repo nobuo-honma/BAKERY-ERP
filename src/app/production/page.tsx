@@ -505,7 +505,7 @@ export default function ProductionPage() {
                             {dayOrders.length > 0 && (
                               <div onClick={(e) => openOrdersModal(e, dateStr!)} className="bg-purple-100 border border-purple-300 rounded px-2 py-1 print:p-1 print:border-black text-xs font-bold text-purple-800 print:text-black flex items-center justify-between shadow-sm cursor-pointer hover:bg-purple-200 transition-colors">
                                 <span className="flex items-center gap-1"><Truck className="w-3.5 h-3.5" /> 出荷</span>
-                                <span className="text-[10px] bg-white px-1.5 rounded-sm">{dayOrders.length}件</span>
+                                <span className="text-[10px] bg-white px-1.5 rounded-sm">{new Set(dayOrders.map(o => o.customers?.name)).size}件</span>
                               </div>
                             )}
 
@@ -586,7 +586,7 @@ export default function ProductionPage() {
                       {dayOrders.length > 0 && (
                         <div onClick={(e) => openOrdersModal(e, dateStr!)} className="bg-purple-100 border border-purple-300 rounded px-3 py-2 text-sm font-bold text-purple-800 flex items-center justify-between shadow-sm cursor-pointer hover:bg-purple-200 transition-colors">
                           <span className="flex items-center gap-1.5"><Truck className="w-4 h-4" /> 出荷</span>
-                          <span className="text-xs bg-white px-2 py-0.5 rounded-sm">{dayOrders.length} 件の予定</span>
+                          <span className="text-xs bg-white px-2 py-0.5 rounded-sm">{new Set(dayOrders.map(o => o.customers?.name)).size} 件の予定</span>
                         </div>
                       )}
 
