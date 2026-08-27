@@ -130,6 +130,8 @@ type SimulatorRow = {
     productId: string;
     qty: number | "";
     basisType: "production_qty" | "planned_cs";
+    unitPerKg?: number; // 1kgあたり個数 (kg→CS変換に使用)
+    unitPerCs?: number; // 1CSあたり個数
 };
 
 type Supplier = "hashiya" | "nexus";
@@ -222,7 +224,7 @@ export default function ArrivalsPage() {
 
     // 製造シミュレーター用の製造予定リスト (初期状態で1行空データを用意)
     const [simulatorRows, setSimulatorRows] = useState<SimulatorRow[]>([
-        { id: "init-1", productId: "", qty: "", basisType: "production_qty" }
+        { id: "init-1", productId: "", qty: "", basisType: "production_qty", unitPerKg: 10, unitPerCs: 24 }
     ]);
 
     const [items, setItems] = useState<Item[]>([]);
@@ -340,9 +342,9 @@ export default function ArrivalsPage() {
                 const prod = ord.products;
                 const unitCs = prod?.unit_per_cs || 1;
                 const unitKg = prod?.unit_per_kg || 0;
-                const totalPcs = ord.quantity * unitCs;
+                const totalPcs = ord.quantity; // quantity は pieces（個数）単位
                 const productionKg = unitKg ? totalPcs / unitKg : 0;
-                const csCount = ord.quantity;
+                const csCount = totalPcs / unitCs; // pieces ÷ pieces/cs = CS数
 
                 const productBoms = boms.filter((b) => b.product_id === ord.product_id);
                 productBoms.forEach((bom) => {
@@ -477,9 +479,9 @@ export default function ArrivalsPage() {
                     const prod = ord.products;
                     const unitCs = prod?.unit_per_cs || 1;
                     const unitKg = prod?.unit_per_kg || 0;
-                    const totalPcs = ord.quantity * unitCs;
+                    const totalPcs = ord.quantity; // quantity は pieces（個数）単位
                     const productionKg = unitKg ? totalPcs / unitKg : 0;
-                    const csCount = ord.quantity;
+                    const csCount = totalPcs / unitCs; // pieces ÷ pieces/cs = CS数
 
                     const productBoms = boms.filter((b) => b.product_id === ord.product_id);
                     productBoms.forEach((bom) => {
@@ -581,11 +583,19 @@ export default function ArrivalsPage() {
         simulatorRows.forEach(row => {
             if (!row.productId || !row.qty || Number(row.qty) <= 0) return;
             const productBoms = boms.filter(b => b.product_id === row.productId);
+            const kgQty = Number(row.qty);
 
             productBoms.forEach(bom => {
-                const req = bom.basis_type === "production_qty"
-                    ? Number(row.qty) * bom.usage_rate // kg基準
-                    : Number(row.qty) * bom.usage_rate; // cs基準 (BOM定義に依存)
+                let req: number;
+                if (bom.basis_type === "production_qty") {
+                    // kg基準: 製造量(kg) × usage_rate
+                    req = kgQty * bom.usage_rate;
+                } else {
+                    // CS基準: 製造量(kg) → 完成個数 → CS数 に変換してから掛け算
+                    const totalPcs = kgQty * (row.unitPerKg || 10);
+                    const csCount = totalPcs / (row.unitPerCs || 24);
+                    req = csCount * bom.usage_rate;
+                }
 
                 if (requiredMap[bom.item_id] !== undefined) {
                     requiredMap[bom.item_id] += req;
@@ -628,14 +638,16 @@ export default function ArrivalsPage() {
             id: Date.now().toString(),
             productId: "",
             qty: "",
-            basisType: "production_qty"
+            basisType: "production_qty",
+            unitPerKg: 10,
+            unitPerCs: 24
         };
         setSimulatorRows(prev => [...prev, newRow]);
     };
 
     const removeSimulatorRow = (id: string) => {
         if (simulatorRows.length <= 1) {
-            setSimulatorRows([{ id: "init-1", productId: "", qty: "", basisType: "production_qty" }]);
+            setSimulatorRows([{ id: "init-1", productId: "", qty: "", basisType: "production_qty", unitPerKg: 10, unitPerCs: 24 }]);
             return;
         }
         setSimulatorRows(prev => prev.filter(r => r.id !== id));
@@ -645,11 +657,17 @@ export default function ArrivalsPage() {
         setSimulatorRows(prev => prev.map(row => {
             if (row.id === id) {
                 const updated = { ...row, [field]: value };
-                // 製品選択時、BOMのbasis_typeを自動で判別してセット
+                // 製品選択時、BOMのbasis_typeと製品の換算値を自動でセット
                 if (field === "productId") {
                     const firstBom = boms.find(b => b.product_id === value);
                     if (firstBom) {
                         updated.basisType = firstBom.basis_type;
+                    }
+                    // ordersからunit_per_kg / unit_per_csを取得してセット
+                    const matchingOrder = orders.find(o => o.product_id === value);
+                    if (matchingOrder?.products) {
+                        updated.unitPerKg = matchingOrder.products.unit_per_kg || 10;
+                        updated.unitPerCs = matchingOrder.products.unit_per_cs || 24;
                     }
                 }
                 return updated;
