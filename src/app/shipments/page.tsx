@@ -457,9 +457,20 @@ export default function ShipmentsPage() {
                         <td className="border border-black text-center font-bold text-[15px] leading-tight py-1">
                           {group ? formatDesiredDate(group.desiredShipDate) : ""}
                         </td>
-                        {/* ★ 出荷先のフォントサイズを text-[15px] に引き上げ拡大表示 */}
-                        <td className="border border-black px-2.5 font-black text-[25px] tracking-wide leading-tight truncate">
-                          {group ? group.customerName : ""}
+                        {/* ★ 出荷先のフォントサイズを文字数に応じて自動縮小表示 */}
+                        <td className="border border-black px-2.5 font-black tracking-wide leading-tight align-middle">
+                          <div style={{ containerType: "inline-size", width: "100%" }}>
+                            <div
+                              className="whitespace-nowrap overflow-hidden"
+                              style={{
+                                fontSize: (group && group.customerName)
+                                  ? `min(25px, 100cqi / ${group.customerName.length})`
+                                  : "25px"
+                              }}
+                            >
+                              {group ? group.customerName : ""}
+                            </div>
+                          </div>
                         </td>
                         <td className="border border-black"></td>
                         <td className="border border-black"></td>
