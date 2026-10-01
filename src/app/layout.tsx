@@ -4,6 +4,7 @@ import "./globals.css";
 import Header from "@/components/header";
 // ▼ 追加: 権限プロバイダーを読み込む
 import { AuthProvider } from "@/contexts/AuthContext";
+import { ChatAssistant } from "@/components/chat-assistant";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -27,6 +28,7 @@ export default function RootLayout({
             <main className="flex-1 p-4 md:p-8 max-w-7xl mx-auto w-full">
               {children}
             </main>
+            <ChatAssistant />
           </div>
         </AuthProvider>
       </body>

@@ -9,7 +9,11 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@ai-sdk/google": "^4.0.80",
+    "@ai-sdk/openai": "^4.0.74",
+    "@ai-sdk/react": "^4.0.116",
     "@supabase/supabase-js": "^2.100.1",
+    "ai": "^7.0.113",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.473.0",
