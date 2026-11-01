@@ -779,16 +779,54 @@ export default function InventoryPage() {
     return allData;
   }, [forecastResult.fData, forecastFilter, showOnlyScheduled, forecastResult.dates]);
 
+  const plannedUsageByItem = useMemo(() => {
+    const totals: Record<string, number> = {};
+    Object.values(forecastResult.fData).forEach(({ item, days }) => {
+      totals[item.id] = forecastResult.dates.reduce((sum, date) => sum + days[date].outQty, 0);
+    });
+    return totals;
+  }, [forecastResult]);
+
+  const getPlannedUsageStatus = (item: ItemStock, plannedQty: number, availableQty: number) => {
+    if (plannedQty <= 0) {
+      return { label: '予定なし', color: 'bg-slate-100 text-slate-600 border-none' };
+    }
+
+    const itemForecast = forecastResult.fData[item.id];
+    let projectedQty = availableQty;
+    let shortageQty = 0;
+    forecastResult.dates.forEach((date) => {
+      const day = itemForecast.days[date];
+      const rawProjectedQty = projectedQty + day.inQty - day.outQty;
+      projectedQty = item.item_type === 'raw_material' ? rawProjectedQty : Math.round(rawProjectedQty);
+      shortageQty = Math.max(shortageQty, -projectedQty);
+    });
+
+    if (shortageQty > 0) {
+      return {
+        label: `不足 ${formatQty(shortageQty, item.item_type)} ${item.unit}`,
+        color: 'bg-red-500 text-white border-none'
+      };
+    }
+
+    return { label: '充足', color: 'bg-green-100 text-green-800 border-none' };
+  };
+
   // 原材料・資材テーブル
   const renderItemTab = (itemList: ItemStock[]) => (
     <>
-      <div className="hidden md:block bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-        <Table className="min-w-250 w-full border-collapse">
+      <p className="mb-2 text-xs text-slate-500">
+        充足判定は、現在庫・入荷予定・製造予定を反映した30日間の在庫推移で行います。
+      </p>
+      <div className="hidden md:block bg-white border border-slate-200 rounded-xl overflow-x-auto shadow-sm">
+        <Table className="min-w-[1400px] w-full border-collapse">
           <TableHeader className="bg-slate-50/80 border-b border-slate-200">
             <TableRow>
               <TableHead className="w-24 pl-4 text-slate-600 font-bold">品目 ID</TableHead>
               <TableHead className="text-slate-600 font-bold">品目名</TableHead>
               <TableHead className="text-right w-32 text-slate-600 font-bold">現在庫</TableHead>
+              <TableHead className="text-right w-32 text-red-700 font-bold">30日使用予定</TableHead>
+              <TableHead className="text-center w-36 text-slate-600 font-bold">充足判定</TableHead>
               <TableHead className="text-center w-24 text-slate-600 font-bold">規格</TableHead>
               <TableHead className="text-right w-28 text-slate-600 font-bold">規格換算</TableHead>
               <TableHead className="text-right w-28 text-slate-600 font-bold">単価</TableHead>
@@ -804,6 +842,8 @@ export default function InventoryPage() {
               const displayQty = isBatchMode && batchInputs[item.id] !== undefined ? Number(batchInputs[item.id]) : item.current_qty;
               const specCount = displayQty / item.unit_size;
               const totalPrice = displayQty * item.unit_price;
+              const plannedQty = plannedUsageByItem[item.id] ?? 0;
+              const plannedStatus = getPlannedUsageStatus(item, plannedQty, displayQty);
 
               return (
                 <TableRow key={item.id} className={`${isChanged ? "bg-amber-50/70 hover:bg-amber-100/50" : "hover:bg-slate-50/70"} border-b border-slate-100 transition-colors`}>
@@ -829,6 +869,15 @@ export default function InventoryPage() {
                         <span className="text-xs font-normal text-slate-500 ml-1">{item.unit}</span>
                       </span>
                     )}
+                  </TableCell>
+                  <TableCell className="text-right font-mono font-bold text-red-700 bg-red-50/30">
+                    {formatQty(plannedQty, item.item_type)}
+                    <span className="text-xs font-normal text-slate-500 ml-1">{item.unit}</span>
+                  </TableCell>
+                  <TableCell className="text-center">
+                    <Badge className={`px-2 py-0.5 text-xs shadow-none border ${plannedStatus.color}`}>
+                      {plannedStatus.label}
+                    </Badge>
                   </TableCell>
                   <TableCell className="text-center text-slate-600 bg-slate-50/50 font-medium">
                     {item.unit_size}<span className="text-xs font-normal text-slate-400 ml-0.5">{item.unit}</span>
@@ -875,6 +924,8 @@ export default function InventoryPage() {
           const displayQty = isBatchMode && batchInputs[item.id] !== undefined ? Number(batchInputs[item.id]) : item.current_qty;
           const specCount = displayQty / item.unit_size;
           const totalPrice = displayQty * item.unit_price;
+          const plannedQty = plannedUsageByItem[item.id] ?? 0;
+          const plannedStatus = getPlannedUsageStatus(item, plannedQty, displayQty);
 
           return (
             <Card key={item.id} className={`p-4 shadow-sm border ${isChanged ? 'bg-amber-50/50 border-amber-300' : 'border-slate-200'}`}>
@@ -926,6 +977,19 @@ export default function InventoryPage() {
                   )}
                 </div>
               )}
+
+              <div className="flex items-center justify-between mt-3 rounded-lg border border-red-100 bg-red-50/50 px-3 py-2">
+                <div>
+                  <div className="text-[10px] text-slate-500 font-bold">30日使用予定</div>
+                  <div className="font-mono font-bold text-red-700">
+                    {formatQty(plannedQty, item.item_type)}
+                    <span className="text-xs font-normal text-slate-500 ml-1">{item.unit}</span>
+                  </div>
+                </div>
+                <Badge className={`px-2 py-0.5 text-xs shadow-none border ${plannedStatus.color}`}>
+                  {plannedStatus.label}
+                </Badge>
+              </div>
 
               <div className="grid grid-cols-2 gap-2 mt-3 pt-3 border-t border-slate-100 text-xs">
                 <div className="space-y-1 text-slate-500">
