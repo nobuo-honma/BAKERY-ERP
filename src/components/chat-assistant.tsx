@@ -14,8 +14,7 @@ export function ChatAssistant() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // useChatから利用可能な関数と状態を取得
-  const chatHelpers = useChat();
-  const { messages = [], status, error } = chatHelpers;
+  const { messages, status, error, sendMessage, clearError } = useChat();
   const isLoading = status === "streaming" || status === "submitted";
 
   // 最下部への自動スクロール処理
@@ -29,31 +28,21 @@ export function ChatAssistant() {
     }
   }, [messages, isLoading, isOpen]);
 
-  // チャット送信ハンドラー (複数のSDKバージョンに対応する安全な設計)
+  // チャット送信ハンドラー
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const textToSend = inputValue.trim();
     if (!textToSend || isLoading) return;
 
-    setInputValue(""); // 入力欄を即座にクリア
-
+    clearError();
     try {
-      // 1. sendMessage が関数として存在する場合 (最新仕様)
-      if (typeof chatHelpers.sendMessage === "function") {
-        await chatHelpers.sendMessage({ text: textToSend });
-      }
-      // 2. append が関数として存在する場合 (従来仕様)
-      else if (typeof (chatHelpers as any).append === "function") {
-        await (chatHelpers as any).append({
-          role: "user",
-          content: textToSend,
-        });
-      }
-    } catch (err) {
-      console.error("Failed to send message:", err);
+      setInputValue("");
+      await sendMessage({ text: textToSend });
+    } catch (error: unknown) {
+      console.error("AIメッセージの送信に失敗しました。", error);
+      setInputValue(textToSend);
     }
 
-    // 送信後も入力欄のフォーカスを維持
     inputRef.current?.focus();
   };
 
@@ -92,14 +81,10 @@ export function ChatAssistant() {
           </div>
         ) : (
           messages.map((m) => {
-            // content または parts 配列からの安全なテキスト抽出
-            const textContent =
-              (m as any).content ||
-              m.parts
-                ?.filter((p) => p.type === "text")
-                .map((p) => (p as { type: "text"; text: string }).text)
-                .join("") ||
-              "";
+            const textContent = m.parts
+              .filter((part) => part.type === "text")
+              .map((part) => part.text)
+              .join("");
 
             return (
               <div
@@ -130,10 +115,7 @@ export function ChatAssistant() {
 
         {error && (
           <div className="text-sm text-red-500 bg-red-50 rounded-xl p-3 border border-red-200">
-            ⚠️ エラー:{" "}
-            {error.message?.includes("credits")
-              ? "OpenAIのクレジット残高がありません。billing画面でチャージしてください。"
-              : error.message || "通信エラーが発生しました。"}
+            AI応答エラー: {error.message || "通信エラーが発生しました。"}
           </div>
         )}
 

@@ -3,26 +3,28 @@
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetTrigger } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 // ▼ 修正: Search アイコンのインポートを追加
-import { Menu, Home, ShoppingCart, Factory, Package, ArrowDownToLine, Truck, Database, BookOpen, FileText, Sun, Moon, Beaker, Key, LogOut, LogIn, ShieldCheck, ShieldAlert, LineChart, Search } from "lucide-react";
+import { Menu, Home, ShoppingCart, Factory, Package, ArrowDownToLine, Truck, Database, BookOpen, Sun, Moon, Beaker, Key, LogOut, LogIn, ShieldCheck, ShieldAlert, LineChart, Search } from "lucide-react";
 import Link from "next/link";
-import { useState, useEffect } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "next-themes";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 
+const subscribeToMount = () => () => {};
+const getClientMounted = () => true;
+const getServerMounted = () => false;
+
 export default function Header() {
-  const { role, isLoggedIn, login, logout } = useAuth();
+  const { isLoggedIn, login, logout } = useAuth();
   const [open, setOpen] = useState(false);
   const { theme, setTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
+  const mounted = useSyncExternalStore(subscribeToMount, getClientMounted, getServerMounted);
 
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
   const [passwordInput, setPasswordInput] = useState("");
   const [passwordError, setPasswordError] = useState("");
-
-  useEffect(() => setMounted(true), []);
 
   const menuItems = [
     { title: "ダッシュボード", href: "/", icon: Home },

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useSyncExternalStore } from "react";
 
 // ロール（権限）の定義
 type Role = "admin" | "viewer";
@@ -21,27 +21,32 @@ const AuthContext = createContext<AuthContextType>({
   canEdit: false
 });
 
+const AUTH_CHANGE_EVENT = "app-auth-change";
+
+const subscribeToAuth = (callback: () => void) => {
+  if (typeof window === "undefined") return () => {};
+  window.addEventListener("storage", callback);
+  window.addEventListener(AUTH_CHANGE_EVENT, callback);
+  return () => {
+    window.removeEventListener("storage", callback);
+    window.removeEventListener(AUTH_CHANGE_EVENT, callback);
+  };
+};
+
+const getAuthSnapshot = () => localStorage.getItem("app_logged_in") === "true";
+const getServerAuthSnapshot = () => false;
+
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
-  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
+  const isLoggedIn = useSyncExternalStore(subscribeToAuth, getAuthSnapshot, getServerAuthSnapshot);
 
-  // 画面を開いた時、前回ログインしたままかチェックする
-  useEffect(() => {
-    const saved = localStorage.getItem("app_logged_in");
-    if (saved === "true") {
-      setIsLoggedIn(true);
-    }
-  }, []);
-
-  // ログイン成功時の処理
   const login = () => {
-    setIsLoggedIn(true);
     localStorage.setItem("app_logged_in", "true");
+    window.dispatchEvent(new Event(AUTH_CHANGE_EVENT));
   };
 
-  // ログアウト時の処理
   const logout = () => {
-    setIsLoggedIn(false);
     localStorage.removeItem("app_logged_in");
+    window.dispatchEvent(new Event(AUTH_CHANGE_EVENT));
   };
 
   // ログインしていれば admin、していなければ viewer

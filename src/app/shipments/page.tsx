@@ -78,36 +78,6 @@ function formatDesiredDate(dateStr: string): string {
   return `${d.getMonth() + 1}月${d.getDate()}日`;
 }
 
-// 品目名やLot番号から「C3」などの短い実務用識別コードを抽出・マッピングするヘルパー
-function getShortProductCode(productName: string, lotCode: string): string {
-  const name = productName.toLowerCase();
-
-  if (name.includes("チョコチップ") || name.includes("チョコ")) return "C3";
-  if (name.includes("あすなろ")) return "A1";
-  if (name.includes("角食") || name.includes("食パン")) return "K1";
-  if (name.includes("菓子パン") || name.includes("p15")) return "P15";
-  if (name.includes("全卵") || name.includes("卵")) return "E1";
-  if (name.includes("オレンジ")) return "O1";
-  if (name.includes("黒豆") || name.includes("かのこ")) return "B1";
-  if (name.includes("キャラメル")) return "C2";
-  if (name.includes("フルーツ")) return "F1";
-  if (name.includes("アップル")) return "Ap";
-  if (name.includes("イースト")) return "Y1";
-  if (name.includes("ミルシア")) return "M1";
-
-  if (lotCode) {
-    const cleaned = lotCode.replace(/^\d+/, '').replace(/-\d+$/, '').trim();
-    if (cleaned.length > 0 && cleaned.length <= 4) {
-      return cleaned;
-    }
-    const alphaOnly = lotCode.replace(/[^a-zA-Z0-9]/g, '').replace(/^\d+/, '');
-    if (alphaOnly && alphaOnly.length <= 4) return alphaOnly;
-    return lotCode.slice(-3);
-  }
-
-  return "";
-}
-
 export default function ShipmentsPage() {
   const { canEdit } = useAuth();
   const [viewMode, setViewMode] = useState<'list' | 'print'>('list');

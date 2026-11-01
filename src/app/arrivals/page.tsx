@@ -34,7 +34,6 @@ import {
     Sparkles,
     Trash,
     Wrench,
-    AlertTriangle,
 } from "lucide-react";
 import {
     Table,
@@ -653,12 +652,12 @@ export default function ArrivalsPage() {
         setSimulatorRows(prev => prev.filter(r => r.id !== id));
     };
 
-    const updateSimulatorRow = (id: string, field: keyof SimulatorRow, value: any) => {
+    const updateSimulatorRow = <K extends keyof SimulatorRow>(id: string, field: K, value: SimulatorRow[K]) => {
         setSimulatorRows(prev => prev.map(row => {
             if (row.id === id) {
                 const updated = { ...row, [field]: value };
                 // 製品選択時、BOMのbasis_typeと製品の換算値を自動でセット
-                if (field === "productId") {
+                if (field === "productId" && typeof value === "string") {
                     const firstBom = boms.find(b => b.product_id === value);
                     if (firstBom) {
                         updated.basisType = firstBom.basis_type;
@@ -1393,7 +1392,7 @@ export default function ArrivalsPage() {
                                 <p className="text-xs text-slate-500 font-medium">シミュレーションしたい製品と、予定数量をその場で入力してください。必要となるBOM配合量が自動計算されます。</p>
 
                                 <div className="space-y-3">
-                                    {simulatorRows.map((row, idx) => (
+                                    {simulatorRows.map((row) => (
                                         <div key={row.id} className="flex items-start gap-2 bg-slate-50 p-3 rounded-lg border border-slate-200 relative group">
                                             <div className="flex-1 space-y-2">
                                                 <div>

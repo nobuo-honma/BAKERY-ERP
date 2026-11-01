@@ -95,7 +95,10 @@ export default function SensoryTestsPage() {
             .eq('production_date', dateStr);
 
         if (data) {
-            const lots = data.map((d: any) => {
+            const lots = data.map((d: {
+                lot_code: string;
+                products: { name: string | null; variant_name: string | null } | Array<{ name: string | null; variant_name: string | null }> | null;
+            }) => {
                 const prod = Array.isArray(d.products) ? d.products[0] : d.products;
                 return {
                     lot_code: d.lot_code,

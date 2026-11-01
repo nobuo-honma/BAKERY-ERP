@@ -1,68 +1,52 @@
-import { google } from '@ai-sdk/google';
-import { streamText } from 'ai';
+import { createGoogle } from '@ai-sdk/google';
+import { safeValidateUIMessages, convertToModelMessages, streamText } from 'ai';
 
 export const maxDuration = 30;
 
+const jsonResponse = (body: { error: string }, status: number) =>
+  Response.json(body, { status });
+
 export async function POST(req: Request) {
+  const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    console.error('GOOGLE_GENERATIVE_AI_API_KEY または GEMINI_API_KEY が設定されていません。');
+    return jsonResponse({ error: 'AI APIキーが設定されていません。.env.local を確認してください。' }, 503);
+  }
+
+  let body: unknown;
   try {
-    // 1. APIキーの確認
-    const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      console.error('【Error】GOOGLE_GENERATIVE_AI_API_KEY が設定されていません。');
-      return new Response(
-        JSON.stringify({ error: 'APIキーが設定されていません。.env.local を確認してください。' }),
-        { status: 500, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
+    body = await req.json();
+  } catch {
+    return jsonResponse({ error: 'リクエストのJSON形式が不正です。' }, 400);
+  }
 
-    const body = await req.json();
-    const rawMessages = Array.isArray(body.messages) ? body.messages : [];
+  if (typeof body !== 'object' || body === null || !('messages' in body) || !Array.isArray(body.messages)) {
+    return jsonResponse({ error: 'メッセージ形式が不正です。' }, 400);
+  }
 
-    // 2. メッセージデータの安全な抽出 (CoreMessage形式への手動マッピング)
-    const messages = rawMessages
-      .filter((m: any) => m.role === 'user' || m.role === 'assistant')
-      .map((m: any) => {
-        let content = '';
-        if (typeof m.content === 'string') {
-          content = m.content;
-        } else if (Array.isArray(m.parts)) {
-          content = m.parts
-            .filter((p: any) => p.type === 'text')
-            .map((p: any) => p.text ?? '')
-            .join('');
-        }
-        return {
-          role: m.role as 'user' | 'assistant',
-          content,
-        };
-      })
-      .filter((m: any) => m.content.trim().length > 0);
+  const validation = await safeValidateUIMessages({ messages: body.messages });
+  if (!validation.success) {
+    return jsonResponse({ error: 'メッセージ形式が不正です。' }, 400);
+  }
 
-    if (messages.length === 0) {
-      return new Response(
-        JSON.stringify({ error: '送信するメッセージ本文がありません。' }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
+  const messages = validation.data.filter((message) => message.role === 'user' || message.role === 'assistant');
+  if (messages.length === 0) {
+    return jsonResponse({ error: '送信するメッセージ本文がありません。' }, 400);
+  }
 
-    // 3. Gemini モデルの呼び出し (安定版モデル指定)
+  try {
     const result = streamText({
-      model: google('gemini-1.5-flash'),
-      system: 'あなたはベーカリーのERPシステムのアシスタントAIです。ユーザーの業務をサポートし、丁寧かつ簡潔に答えてください。',
-      messages,
+      model: createGoogle({ apiKey })('gemini-2.5-flash'),
+      system: 'あなたはベーカリーのERPシステムのアシスタントAIです。ユーザーの業務をサポートし、丁寧かつ簡潔に答えてください。システム内データを直接参照できない場合は、その旨を明示してください。',
+      messages: await convertToModelMessages(messages),
     });
 
-    // 4. ストリームレスポンスの返却
-    return result.toTextStreamResponse();
-
-  } catch (error: any) {
-    console.error('===== API ROUTE ERROR =====');
-    console.error(error);
-    console.error('===========================');
-
-    return new Response(
-      JSON.stringify({ error: error.message || 'Internal Server Error' }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
+    return result.toUIMessageStreamResponse();
+  } catch (error: unknown) {
+    console.error('AIチャットの応答生成に失敗しました。', error);
+    return jsonResponse(
+      { error: error instanceof Error ? error.message : 'AIの応答生成に失敗しました。' },
+      500
     );
   }
 }
