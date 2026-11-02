@@ -13,12 +13,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useAuth } from "@/contexts/AuthContext";
 
 type Order = { id: string; order_date: string; desired_ship_date: string; planned_ship_date: string; quantity: number; status: string; product_id: string; customer_order_no?: string; customers?: { name: string }; products?: { name: string; variant_name: string; unit_per_kg: number; unit_per_cs: number }; plannedPieces: number; remainPieces: number; };
-type Plan = { id: string; order_id: string; product_id: string; production_date: string; production_kg: number; planned_cs: number; planned_units: number; lot_code: string; expiry_date: string; status: string; notes?: string; products?: { name: string; variant_name: string; unit_per_cs?: number; unit_per_kg?: number }; actual_cs?: number; actual_piece?: number; };
+type Plan = { id: string; order_id: string | null; product_id: string; production_date: string; production_kg: number; planned_cs: number; planned_units: number; lot_code: string; expiry_date: string; status: string; notes?: string; products?: { name: string; variant_name: string; unit_per_cs?: number; unit_per_kg?: number }; actual_cs?: number; actual_piece?: number; production_plan_orders?: Array<{ order_id: string; planned_units: number }>; };
+type ProductionPlanOrder = { order_id: string; planned_units: number };
 type Event = { id: string; event_date: string; title: string; notes?: string; };
 type Product = { id: string; name: string; variant_name: string; unit_per_kg: number; unit_per_cs: number; };
-type OrderWithPlans = Order & {
-  production_plans?: Array<{ planned_units?: number; planned_cs?: number }>;
-};
+type OrderWithPlans = Omit<Order, "plannedPieces" | "remainPieces">;
 type CalendarNoteRow = { note_content: string };
 
 export default function ProductionPage() {
@@ -28,6 +27,8 @@ export default function ProductionPage() {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
+  const [multiOrderSelection, setMultiOrderSelection] = useState(false);
+  const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
 
   const [calendarMonth, setCalendarMonth] = useState(new Date());
   const [calendarPlans, setCalendarPlans] = useState<Plan[]>([]);
@@ -69,16 +70,32 @@ export default function ProductionPage() {
 
   const [monthlyNote, setMonthlyNote] = useState("");
   const [isSavingNote, setIsSavingNote] = useState(false);
+  const selectedOrders = orders.filter(order => selectedOrderIds.includes(order.id));
+  const selectedOrderRemainingPieces = selectedOrders.reduce((sum, order) => sum + order.remainPieces, 0);
 
   const fetchData = useCallback(async (preserveSelectedId?: string) => {
     setLoading(true);
-    const { data: oData } = await supabase.from("orders").select("*, customers(name), products(name, variant_name, unit_per_kg, unit_per_cs), production_plans(planned_cs, planned_units)").in("status", ["received", "in_production"]).order("planned_ship_date", { ascending: true });
-    const { data: pData } = await supabase.from("production_plans").select("*, products(name, variant_name, unit_per_kg, unit_per_cs)").order("production_date", { ascending: false }).limit(30);
-    const { data: prData } = await supabase.from("products").select("*");
+    const [{ data: oData, error: oError }, { data: linkData, error: linkError }, { data: pData, error: pError }, { data: prData, error: prError }] = await Promise.all([
+      supabase.from("orders").select("*, customers(name), products(name, variant_name, unit_per_kg, unit_per_cs)").in("status", ["received", "in_production"]).order("planned_ship_date", { ascending: true }),
+      supabase.from("production_plan_orders").select("order_id, planned_units"),
+      supabase.from("production_plans").select("*, products(name, variant_name, unit_per_kg, unit_per_cs), production_plan_orders(order_id, planned_units)").order("production_date", { ascending: false }).limit(30),
+      supabase.from("products").select("*")
+    ]);
+
+    const dataError = oError || linkError || pError || prError;
+    if (dataError) {
+      alert(`製造データの取得に失敗しました: ${dataError.message}\n複数受注製造を利用するには、supabase/migrations のSQLを適用してください。`);
+      setLoading(false);
+      return;
+    }
+
+    const plannedPiecesByOrder = new Map<string, number>();
+    (linkData as ProductionPlanOrder[] | null)?.forEach(link => {
+      plannedPiecesByOrder.set(link.order_id, (plannedPiecesByOrder.get(link.order_id) || 0) + Number(link.planned_units || 0));
+    });
 
     const processedOrders = (oData as OrderWithPlans[] | null)?.map(o => {
-      const unitPerCs = o.products?.unit_per_cs || 24;
-      const plannedPieces = o.production_plans ? o.production_plans.reduce((sum: number, p) => sum + (p.planned_units || ((p.planned_cs ?? 0) * unitPerCs)), 0) : 0;
+      const plannedPieces = plannedPiecesByOrder.get(o.id) || 0;
       const remainPieces = o.quantity - plannedPieces;
 
       return { ...o, plannedPieces, remainPieces };
@@ -110,7 +127,7 @@ export default function ProductionPage() {
     const lastDay = new Date(y, m, 0).getDate();
     const endDate = `${currentMonthStr}-${String(lastDay).padStart(2, '0')}`;
 
-    const { data: pData } = await supabase.from("production_plans").select("*, products(name, variant_name, unit_per_kg, unit_per_cs)").gte("production_date", startDate).lte("production_date", endDate).order("production_date", { ascending: true });
+    const { data: pData } = await supabase.from("production_plans").select("*, products(name, variant_name, unit_per_kg, unit_per_cs), production_plan_orders(order_id, planned_units)").gte("production_date", startDate).lte("production_date", endDate).order("production_date", { ascending: true });
     if (pData) setCalendarPlans(pData as Plan[]);
 
     const { data: oData } = await supabase.from("orders").select("*, customers(name), products(name, variant_name, unit_per_cs)").gte("planned_ship_date", startDate).lte("planned_ship_date", endDate).order("planned_ship_date", { ascending: true });
@@ -164,14 +181,53 @@ export default function ProductionPage() {
   }, [selectedOrder, planDate, planKg, isStockProduction, stockProductId, products, isLotEdited]);
 
   const handleSelectOrder = (order: Order) => {
+    setMultiOrderSelection(false);
+    setSelectedOrderIds([order.id]);
     setIsStockProduction(false); setStockProductId("");
     setSelectedOrder(order); setPlanDate(new Date().toISOString().split('T')[0]);
     const requiredKg = Math.ceil(order.remainPieces / order.products!.unit_per_kg);
     setPlanKg(requiredKg); setPlanNotes(""); setIsLotEdited(false); // ★リセット
   };
 
+  const handleToggleOrder = (order: Order) => {
+    const alreadySelected = selectedOrderIds.includes(order.id);
+    if (!alreadySelected && selectedOrders.length > 0 && selectedOrders[0].product_id !== order.product_id) {
+      alert("製品が異なる受注は同じ製造計画にまとめられません。");
+      return;
+    }
+
+    const nextIds = alreadySelected
+      ? selectedOrderIds.filter(id => id !== order.id)
+      : [...selectedOrderIds, order.id];
+    const nextOrders = orders.filter(item => nextIds.includes(item.id));
+    setSelectedOrderIds(nextIds);
+    setSelectedOrder(nextOrders[0] || null);
+    setIsStockProduction(false);
+    setStockProductId("");
+    setPlanDate(new Date().toISOString().split('T')[0]);
+    setPlanNotes("");
+    setIsLotEdited(false);
+    if (nextOrders.length > 0) {
+      const unitPerKg = nextOrders[0].products?.unit_per_kg || 10;
+      const remainingPieces = nextOrders.reduce((sum, item) => sum + item.remainPieces, 0);
+      setPlanKg(remainingPieces / unitPerKg);
+    } else {
+      setPlanKg("");
+    }
+  };
+
+  const handleToggleMultiOrderSelection = () => {
+    setMultiOrderSelection(enabled => !enabled);
+    setSelectedOrder(null);
+    setSelectedOrderIds([]);
+    setIsStockProduction(false);
+    setPlanKg("");
+    setPlanNotes("");
+    setIsLotEdited(false);
+  };
+
   const handleSelectStockProduction = () => {
-    setSelectedOrder(null); setIsStockProduction(true);
+    setSelectedOrder(null); setSelectedOrderIds([]); setMultiOrderSelection(false); setIsStockProduction(true);
     setPlanDate(new Date().toISOString().split('T')[0]);
     setPlanKg(""); setPlanNotes(""); setStockProductId(""); setIsLotEdited(false); // ★リセット
   };
@@ -188,29 +244,65 @@ export default function ProductionPage() {
     const targetProduct = isStockProduction ? products.find(p => p.id === stockProductId) : selectedOrder?.products;
 
     if (!pId || !targetProduct || !planDate || !planKg || !calculatedLot) return;
+    if (!isStockProduction && selectedOrders.length === 0) {
+      alert("製造対象の受注を選択してください。");
+      return;
+    }
     setIsProcessing(true);
 
-    const dateStr = planDate.replace(/-/g, "");
-    const random3 = Math.floor(Math.random() * 1000).toString().padStart(3, "0");
-    const newPlan = {
-      id: `PLN-${dateStr}-${random3}`, order_id: isStockProduction ? null : selectedOrder?.id, product_id: pId,
-      production_date: planDate, production_kg: planKg,
-      planned_units: (planKg as number) * targetProduct.unit_per_kg,
-      planned_cs: calculatedCs, lot_code: calculatedLot, expiry_date: calculatedExpiry, status: "planned", notes: planNotes
-    };
+    try {
+      const dateStr = planDate.replace(/-/g, "");
+      const random3 = Math.floor(Math.random() * 1000).toString().padStart(3, "0");
+      const plannedUnits = (planKg as number) * targetProduct.unit_per_kg;
+      const newPlan = {
+        id: `PLN-${dateStr}-${random3}`, order_id: isStockProduction ? null : selectedOrder?.id, product_id: pId,
+        production_date: planDate, production_kg: planKg,
+        planned_units: plannedUnits,
+        planned_cs: calculatedCs, lot_code: calculatedLot, expiry_date: calculatedExpiry, status: "planned", notes: planNotes
+      };
 
-    const { error } = await supabase.from("production_plans").insert(newPlan);
-    if (!error) {
-      if (!isStockProduction && selectedOrder?.status === 'received') {
-        await supabase.from("orders").update({ status: "in_production" }).eq("id", selectedOrder.id);
-        fetchData(selectedOrder.id);
-      } else {
-        alert(isStockProduction ? "在庫品としての製造計画を登録しました！" : "計画を登録しました！");
-        fetchData();
+      const { error } = await supabase.from("production_plans").insert(newPlan);
+      if (error) throw error;
+
+      if (!isStockProduction) {
+        const allocations = multiOrderSelection
+          ? selectedOrders.map(order => ({ production_plan_id: newPlan.id, order_id: order.id, planned_units: order.remainPieces }))
+          : [{ production_plan_id: newPlan.id, order_id: selectedOrders[0].id, planned_units: Math.min(plannedUnits, selectedOrders[0].remainPieces) }];
+        const { error: allocationError } = await supabase.from("production_plan_orders").insert(allocations);
+        if (allocationError) {
+          const { error: cleanupError } = await supabase.from("production_plans").delete().eq("id", newPlan.id);
+          if (cleanupError) {
+            throw new Error(`受注紐付けに失敗し、計画の取り消しにも失敗しました。計画ID: ${newPlan.id}。紐付けエラー: ${allocationError.message}。取消エラー: ${cleanupError.message}`);
+          }
+          throw allocationError;
+        }
+
+        const receivedOrderIds = selectedOrders.filter(order => order.status === "received").map(order => order.id);
+        if (receivedOrderIds.length > 0) {
+          const { error: statusError } = await supabase.from("orders").update({ status: "in_production" }).in("id", receivedOrderIds);
+          if (statusError) {
+            const { error: cleanupError } = await supabase.from("production_plans").delete().eq("id", newPlan.id);
+            if (cleanupError) {
+              throw new Error(`受注ステータス更新に失敗し、計画の取り消しにも失敗しました。計画ID: ${newPlan.id}。更新エラー: ${statusError.message}。取消エラー: ${cleanupError.message}`);
+            }
+            throw statusError;
+          }
+        }
+      }
+
+      alert(isStockProduction ? "在庫品としての製造計画を登録しました！" : `${selectedOrders.length}件の受注をまとめた製造計画を登録しました！`);
+      if (multiOrderSelection || isStockProduction) {
+        setSelectedOrder(null);
+        setSelectedOrderIds([]);
         if (isStockProduction) { setPlanKg(""); setPlanNotes(""); setIsLotEdited(false); }
       }
-    } else alert("エラー: " + error.message);
-    setIsProcessing(false);
+      fetchData(!multiOrderSelection && !isStockProduction ? selectedOrder?.id : undefined);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "不明なエラーが発生しました。";
+      alert("計画登録に失敗しました: " + message);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const openEditDialog = (e: React.MouseEvent, plan: Plan) => {
@@ -677,7 +769,11 @@ export default function ProductionPage() {
 
           <div className="flex flex-col lg:flex-row gap-6">
             <div className="w-full lg:w-[35%]">
-              <h2 className="font-bold text-slate-700 mb-3 flex items-center gap-2"><span className="bg-blue-100 text-blue-800 rounded-full w-6 h-6 flex items-center justify-center text-xs">1</span>未計画の残数がある受注</h2>
+              <div className="flex items-center justify-between gap-2 mb-3">
+                <h2 className="font-bold text-slate-700 flex items-center gap-2"><span className="bg-blue-100 text-blue-800 rounded-full w-6 h-6 flex items-center justify-center text-xs">1</span>未計画の残数がある受注</h2>
+                {canEdit && <Button variant={multiOrderSelection ? "default" : "outline"} size="sm" onClick={handleToggleMultiOrderSelection} className="shrink-0">{multiOrderSelection ? "複数選択を終了" : "複数受注を選択"}</Button>}
+              </div>
+              {multiOrderSelection && <p className="text-xs text-slate-500 mb-2">同じ製品の受注を選択してください。選択した未計画残数を合計して一つのLotで製造します。</p>}
               <div className="space-y-3 h-[calc(100vh-200px)] overflow-y-auto pr-2 pb-10">
                 {orders.map((order) => {
                   const unitPerCs = order.products?.unit_per_cs || 24;
@@ -685,10 +781,12 @@ export default function ProductionPage() {
                   const displayP = Math.floor((order.remainPieces % unitPerCs) / 2);
                   const totalCs = Math.floor(order.quantity / unitPerCs);
                   const totalP = Math.floor((order.quantity % unitPerCs) / 2);
+                  const isSelected = selectedOrderIds.includes(order.id);
+                  const isIncompatible = multiOrderSelection && selectedOrders.length > 0 && selectedOrders[0].product_id !== order.product_id;
 
                   return (
-                    <Card key={order.id} onClick={() => handleSelectOrder(order)} className={`cursor-pointer transition-all border-2 ${selectedOrder?.id === order.id ? "border-blue-500 bg-blue-50 shadow-md transform scale-[1.02]" : "border-slate-200 hover:border-blue-300"}`}>
-                      <CardHeader className="p-4 pb-2 bg-white rounded-t-lg"><div className="flex justify-between items-start"><div className="text-xs text-slate-500">{order.id}</div><Badge className="bg-slate-100 text-slate-800 border-none shadow-sm text-xs">出荷: {new Date(order.planned_ship_date || order.desired_ship_date).toLocaleDateString()}</Badge></div><CardTitle className="text-base text-slate-800 leading-tight mt-1">{order.customers?.name}</CardTitle></CardHeader>
+                    <Card key={order.id} onClick={() => multiOrderSelection ? handleToggleOrder(order) : handleSelectOrder(order)} className={`${isIncompatible ? "opacity-50 cursor-not-allowed" : "cursor-pointer"} transition-all border-2 ${isSelected ? "border-blue-500 bg-blue-50 shadow-md transform scale-[1.02]" : "border-slate-200 hover:border-blue-300"}`}>
+                      <CardHeader className="p-4 pb-2 bg-white rounded-t-lg"><div className="flex justify-between items-start"><div className="flex items-center gap-2 text-xs text-slate-500">{multiOrderSelection && <input type="checkbox" checked={isSelected} disabled={isIncompatible && !isSelected} onClick={e => e.stopPropagation()} onChange={() => handleToggleOrder(order)} aria-label={`${order.customers?.name || "受注"}を選択`} />}{order.id}</div><Badge className="bg-slate-100 text-slate-800 border-none shadow-sm text-xs">出荷: {new Date(order.planned_ship_date || order.desired_ship_date).toLocaleDateString()}</Badge></div><CardTitle className="text-base text-slate-800 leading-tight mt-1">{order.customers?.name}</CardTitle></CardHeader>
                       <CardContent className="p-4 pt-2 text-sm text-slate-600 bg-white rounded-b-lg">
                         <div className="font-bold text-slate-800 mb-2">{order.products?.name} ({order.products?.variant_name})</div>
                         <div className="flex items-center justify-between border-t pt-2">
@@ -727,10 +825,10 @@ export default function ProductionPage() {
                           <>
                             <div><div className="text-xs text-slate-500 mb-1">対象製品</div><div className="font-bold text-lg text-slate-800">{selectedOrder?.products?.name} ({selectedOrder?.products?.variant_name})</div></div>
                             <div className="md:text-right border-t md:border-none pt-2 md:pt-0 mt-2 md:mt-0">
-                              <div className="text-xs text-slate-500 mb-1">この受注の残数</div>
+                              <div className="text-xs text-slate-500 mb-1">{multiOrderSelection ? `選択した${selectedOrders.length}受注の合計残数` : "この受注の残数"}</div>
                               <div className="font-black text-2xl text-red-600">
-                                {Math.floor((selectedOrder?.remainPieces || 0) / (selectedOrder?.products?.unit_per_cs || 24))} <span className="text-sm font-normal text-slate-500">c/s</span>
-                                {Math.floor(((selectedOrder?.remainPieces || 0) % (selectedOrder?.products?.unit_per_cs || 24)) / 2) > 0 && <span className="ml-1 text-xl">{Math.floor(((selectedOrder?.remainPieces || 0) % (selectedOrder?.products?.unit_per_cs || 24)) / 2)} <span className="text-xs font-normal text-slate-500">p</span></span>}
+                                {Math.floor((multiOrderSelection ? selectedOrderRemainingPieces : selectedOrder?.remainPieces || 0) / (selectedOrder?.products?.unit_per_cs || 24))} <span className="text-sm font-normal text-slate-500">c/s</span>
+                                {Math.floor(((multiOrderSelection ? selectedOrderRemainingPieces : selectedOrder?.remainPieces || 0) % (selectedOrder?.products?.unit_per_cs || 24)) / 2) > 0 && <span className="ml-1 text-xl">{Math.floor(((multiOrderSelection ? selectedOrderRemainingPieces : selectedOrder?.remainPieces || 0) % (selectedOrder?.products?.unit_per_cs || 24)) / 2)} <span className="text-xs font-normal text-slate-500">p</span></span>}
                               </div>
                             </div>
                           </>
@@ -739,7 +837,7 @@ export default function ProductionPage() {
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                         <div className="space-y-4">
                           <div><label className="text-sm font-bold mb-2 text-slate-700 flex items-center gap-1"><CalendarIcon className="h-4 w-4" /> 製造予定日</label><Input type="date" value={planDate} onChange={e => setPlanDate(e.target.value)} className="text-lg bg-white h-12 border-blue-300 shadow-sm" /></div>
-                          <div><label className="block text-sm font-bold mb-2 text-slate-700">この日の製造量 (kg)</label><div className="flex items-center gap-3"><Input type="number" min="0" value={planKg} onChange={e => setPlanKg(e.target.value === "" ? "" : Number(e.target.value))} className="text-xl font-bold bg-white h-12 text-right border-blue-300 shadow-sm" /><span className="text-lg font-bold text-slate-500">kg</span></div><div className="text-xs text-slate-500 mt-2 text-right">自動計算 👉 <span className="font-bold text-blue-700 text-sm">{calculatedCs} c/s</span></div></div>
+                          <div><label className="block text-sm font-bold mb-2 text-slate-700">この日の製造量 (kg)</label><div className="flex items-center gap-3"><Input type="number" min="0" value={planKg} disabled={multiOrderSelection && selectedOrderIds.length > 0} onChange={e => setPlanKg(e.target.value === "" ? "" : Number(e.target.value))} className="text-xl font-bold bg-white h-12 text-right border-blue-300 shadow-sm" /><span className="text-lg font-bold text-slate-500">kg</span></div><div className="text-xs text-slate-500 mt-2 text-right">{multiOrderSelection ? "受注残数の合計から自動計算" : "自動計算"} 👉 <span className="font-bold text-blue-700 text-sm">{calculatedCs} c/s</span></div></div>
                         </div>
                         <div className="flex flex-col h-full"><label className="block text-sm font-bold mb-2 text-slate-700">備考 (任意)</label><textarea value={planNotes} onChange={e => setPlanNotes(e.target.value)} className="flex-1 w-full p-3 border rounded-md text-sm border-blue-300 shadow-sm min-h-25 resize-none" /></div>
                       </div>
@@ -794,7 +892,7 @@ export default function ProductionPage() {
                                 <div className="font-bold text-slate-700">{new Date(plan.production_date).toLocaleDateString()}</div>
                                 {!plan.order_id && <Badge className="bg-slate-100 text-slate-500 border-none shadow-none text-[10px] mt-1 py-0">見込み生産</Badge>}
                               </TableCell>
-                              <TableCell><div className="font-bold text-blue-600">{plan.lot_code}</div><div className="text-xs text-slate-600">{plan.products?.name}</div></TableCell>
+                              <TableCell><div className="font-bold text-blue-600">{plan.lot_code}</div><div className="text-xs text-slate-600">{plan.products?.name}</div>{(plan.production_plan_orders?.length || 0) > 1 && <div className="text-[10px] text-purple-700">受注 {plan.production_plan_orders?.length}件をまとめて製造</div>}</TableCell>
                               <TableCell className="text-right font-bold">
                                 {displayCs} c/s
                                 {/* ★修正: 完了時のみ p数を表示 */}
@@ -859,6 +957,7 @@ export default function ProductionPage() {
                   </div>
                   <div className="font-bold text-lg text-blue-900 leading-tight">{editingPlan.products?.name}</div>
                   <div className="text-slate-600 mt-1">{editingPlan.products?.variant_name}</div>
+                  {editingPlan.order_id && <div className="text-xs text-purple-700 mt-2">紐付け受注: {editingPlan.production_plan_orders?.length || 1}件</div>}
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
