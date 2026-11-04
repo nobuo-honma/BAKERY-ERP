@@ -243,7 +243,7 @@ export default function ProductionPage() {
     const pId = isStockProduction ? stockProductId : selectedOrder?.product_id;
     const targetProduct = isStockProduction ? products.find(p => p.id === stockProductId) : selectedOrder?.products;
 
-    if (!pId || !targetProduct || !planDate || !planKg || !calculatedLot) return;
+    if (!pId || !targetProduct || !planDate || !planKg || planKg <= 0 || !calculatedLot) return;
     if (!isStockProduction && selectedOrders.length === 0) {
       alert("製造対象の受注を選択してください。");
       return;
@@ -265,9 +265,14 @@ export default function ProductionPage() {
       if (error) throw error;
 
       if (!isStockProduction) {
-        const allocations = multiOrderSelection
-          ? selectedOrders.map(order => ({ production_plan_id: newPlan.id, order_id: order.id, planned_units: order.remainPieces }))
-          : [{ production_plan_id: newPlan.id, order_id: selectedOrders[0].id, planned_units: Math.min(plannedUnits, selectedOrders[0].remainPieces) }];
+        let remainingUnits = plannedUnits;
+        const allocations = selectedOrders.flatMap(order => {
+          const allocatedUnits = Math.min(remainingUnits, order.remainPieces);
+          remainingUnits -= allocatedUnits;
+          return allocatedUnits > 0
+            ? [{ production_plan_id: newPlan.id, order_id: order.id, planned_units: allocatedUnits }]
+            : [];
+        });
         const { error: allocationError } = await supabase.from("production_plan_orders").insert(allocations);
         if (allocationError) {
           const { error: cleanupError } = await supabase.from("production_plans").delete().eq("id", newPlan.id);
@@ -837,7 +842,7 @@ export default function ProductionPage() {
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                         <div className="space-y-4">
                           <div><label className="text-sm font-bold mb-2 text-slate-700 flex items-center gap-1"><CalendarIcon className="h-4 w-4" /> 製造予定日</label><Input type="date" value={planDate} onChange={e => setPlanDate(e.target.value)} className="text-lg bg-white h-12 border-blue-300 shadow-sm" /></div>
-                          <div><label className="block text-sm font-bold mb-2 text-slate-700">この日の製造量 (kg)</label><div className="flex items-center gap-3"><Input type="number" min="0" value={planKg} disabled={multiOrderSelection && selectedOrderIds.length > 0} onChange={e => setPlanKg(e.target.value === "" ? "" : Number(e.target.value))} className="text-xl font-bold bg-white h-12 text-right border-blue-300 shadow-sm" /><span className="text-lg font-bold text-slate-500">kg</span></div><div className="text-xs text-slate-500 mt-2 text-right">{multiOrderSelection ? "受注残数の合計から自動計算" : "自動計算"} 👉 <span className="font-bold text-blue-700 text-sm">{calculatedCs} c/s</span></div></div>
+                          <div><label className="block text-sm font-bold mb-2 text-slate-700">この日の製造量 (kg)</label><div className="flex items-center gap-3"><Input type="number" min="0" step="any" value={planKg} onChange={e => setPlanKg(e.target.value === "" ? "" : Number(e.target.value))} className="text-xl font-bold bg-white h-12 text-right border-blue-300 shadow-sm" /><span className="text-lg font-bold text-slate-500">kg</span></div><div className="text-xs text-slate-500 mt-2 text-right">{multiOrderSelection ? "選択受注の残数から算出（変更できます）" : "自動計算（変更できます）"} 👉 <span className="font-bold text-blue-700 text-sm">{calculatedCs} c/s</span></div></div>
                         </div>
                         <div className="flex flex-col h-full"><label className="block text-sm font-bold mb-2 text-slate-700">備考 (任意)</label><textarea value={planNotes} onChange={e => setPlanNotes(e.target.value)} className="flex-1 w-full p-3 border rounded-md text-sm border-blue-300 shadow-sm min-h-25 resize-none" /></div>
                       </div>
