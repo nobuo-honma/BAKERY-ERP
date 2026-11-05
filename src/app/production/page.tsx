@@ -351,6 +351,47 @@ export default function ProductionPage() {
     setIsProcessing(false);
   };
 
+  const handleUpdateCompletedLot = async () => {
+    if (!editingPlan || editingPlan.status !== "completed" || !canEdit) return;
+    const newLotCode = editLot.trim();
+    if (!newLotCode) {
+      alert("Lot番号を入力してください。");
+      return;
+    }
+    if (newLotCode === editingPlan.lot_code) return;
+
+    setIsProcessing(true);
+    try {
+      const { count, error: countError } = await supabase
+        .from("production_plans")
+        .select("id", { count: "exact", head: true })
+        .eq("product_id", editingPlan.product_id)
+        .eq("lot_code", editingPlan.lot_code)
+        .eq("status", "completed");
+      if (countError) throw countError;
+
+      const updateAll = (count ?? 0) > 1;
+      if (updateAll && !confirm(`同じ製品・Lot番号の完了済み製造計画が${count}件あります。\n関連する計画もすべて「${newLotCode}」に変更しますか？`)) return;
+
+      const { error } = await supabase.rpc("update_completed_production_lot", {
+        p_plan_id: editingPlan.id,
+        p_new_lot_code: newLotCode,
+        p_update_all: updateAll,
+      });
+      if (error) throw error;
+
+      setEditingPlan(null);
+      if (viewMode === "calendar") fetchCalendarPlans();
+      fetchData();
+      alert(updateAll ? "製造済み製品と関連する製造計画のLot番号を更新しました。" : "製造済み製品のLot番号と関連記録を更新しました。");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "不明なエラーが発生しました。";
+      alert("Lot番号の更新に失敗しました: " + message);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const handleDeletePlan = async () => {
     if (!editingPlan) return;
     let confirmMsg = "この製造計画を削除（キャンセル）しますか？";
@@ -956,7 +997,7 @@ export default function ProductionPage() {
                     <Input
                       value={editLot}
                       onChange={e => setEditLot(e.target.value)}
-                      disabled={editingPlan.status !== 'planned' || !canEdit}
+                      disabled={(editingPlan.status !== 'planned' && editingPlan.status !== 'completed') || !canEdit}
                       className="h-8 font-black text-blue-800 bg-white border-blue-200"
                     />
                   </div>
@@ -976,7 +1017,8 @@ export default function ProductionPage() {
                 {canEdit && (
                   <div className="pt-4 border-t flex flex-col gap-3">
                     <div className="flex gap-2">
-                      <Button onClick={handleUpdatePlan} disabled={isProcessing || editingPlan.status !== 'planned'} className="flex-1 bg-slate-800 hover:bg-slate-900 text-white h-10 md:h-9"><Edit className="h-4 w-4 mr-2" /> 内容更新</Button>
+                      {editingPlan.status !== 'completed' && <Button onClick={handleUpdatePlan} disabled={isProcessing || editingPlan.status !== 'planned'} className="flex-1 bg-slate-800 hover:bg-slate-900 text-white h-10 md:h-9"><Edit className="h-4 w-4 mr-2" /> 内容更新</Button>}
+                      {editingPlan.status === 'completed' && <Button onClick={handleUpdateCompletedLot} disabled={isProcessing || !editLot.trim() || editLot.trim() === editingPlan.lot_code} className="flex-1 bg-slate-800 hover:bg-slate-900 text-white h-10 md:h-9"><Edit className="h-4 w-4 mr-2" /> Lot番号を更新</Button>}
                       <Button onClick={handleDeletePlan} disabled={isProcessing} variant="outline" className="border-red-200 text-red-600 hover:bg-red-50 h-10 md:h-9"><Trash2 className="h-4 w-4 mr-2" /> {editingPlan.status === 'planned' ? '削除' : 'キャンセル'}</Button>
                     </div>
 

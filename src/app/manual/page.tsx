@@ -564,6 +564,9 @@ export default function ManualPage() {
                       サンプル差し引き後の製品数が、最終的な製品倉庫の利用可能在庫（`product_stocks`）に加算されます。
                     </NoteBox>
                   </Step>
+                  <NoteBox type="info">
+                    製造完了後にLot番号の誤りが分かった場合は、製造計画一覧の「確認」から番号を修正し、「Lot番号を更新」を押してください。在庫・キープサンプル・出荷履歴・検査記録も一括更新されます。同じ製品・Lot番号の完了済み計画が複数ある場合は、まとめて変更するか確認されます。
+                  </NoteBox>
 
                   <Accordion title="解説: 計画の削除と安全な自動復元（ロールバック）機構">
                     <div className="space-y-2">
