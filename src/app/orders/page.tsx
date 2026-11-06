@@ -101,7 +101,9 @@ export default function OrdersPage() {
           };
         }
         groups[gId].items.push(o);
-        if (o.status === 'in_production' || o.status === 'shipped') groups[gId].status = o.status;
+        if (o.status === 'shipped' || (o.status === 'in_production' && groups[gId].status !== 'shipped')) {
+          groups[gId].status = o.status;
+        }
       });
       setOrderGroups(Object.values(groups));
     }
@@ -236,6 +238,17 @@ export default function OrdersPage() {
       return;
     }
 
+    const existingIds = editingGroup?.items.map(item => item.id) || [];
+    const currentIds = validDetails.map(detail => detail.id).filter((id): id is string => Boolean(id));
+    const idsToDelete = existingIds.filter(id => !currentIds.includes(id));
+    const deletedItems = editingGroup?.items.filter(item => idsToDelete.includes(item.id)) || [];
+    if (deletedItems.some(item => item.status === 'shipped')) {
+      alert("出荷済みの製品は削除できません。");
+      return;
+    }
+    if (deletedItems.some(item => item.status === 'in_production') &&
+      !confirm("製造中の製品を受注から削除しますか？\n紐づく製造計画は継続し、製造済みの原料在庫も戻しません。")) return;
+
     setIsProcessing(true);
     try {
       const dateStr = formData.date.replace(/-/g, "");
@@ -258,44 +271,61 @@ export default function OrdersPage() {
           quantity: totalPcs,
           unit_price: Number(detail.unitPrice) || 0,
           remarks: detail.remarks || null,
-          status: "received"
+          status: editingGroup?.items.find(item => item.id === detail.id)?.status || "received"
         };
       });
 
-      if (editingGroup) {
-        const existingIds = editingGroup.items.map(item => item.id);
-        const currentIds = upserts.map(u => u.id);
-        const idsToDelete = existingIds.filter(id => !currentIds.includes(id));
-        if (idsToDelete.length > 0) {
-          await supabase.from("orders").delete().in("id", idsToDelete);
-        }
-      }
+      if (idsToDelete.length > 0) await deleteOrdersAndUnlinkPlans(idsToDelete);
 
-      await supabase.from("orders").upsert(upserts);
+      const { error } = await supabase.from("orders").upsert(upserts);
+      if (error) throw error;
       alert(editingGroup ? "受注データを更新しました！" : `新規受注を登録しました！(${upserts.length}件)`);
       setIsOpen(false);
-      fetchData();
+      await fetchData();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "不明なエラーが発生しました。";
       alert("エラー: " + message);
+    } finally {
+      setIsProcessing(false);
     }
-    setIsProcessing(false);
+  };
+
+  const deleteOrdersAndUnlinkPlans = async (orderIds: string[]) => {
+    const { error: unlinkError } = await supabase
+      .from("production_plans")
+      .update({ order_id: null })
+      .in("order_id", orderIds);
+    if (unlinkError) throw unlinkError;
+
+    const { error } = await supabase.from("orders").delete().in("id", orderIds);
+    if (error) throw error;
   };
 
   const handleDeleteOrder = async (group: OrderGroup) => {
-    if (group.status !== 'received') {
-      alert("製造中または出荷済みのデータが含まれているため削除できません。\n（先に製造計画や出荷を取り消してください）");
+    if (group.items.some(item => item.status === 'shipped')) {
+      alert("出荷済みのデータが含まれているため削除できません。");
       return;
     }
-    if (!confirm("この注文書（登録されているすべての製品）を本当にキャンセル（削除）しますか？")) return;
+    const hasInProduction = group.items.some(item => item.status === 'in_production');
+    const confirmMessage = hasInProduction
+      ? "この注文書（登録されているすべての製品）を削除しますか？\n紐づく製造計画は継続し、製造済みの原料在庫も戻しません。"
+      : "この注文書（登録されているすべての製品）を本当にキャンセル（削除）しますか？";
+    if (!confirm(confirmMessage)) return;
 
     setIsProcessing(true);
-    const idsToDelete = group.items.map(item => item.id);
-    const { error } = await supabase.from("orders").delete().in("id", idsToDelete);
+    try {
+      const idsToDelete = group.items.map(item => item.id);
+      await deleteOrdersAndUnlinkPlans(idsToDelete);
 
-    if (!error) { setIsOpen(false); fetchData(); alert("注文書全体をキャンセルしました。"); }
-    else alert("エラー: " + error.message);
-    setIsProcessing(false);
+      setIsOpen(false);
+      await fetchData();
+      alert("注文書全体をキャンセルしました。");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "不明なエラーが発生しました。";
+      alert("削除に失敗しました: " + message);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   // =======================================================================
