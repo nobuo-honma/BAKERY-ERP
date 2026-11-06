@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ShoppingCart, Plus, Calculator, Loader2, Save, Lock, Edit, Trash2, X, FileText, Printer, ArrowLeft } from "lucide-react";
+import { ShoppingCart, Plus, Calculator, Loader2, Save, Lock, Edit, Trash2, X, FileText, Printer, ArrowLeft, LayoutGrid, List } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 
 type Order = {
@@ -56,9 +56,11 @@ function displayToPcs(cs: number, p: number, unitPerCs: number): number {
 export default function OrdersPage() {
   const { canEdit } = useAuth();
   const [orderGroups, setOrderGroups] = useState<OrderGroup[]>([]);
+  const [productionDates, setProductionDates] = useState<Record<string, string[]>>({});
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
+  const [displayMode, setDisplayMode] = useState<"cards" | "list">("cards");
 
   const [isOpen, setIsOpen] = useState(false);
   const [editingGroup, setEditingGroup] = useState<OrderGroup | null>(null);
@@ -83,6 +85,43 @@ export default function OrdersPage() {
     const { data: oData } = await supabase.from("orders").select("*, customers(name, address), products(name, variant_name, unit_per_kg, unit_per_cs)").order("order_date", { ascending: false });
     const { data: cData } = await supabase.from("customers").select("id, name, address");
     const { data: pData } = await supabase.from("products").select("*");
+
+    const orderIds = (oData ?? []).map((order: Order) => order.id);
+    const datesByOrder: Record<string, Set<string>> = {};
+    if (orderIds.length > 0) {
+      const [{ data: planLinks, error: linksError }, { data: directPlans, error: directPlansError }] = await Promise.all([
+        supabase.from("production_plan_orders").select("order_id, production_plan_id").in("order_id", orderIds),
+        supabase.from("production_plans").select("id, order_id, production_date").in("order_id", orderIds)
+      ]);
+
+      let linkedPlans: Array<{ id: string; production_date: string }> = [];
+      let linkedPlansError: { message: string } | null = null;
+      const planIds = [...new Set((planLinks ?? []).map((link) => link.production_plan_id))];
+      if (planIds.length > 0) {
+        const result = await supabase.from("production_plans").select("id, production_date").in("id", planIds);
+        linkedPlansError = result.error;
+        linkedPlans = result.data ?? [];
+      }
+
+      const addProductionDate = (orderId: string, productionDate: string) => {
+        if (!datesByOrder[orderId]) datesByOrder[orderId] = new Set();
+        datesByOrder[orderId].add(productionDate);
+      };
+      (directPlans ?? []).forEach((plan) => addProductionDate(plan.order_id, plan.production_date));
+      const linkedDates = new Map(linkedPlans.map((plan) => [plan.id, plan.production_date]));
+      (planLinks ?? []).forEach((link) => {
+        const productionDate = linkedDates.get(link.production_plan_id);
+        if (productionDate) addProductionDate(link.order_id, productionDate);
+      });
+
+      if (linksError || directPlansError || linkedPlansError) {
+        const errorMessage = linksError?.message || directPlansError?.message || linkedPlansError?.message;
+        alert(`製造予定日の取得に失敗しました。一覧に製造予定日が表示されない場合があります。\n${errorMessage}`);
+      }
+    }
+    setProductionDates(Object.fromEntries(
+      Object.entries(datesByOrder).map(([orderId, dates]) => [orderId, [...dates].sort()])
+    ));
 
     if (oData) {
       const groups: Record<string, OrderGroup> = {};
@@ -225,6 +264,12 @@ export default function OrdersPage() {
       simResult[bom.item_id].isShort = simResult[bom.item_id].required > simResult[bom.item_id].stock;
     });
   });
+
+  const formatListDate = (date: string | null | undefined) => {
+    if (!date) return "未設定";
+    const [year, month, day] = date.slice(0, 10).split("-");
+    return year && month && day ? `${year}/${Number(month)}/${Number(day)}` : date;
+  };
 
   const handleSaveOrder = async () => {
     if (!formData.customerId || !formData.shipDate || !formData.plannedShipDate) {
@@ -482,12 +527,33 @@ export default function OrdersPage() {
   // =======================================================================
   return (
     <div className="bg-transparent">
+      {displayMode === "list" && (
+        <style>{`
+          @media print {
+            header, nav, .orders-screen-controls { display: none !important; }
+            main { padding: 0 !important; margin: 0 !important; max-width: 100% !important; }
+            body { background: white !important; color: black !important; }
+            @page { size: A4 landscape; margin: 10mm; }
+            .orders-cards { display: none !important; }
+            .orders-print-list { border: 0 !important; box-shadow: none !important; }
+            .orders-print-list table { font-size: 10pt; }
+            .orders-print-list thead { display: table-header-group; }
+            .orders-print-list tr { break-inside: avoid; }
+            .orders-print-hide { display: none !important; }
+          }
+        `}</style>
+      )}
       <div className="flex justify-between items-center mb-6">
         <div className="flex items-center gap-4">
           <h1 className="text-2xl font-bold flex items-center gap-2 text-slate-800"><ShoppingCart className="h-6 w-6 text-blue-600" />受注管理</h1>
           {!canEdit && <Badge variant="outline" className="bg-slate-100 text-slate-500 border-slate-300 px-3 py-1 shadow-sm"><Lock className="w-3 h-3 mr-1" /> 閲覧モード</Badge>}
         </div>
-        {canEdit && <Button onClick={() => openModal()} className="bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-sm"><Plus className="h-4 w-4 mr-2" /> 新規受注登録</Button>}
+        <div className="orders-screen-controls flex flex-wrap justify-end gap-2">
+          <Button variant={displayMode === "cards" ? "default" : "outline"} onClick={() => setDisplayMode("cards")} className={displayMode === "cards" ? "bg-blue-600 hover:bg-blue-700 text-white" : ""}><LayoutGrid className="h-4 w-4 mr-2" />カード</Button>
+          <Button variant={displayMode === "list" ? "default" : "outline"} onClick={() => setDisplayMode("list")} className={displayMode === "list" ? "bg-blue-600 hover:bg-blue-700 text-white" : ""}><List className="h-4 w-4 mr-2" />一覧</Button>
+          {displayMode === "list" && <Button variant="outline" onClick={() => window.print()}><Printer className="h-4 w-4 mr-2" />印刷 / PDF保存</Button>}
+          {canEdit && <Button onClick={() => openModal()} className="bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-sm"><Plus className="h-4 w-4 mr-2" /> 新規受注登録</Button>}
+        </div>
       </div>
 
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
@@ -604,8 +670,57 @@ export default function OrdersPage() {
         </DialogContent>
       </Dialog>
 
+      {/* PDF向け受注一覧 */}
+      {displayMode === "list" && (
+        <Card className="orders-print-list overflow-hidden">
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader className="bg-slate-100">
+                  <TableRow>
+                    <TableHead className="font-bold text-slate-700">発注№</TableHead>
+                    <TableHead className="font-bold text-slate-700">出荷先</TableHead>
+                    <TableHead className="font-bold text-slate-700">製造種類</TableHead>
+                    <TableHead className="font-bold text-slate-700">製造予定日</TableHead>
+                    <TableHead className="font-bold text-slate-700">出荷予定日</TableHead>
+                    <TableHead className="font-bold text-slate-700">着日</TableHead>
+                    <TableHead className="orders-print-hide w-20"></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {orderGroups.flatMap((group) => group.items.map((item) => {
+                    const itemProductionDates = productionDates[item.id] ?? [];
+                    return (
+                      <TableRow key={item.id}>
+                        <TableCell className="font-medium">{group.customerOrderNo || "—"}</TableCell>
+                        <TableCell>{group.customerName || "—"}</TableCell>
+                        <TableCell>
+                          <div className="font-medium">{item.products?.name || "—"}</div>
+                          {item.products?.variant_name && <div className="text-xs text-slate-500">{item.products.variant_name}</div>}
+                        </TableCell>
+                        <TableCell>{itemProductionDates.length > 0 ? itemProductionDates.map(formatListDate).join("、") : "未定"}</TableCell>
+                        <TableCell>{formatListDate(group.plannedShipDate)}</TableCell>
+                        <TableCell>{formatListDate(group.desiredShipDate)}</TableCell>
+                        <TableCell className="orders-print-hide">
+                          <div className="flex gap-1">
+                            <Button variant="ghost" size="icon" onClick={() => setPrintGroup(group)} title="受注書を印刷"><Printer className="h-4 w-4" /></Button>
+                            {canEdit && <Button variant="ghost" size="icon" onClick={() => openModal(group)} title="編集"><Edit className="h-4 w-4" /></Button>}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  }))}
+                  {loading && orderGroups.length === 0 && <TableRow><TableCell colSpan={7} className="py-12 text-center"><Loader2 className="animate-spin w-8 h-8 text-slate-400 mx-auto" /></TableCell></TableRow>}
+                  {!loading && orderGroups.length === 0 && <TableRow><TableCell colSpan={7} className="py-12 text-center text-slate-500">受注データがありません。</TableCell></TableRow>}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* 受注カード一覧 */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      {displayMode === "cards" && <div className="orders-cards grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {orderGroups.map((group) => {
           const today = new Date(); today.setHours(0, 0, 0, 0);
           const isLate = new Date(group.plannedShipDate) < today;
@@ -664,7 +779,7 @@ export default function OrdersPage() {
         })}
         {loading && orderGroups.length === 0 && <div className="col-span-full text-center py-16"><Loader2 className="animate-spin w-8 h-8 text-slate-400 mx-auto" /></div>}
         {!loading && orderGroups.length === 0 && <div className="col-span-full text-center py-16 text-slate-500 bg-white rounded-lg border-dashed">受注データがありません。</div>}
-      </div>
+      </div>}
     </div>
   );
 }
