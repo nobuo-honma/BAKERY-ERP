@@ -105,8 +105,15 @@ export default function ShipmentsPage() {
     if (data) {
       const groups: Record<string, OrderGroup> = {};
       const today = new Date(); today.setHours(0, 0, 0, 0);
+      const monthStart = new Date();
+      monthStart.setDate(1);
+      monthStart.setHours(0, 0, 0, 0);
+      const monthStartDate = `${monthStart.getFullYear()}-${String(monthStart.getMonth() + 1).padStart(2, "0")}-01`;
 
       data.forEach((o: Order) => {
+        const plannedShipDate = o.planned_ship_date || o.desired_ship_date;
+        if (plannedShipDate && plannedShipDate < monthStartDate) return;
+
         const parts = o.id.split('-');
         const gId = o.customer_order_no
           ? `${o.customer_order_no}_${o.customer_id}_${o.planned_ship_date}`
@@ -579,9 +586,12 @@ export default function ShipmentsPage() {
                             <div className="font-bold text-slate-700 truncate mr-2">
                               {item.products?.name} <span className="text-xs font-normal text-slate-500">({item.products?.variant_name})</span>
                             </div>
-                            <div className="font-black text-lg text-blue-600 shrink-0">
-                              {cs} <span className="text-[10px] font-normal text-slate-500">c/s</span>
-                              {p > 0 && <span className="text-slate-700 ml-1">{p} <span className="text-[10px] font-normal text-slate-500">p</span></span>}
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className="text-xs font-bold text-slate-500">受注数:</span>
+                              <span className="font-black text-lg text-blue-600">
+                                {cs} <span className="text-[10px] font-normal text-slate-500">c/s</span>
+                                {p > 0 && <span className="text-slate-700 ml-1">{p} <span className="text-[10px] font-normal text-slate-500">p</span></span>}
+                              </span>
                             </div>
                           </div>
                         );
@@ -637,7 +647,7 @@ export default function ShipmentsPage() {
                         <div className="bg-blue-50 border-b border-blue-100 p-3 flex justify-between items-center">
                           <div className="font-bold text-blue-900">{order.products?.name} <span className="text-xs text-blue-600 font-normal">({order.products?.variant_name})</span></div>
                           <div className="flex items-center gap-4">
-                            <div className="text-xs font-bold text-slate-500">注文: <span className="text-sm font-black text-slate-800">{orderCs} c/s {orderP > 0 && `${orderP} p`}</span></div>
+                            <div className="text-xs font-bold text-slate-500">受注数: <span className="text-sm font-black text-slate-800">{orderCs} c/s {orderP > 0 && `${orderP} p`}</span></div>
                             <div className={`text-xs font-bold px-2 py-1 rounded ${totalInputPcs === order.quantity ? 'bg-green-100 text-green-700' : totalInputPcs > 0 ? 'bg-amber-100 text-amber-700' : 'bg-slate-200 text-slate-500'}`}>
                               入力計: {inputCs} c/s {inputP > 0 && `${inputP} p`}
                             </div>
