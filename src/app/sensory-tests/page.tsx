@@ -45,9 +45,11 @@ const TEST_SECTIONS = [
     }
 ];
 
-type PlanOption = { lot_code: string; product_name: string };
+type CompletedPlan = { id: string; production_date: string; lot_code: string; product_name: string };
+type InspectionRow = { key: string; plan: CompletedPlan | null; record: SensoryRecord | null };
 type SensoryRecord = {
     id: string;
+    production_plan_id?: string | null;
     test_date: string;
     lot_code: string;
     product_name: string;
@@ -61,6 +63,8 @@ export default function SensoryTestsPage() {
     const { canEdit } = useAuth();
     const [loading, setLoading] = useState(false);
     const [viewMode, setViewMode] = useState<'input' | 'list'>('list');
+    const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
+    const [productionPlanId, setProductionPlanId] = useState<string | null>(null);
 
     // 日次入力用State
     const [testDate, setTestDate] = useState(() => new Date().toISOString().split('T')[0]);
@@ -73,42 +77,42 @@ export default function SensoryTestsPage() {
     const [notes, setNotes] = useState("");
     const [isSaving, setIsSaving] = useState(false);
 
-    // その日製造されたLotのリスト（プルダウン用）
-    const [availableLots, setAvailableLots] = useState<PlanOption[]>([]);
-
     // 一覧用State
     const [testRecords, setTestRecords] = useState<SensoryRecord[]>([]);
+    const [completedPlans, setCompletedPlans] = useState<CompletedPlan[]>([]);
 
     // 印刷・編集用State
     const [printRecord, setPrintRecord] = useState<SensoryRecord | null>(null);
 
     const fetchRecords = useCallback(async () => {
         setLoading(true);
-        const { data } = await supabase.from('sensory_tests').select('*').order('test_date', { ascending: false }).limit(50);
-        if (data) setTestRecords(data as SensoryRecord[]);
-        setLoading(false);
-    }, []);
-
-    const fetchAvailableLots = useCallback(async (dateStr: string) => {
-        const { data } = await supabase.from('production_plans')
-            .select('lot_code, products(name, variant_name)')
-            .eq('production_date', dateStr);
-
-        if (data) {
-            const lots = data.map((d: {
-                lot_code: string;
-                products: { name: string | null; variant_name: string | null } | Array<{ name: string | null; variant_name: string | null }> | null;
-            }) => {
-                const prod = Array.isArray(d.products) ? d.products[0] : d.products;
-                return {
-                    lot_code: d.lot_code,
-                    product_name: `${prod?.name ?? ""} (${prod?.variant_name ?? ""})`
-                };
-            });
-            setAvailableLots(lots);
-        } else {
-            setAvailableLots([]);
+        const [{ data: recordData, error: recordError }, { data: planData, error: planError }] = await Promise.all([
+            supabase.from('sensory_tests').select('*').order('test_date', { ascending: false }).limit(1000),
+            supabase.from('production_plans')
+                .select('id, production_date, lot_code, products(name, variant_name)')
+                .eq('status', 'completed')
+                .order('production_date', { ascending: false })
+        ]);
+        const error = recordError ?? planError;
+        if (error) {
+            alert(`製造実績・検査記録の取得に失敗しました: ${error.message}\n未適用のマイグレーションがないか確認してください。`);
+            setLoading(false);
+            return;
         }
+
+        const plans: CompletedPlan[] = (planData as Array<Record<string, unknown>> | null ?? []).map(plan => {
+            const productValue = plan.products as Record<string, unknown> | Array<Record<string, unknown>> | null;
+            const product = Array.isArray(productValue) ? productValue[0] : productValue;
+            return {
+                id: String(plan.id),
+                production_date: String(plan.production_date),
+                lot_code: String(plan.lot_code ?? ""),
+                product_name: `${String(product?.name ?? "")} (${String(product?.variant_name ?? "")})`
+            };
+        });
+        setTestRecords((recordData as SensoryRecord[] | null) ?? []);
+        setCompletedPlans(plans);
+        setLoading(false);
     }, []);
 
     // 初期化と一覧取得
@@ -120,48 +124,9 @@ export default function SensoryTestsPage() {
         return () => window.clearTimeout(timer);
     }, [fetchRecords]);
 
-    // 入力画面で日付が変わった際に、その日の製造計画（Lot）を取得する
-    useEffect(() => {
-        if (viewMode === 'input' && testDate) {
-            const timer = window.setTimeout(() => {
-                void fetchAvailableLots(testDate);
-            }, 0);
-
-            return () => window.clearTimeout(timer);
-        }
-    }, [testDate, viewMode, fetchAvailableLots]);
-
-    // Lot番号が選択されたら、製品名を自動セット
-    const handleLotSelect = (selectedLot: string) => {
-        setLotCode(selectedLot);
-        const target = availableLots.find(l => l.lot_code === selectedLot);
-        if (target) setProductName(target.product_name);
-        else setProductName("");
-    };
-
-    // 新規入力のリセット
-    const resetInput = () => {
-        const today = new Date().toISOString().split('T')[0];
-        setTestDate(today); setLotCode(""); setProductName(""); setCheckerName(""); setSubCheckerName(""); setNotes("");
-
-        // 初期値としてすべての項目を「問題ない」と「規格内」にする
-        const initialResults: Record<string, string[]> = {};
-        TEST_SECTIONS.forEach(sec => {
-            sec.items.forEach(item => {
-                initialResults[item.id] = ["問題ない"];
-                if (item.id === "bread_visual") initialResults[item.id].push("規格内");
-            });
-        });
-        setResults(initialResults);
-        setOtherTexts({});
-    };
-
-    const handleOpenInput = () => {
-        resetInput();
-        setViewMode('input');
-    };
-
-    const handleEdit = (record: SensoryRecord) => {
+    const handleEdit = (record: SensoryRecord, planId: string | null = record.production_plan_id ?? null) => {
+        setEditingRecordId(record.id);
+        setProductionPlanId(planId);
         setTestDate(record.test_date);
         setLotCode(record.lot_code);
         setProductName(record.product_name);
@@ -184,6 +149,34 @@ export default function SensoryTestsPage() {
         setResults(parsedResults);
         setOtherTexts(parsedOthers);
 
+        setViewMode('input');
+    };
+
+    const handleStartPlan = (plan: CompletedPlan) => {
+        const record = testRecords.find(item =>
+            item.production_plan_id === plan.id ||
+            (!item.production_plan_id && item.test_date === plan.production_date && item.lot_code === plan.lot_code && item.product_name === plan.product_name)
+        );
+        if (record) {
+            handleEdit(record, plan.id);
+            return;
+        }
+
+        setEditingRecordId(null);
+        setProductionPlanId(plan.id);
+        setTestDate(plan.production_date);
+        setLotCode(plan.lot_code);
+        setProductName(plan.product_name);
+        setCheckerName(""); setSubCheckerName(""); setNotes("");
+        const initialResults: Record<string, string[]> = {};
+        TEST_SECTIONS.forEach(section => {
+            section.items.forEach(item => {
+                initialResults[item.id] = ["問題ない"];
+                if (item.id === "bread_visual") initialResults[item.id].push("規格内");
+            });
+        });
+        setResults(initialResults);
+        setOtherTexts({});
         setViewMode('input');
     };
 
@@ -214,7 +207,7 @@ export default function SensoryTestsPage() {
 
     const handleSave = async () => {
         if (!testDate || !lotCode || !productName) {
-            alert("実施日とLot番号（対象品）を選択してください。");
+            alert("実施日とLot番号（対象品）を入力してください。");
             return;
         }
         setIsSaving(true);
@@ -237,7 +230,9 @@ export default function SensoryTestsPage() {
             updated_at: new Date().toISOString()
         };
 
-        const { error } = await supabase.from('sensory_tests').upsert(payload, { onConflict: 'test_date,lot_code' });
+        const { error } = editingRecordId
+            ? await supabase.from('sensory_tests').update({ ...payload, production_plan_id: productionPlanId }).eq('id', editingRecordId)
+            : await supabase.from('sensory_tests').upsert({ ...payload, production_plan_id: productionPlanId }, { onConflict: 'test_date,lot_code' });
         setIsSaving(false);
         if (error) {
             alert("保存に失敗しました: " + error.message);
@@ -254,6 +249,19 @@ export default function SensoryTestsPage() {
         if (error) alert("削除エラー: " + error.message);
         else fetchRecords();
     };
+
+    const usedRecordIds = new Set<string>();
+    const inspectionRows: InspectionRow[] = completedPlans.map(plan => {
+        const record = testRecords.find(item =>
+            item.production_plan_id === plan.id ||
+            (!item.production_plan_id && item.test_date === plan.production_date && item.lot_code === plan.lot_code && item.product_name === plan.product_name)
+        ) ?? null;
+        if (record) usedRecordIds.add(record.id);
+        return { key: `plan-${plan.id}`, plan, record };
+    });
+    testRecords.forEach(record => {
+        if (!usedRecordIds.has(record.id)) inspectionRows.push({ key: `record-${record.id}`, plan: null, record });
+    });
 
     // =======================================================================
     // 印刷（PDF帳票）ビュー
@@ -426,11 +434,6 @@ export default function SensoryTestsPage() {
                     </h1>
                     {!canEdit && <Badge variant="outline" className="bg-slate-100 text-slate-500 border-slate-300 px-3 py-1 shadow-sm hidden md:flex"><Lock className="w-3 h-3 mr-1" /> 閲覧モード</Badge>}
                 </div>
-                {viewMode === 'list' && canEdit && (
-                    <Button onClick={handleOpenInput} className="bg-pink-600 hover:bg-pink-700 text-white font-bold shadow-sm h-10 w-full sm:w-auto">
-                        <Plus className="h-4 w-4 mr-2" /> 新規検査を入力
-                    </Button>
-                )}
                 {viewMode === 'input' && (
                     <Button variant="outline" onClick={() => setViewMode('list')} className="font-bold border-slate-300 h-10">
                         <ArrowLeft className="h-4 w-4 mr-2" /> 一覧に戻る
@@ -441,7 +444,7 @@ export default function SensoryTestsPage() {
             {viewMode === 'list' ? (
                 <Card className="shadow-sm border-slate-200">
                     <CardHeader className="bg-slate-50 border-b py-4">
-                        <CardTitle className="text-lg text-slate-800">検査記録一覧</CardTitle>
+                        <CardTitle className="text-lg text-slate-800">製造実績・検査一覧</CardTitle>
                     </CardHeader>
                     <CardContent className="p-0">
                         <div className="overflow-x-auto">
@@ -457,28 +460,37 @@ export default function SensoryTestsPage() {
                                 </TableHeader>
                                 <TableBody>
                                     {loading ? <TableRow><TableCell colSpan={5} className="h-32 text-center"><Loader2 className="animate-spin h-6 w-6 text-slate-400 mx-auto" /></TableCell></TableRow> : (
-                                        testRecords.map(rec => (
-                                            <TableRow key={rec.id} className="hover:bg-slate-50">
-                                                <TableCell className="pl-4 font-bold text-slate-600">{new Date(rec.test_date).toLocaleDateString()}</TableCell>
-                                                <TableCell className="font-black text-pink-700 tracking-widest">{rec.lot_code}</TableCell>
-                                                <TableCell className="font-bold text-slate-800">{rec.product_name}</TableCell>
-                                                <TableCell className="text-xs text-slate-500">主: {rec.checker_name || "-"}<br />副: {rec.sub_checker_name || "-"}</TableCell>
+                                        inspectionRows.map(row => {
+                                            const rec = row.record;
+                                            const plan = row.plan;
+                                            const date = rec?.test_date ?? plan?.production_date ?? "";
+                                            const lot = rec?.lot_code ?? plan?.lot_code ?? "";
+                                            const product = rec?.product_name ?? plan?.product_name ?? "";
+                                            return (
+                                            <TableRow key={row.key} className="hover:bg-slate-50">
+                                                <TableCell className="pl-4 font-bold text-slate-600">{date ? new Date(date).toLocaleDateString() : "-"}</TableCell>
+                                                <TableCell className="font-black text-pink-700 tracking-widest">{lot}</TableCell>
+                                                <TableCell className="font-bold text-slate-800">{product}</TableCell>
+                                                <TableCell className="text-xs text-slate-500">{rec ? <>主: {rec.checker_name || "-"}<br />副: {rec.sub_checker_name || "-"}</> : <span className="text-amber-700 font-bold">未入力</span>}</TableCell>
                                                 <TableCell className="text-center">
                                                     <div className="flex justify-center gap-2">
-                                                        <Button variant="outline" size="sm" onClick={() => setPrintRecord(rec)} className="h-8 px-2 border-slate-300 hover:bg-slate-100"><Printer className="h-4 w-4" /></Button>
+                                                        {rec && <Button variant="outline" size="sm" onClick={() => setPrintRecord(rec)} className="h-8 px-2 border-slate-300 hover:bg-slate-100"><Printer className="h-4 w-4" /></Button>}
                                                         {canEdit && (
                                                             <>
-                                                                <Button variant="outline" size="sm" onClick={() => handleEdit(rec)} className="h-8 px-2 border-blue-200 text-blue-600 hover:bg-blue-50"><Edit className="h-4 w-4" /></Button>
-                                                                <Button variant="outline" size="sm" onClick={() => handleDelete(rec)} className="h-8 px-2 border-red-200 text-red-600 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
+                                                                <Button variant="outline" size="sm" onClick={() => plan ? handleStartPlan(plan) : rec && handleEdit(rec)} className="h-8 px-2 border-blue-200 text-blue-600 hover:bg-blue-50">
+                                                                    {rec ? <Edit className="h-4 w-4" /> : <><Plus className="h-4 w-4 mr-1" />入力</>}
+                                                                </Button>
+                                                                {rec && <Button variant="outline" size="sm" onClick={() => handleDelete(rec)} className="h-8 px-2 border-red-200 text-red-600 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>}
                                                             </>
                                                         )}
                                                     </div>
                                                 </TableCell>
                                             </TableRow>
-                                        ))
+                                            );
+                                        })
                                     )}
-                                    {testRecords.length === 0 && !loading && (
-                                        <TableRow><TableCell colSpan={5} className="text-center py-12 text-slate-500 bg-slate-50">記録がありません。</TableCell></TableRow>
+                                    {inspectionRows.length === 0 && !loading && (
+                                        <TableRow><TableCell colSpan={5} className="text-center py-12 text-slate-500 bg-slate-50">完了済みの製造実績がありません。</TableCell></TableRow>
                                     )}
                                 </TableBody>
                             </Table>
@@ -490,7 +502,7 @@ export default function SensoryTestsPage() {
                     <Card className="shadow-sm border-slate-200">
                         <CardHeader className="bg-pink-50/50 border-b pb-4">
                             <CardTitle className="text-lg text-pink-900 flex items-center gap-2">
-                                <CalendarDays className="h-5 w-5 text-pink-600" /> 対象Lotの選択
+                                <CalendarDays className="h-5 w-5 text-pink-600" /> 製造実績から検査入力
                             </CardTitle>
                         </CardHeader>
                         <CardContent className="pt-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -499,13 +511,10 @@ export default function SensoryTestsPage() {
                                 <Input type="date" value={testDate} onChange={(e) => setTestDate(e.target.value)} className="h-12 text-lg font-bold bg-white border-pink-300 shadow-sm" />
                             </div>
                             <div>
-                                <label className="block text-sm font-bold mb-1 text-slate-700">製造Lotを選択 (必須)</label>
-                                <select value={lotCode} onChange={(e) => handleLotSelect(e.target.value)} className="w-full h-12 text-base font-bold bg-white border-2 border-pink-300 rounded-md px-3 shadow-sm focus:ring-pink-500">
-                                    <option value="">-- この日製造されたLot --</option>
-                                    {availableLots.map(l => <option key={l.lot_code} value={l.lot_code}>{l.lot_code} ({l.product_name})</option>)}
-                                </select>
-                                {availableLots.length === 0 && <p className="text-[10px] text-red-500 mt-1">※この日に製造されたLotはありません。</p>}
+                                <label className="block text-sm font-bold mb-1 text-slate-700">Lot № (編集可)</label>
+                                <Input value={lotCode} onChange={e => setLotCode(e.target.value)} className="h-12 text-lg font-bold bg-white border-pink-300 shadow-sm" />
                             </div>
+                            <div className="sm:col-span-2"><label className="block text-sm font-bold mb-1 text-slate-700">製品名</label><div className="h-10 flex items-center px-3 rounded-md bg-slate-100 font-bold text-slate-700">{productName}</div></div>
                         </CardContent>
                     </Card>
 

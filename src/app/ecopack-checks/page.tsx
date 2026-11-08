@@ -21,10 +21,12 @@ const CHECK_ITEMS = [
     { id: "c6", num: "⑥", text: "入り数はただしいか" },
 ];
 
-type PlanOption = { lot_code: string; product_name: string; planned_units: number; unit_per_cs: number };
+type CompletedPlan = { id: string; production_date: string; lot_code: string; product_name: string; actual_qty: number; unit_per_cs: number };
+type InspectionRow = { key: string; plan: CompletedPlan | null; record: EcopackCheckRow | null };
 type CheckResult = 'ok' | 'ng' | null;
 type EcopackCheckRow = {
     id: string;
+    production_plan_id?: string | null;
     check_date: string;
     lot_code: string;
     product_name: string;
@@ -43,6 +45,8 @@ export default function EcopackChecksPage() {
     const [loading, setLoading] = useState(false);
 
     const [viewMode, setViewMode] = useState<'input' | 'list' | 'print'>('list');
+    const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
+    const [productionPlanId, setProductionPlanId] = useState<string | null>(null);
 
     // 日次入力用State
     const [testDate, setTestDate] = useState(() => new Date().toISOString().split('T')[0]);
@@ -61,37 +65,45 @@ export default function EcopackChecksPage() {
 
     const [isSaving, setIsSaving] = useState(false);
 
-    // その日製造されたLotのリスト（プルダウン用）
-    const [availableLots, setAvailableLots] = useState<PlanOption[]>([]);
-
     // 一覧用・印刷用State
     const [testRecords, setTestRecords] = useState<EcopackCheckRow[]>([]);
+    const [completedPlans, setCompletedPlans] = useState<CompletedPlan[]>([]);
     const [printMonth, setPrintMonth] = useState(new Date());
 
     const fetchRecords = useCallback(async () => {
         setLoading(true);
-        const { data } = await supabase.from('ecopack_checks').select('*').order('check_date', { ascending: false }).limit(50);
-        const rows = (data as EcopackCheckRow[] | null) ?? [];
-        setTestRecords(rows);
-        setLoading(false);
-    }, []);
-
-    const fetchAvailableLots = useCallback(async (dateStr: string) => {
-        const { data } = await supabase.from('production_plans')
-            .select('lot_code, planned_units, products(name, variant_name, unit_per_cs)')
-            .eq('production_date', dateStr);
-
-        if (data) {
-            const lots: PlanOption[] = data.map((d: Record<string, unknown>) => ({
-                lot_code: String(d.lot_code ?? ""),
-                product_name: `${String((d.products as Record<string, unknown> | undefined)?.name ?? "") } (${String((d.products as Record<string, unknown> | undefined)?.variant_name ?? "")})`,
-                planned_units: Number(d.planned_units ?? 0),
-                unit_per_cs: Number((d.products as Record<string, unknown> | undefined)?.unit_per_cs ?? 24)
-            }));
-            setAvailableLots(lots);
-        } else {
-            setAvailableLots([]);
+        const [{ data: recordData, error: recordError }, { data: planData, error: planError }] = await Promise.all([
+            supabase.from('ecopack_checks').select('*').order('check_date', { ascending: false }).limit(1000),
+            supabase.from('production_plans')
+                .select('id, production_date, lot_code, actual_cs, actual_piece, planned_cs, products(name, variant_name, unit_per_cs)')
+                .eq('status', 'completed')
+                .order('production_date', { ascending: false })
+        ]);
+        const error = recordError ?? planError;
+        if (error) {
+            alert(`製造実績・検査記録の取得に失敗しました: ${error.message}\n未適用のマイグレーションがないか確認してください。`);
+            setLoading(false);
+            return;
         }
+
+        const plans: CompletedPlan[] = (planData as Array<Record<string, unknown>> | null ?? []).map(plan => {
+            const productValue = plan.products as Record<string, unknown> | Array<Record<string, unknown>> | null;
+            const product = Array.isArray(productValue) ? productValue[0] : productValue;
+            const unitPerCs = Number(product?.unit_per_cs) || 24;
+            const actualCs = plan.actual_cs === null || plan.actual_cs === undefined ? Number(plan.planned_cs ?? 0) : Number(plan.actual_cs);
+            const actualPiece = Number(plan.actual_piece ?? 0);
+            return {
+                id: String(plan.id),
+                production_date: String(plan.production_date),
+                lot_code: String(plan.lot_code ?? ""),
+                product_name: `${String(product?.name ?? "")} (${String(product?.variant_name ?? "")})`,
+                actual_qty: actualCs * unitPerCs + actualPiece * 2,
+                unit_per_cs: unitPerCs
+            };
+        });
+        setTestRecords((recordData as EcopackCheckRow[] | null) ?? []);
+        setCompletedPlans(plans);
+        setLoading(false);
     }, []);
 
     useEffect(() => {
@@ -102,52 +114,41 @@ export default function EcopackChecksPage() {
         return () => window.clearTimeout(timeoutId);
     }, [fetchRecords]);
 
-    useEffect(() => {
-        if (viewMode !== 'input' || !testDate) return;
-
-        const timeoutId = window.setTimeout(() => {
-            void fetchAvailableLots(testDate);
-        }, 0);
-
-        return () => window.clearTimeout(timeoutId);
-    }, [fetchAvailableLots, testDate, viewMode]);
-
-    const handleLotSelect = (selectedLot: string) => {
-        setLotCode(selectedLot);
-        const target = availableLots.find(l => l.lot_code === selectedLot);
-        if (target) {
-            setProductName(target.product_name);
-            setPlannedQty(target.planned_units);
-            setUnitPerCs(target.unit_per_cs);
-        } else {
-            setProductName(""); setPlannedQty(""); setUnitPerCs(24);
-        }
-    };
-
-    const resetInput = () => {
-        const today = new Date().toISOString().split('T')[0];
-        setTestDate(today); setLotCode(""); setProductName(""); setPlannedQty(""); setUnitPerCs(24);
-        setSealChecked(""); setSealNg(""); setOxygenLevel(""); setCheckerName("");
-        setDefectiveQty(""); setNotes("");
-
-        const initialResults: Record<string, CheckResult> = {};
-        CHECK_ITEMS.forEach(item => { initialResults[item.id] = 'ok'; });
-        setResults(initialResults);
-    };
-
-    const handleOpenInput = () => {
-        resetInput();
-        setViewMode('input');
-    };
-
-    const handleEdit = (record: EcopackCheckRow) => {
+    const handleEdit = (record: EcopackCheckRow, planId: string | null = record.production_plan_id ?? null) => {
+        setEditingRecordId(record.id);
+        setProductionPlanId(planId);
         setTestDate(record.check_date); setLotCode(record.lot_code); setProductName(record.product_name);
         setPlannedQty(record.planned_qty);
-        setUnitPerCs(24);
+        setUnitPerCs(completedPlans.find(plan => plan.id === planId)?.unit_per_cs ?? 24);
         setSealChecked(record.seal_checked !== null ? record.seal_checked : "");
         setSealNg(record.seal_ng !== null ? record.seal_ng : ""); setOxygenLevel(record.oxygen_level !== null ? record.oxygen_level : "");
         setCheckerName(record.checker_name || ""); setDefectiveQty(record.defective_qty !== null ? record.defective_qty : "");
         setNotes(record.notes || ""); setResults(record.results || {});
+        setViewMode('input');
+    };
+
+    const handleStartPlan = (plan: CompletedPlan) => {
+        const record = testRecords.find(item =>
+            item.production_plan_id === plan.id ||
+            (!item.production_plan_id && item.check_date === plan.production_date && item.lot_code === plan.lot_code && item.product_name === plan.product_name)
+        );
+        if (record) {
+            handleEdit(record, plan.id);
+            return;
+        }
+
+        setEditingRecordId(null);
+        setProductionPlanId(plan.id);
+        setTestDate(plan.production_date);
+        setLotCode(plan.lot_code);
+        setProductName(plan.product_name);
+        setPlannedQty(plan.actual_qty);
+        setUnitPerCs(plan.unit_per_cs);
+        setSealChecked(""); setSealNg(""); setOxygenLevel(""); setCheckerName("");
+        setDefectiveQty(""); setNotes("");
+        const initialResults: Record<string, CheckResult> = {};
+        CHECK_ITEMS.forEach(item => { initialResults[item.id] = 'ok'; });
+        setResults(initialResults);
         setViewMode('input');
     };
 
@@ -163,7 +164,7 @@ export default function EcopackChecksPage() {
     };
 
     const handleSave = async () => {
-        if (!testDate || !lotCode || !productName) { alert("製造日とLot番号を選択してください。"); return; }
+        if (!testDate || !lotCode || !productName) { alert("製造日とLot番号を入力してください。"); return; }
         setIsSaving(true);
 
         const payload = {
@@ -173,7 +174,9 @@ export default function EcopackChecksPage() {
             defective_qty: defectiveQty === "" ? null : Number(defectiveQty), notes: notes, updated_at: new Date().toISOString()
         };
 
-        const { error } = await supabase.from('ecopack_checks').upsert(payload, { onConflict: 'check_date,lot_code' });
+        const { error } = editingRecordId
+            ? await supabase.from('ecopack_checks').update({ ...payload, production_plan_id: productionPlanId }).eq('id', editingRecordId)
+            : await supabase.from('ecopack_checks').upsert({ ...payload, production_plan_id: productionPlanId }, { onConflict: 'check_date,lot_code' });
         setIsSaving(false);
         if (error) alert("保存に失敗しました: " + error.message);
         else { alert("製品チェック記録を保存しました！"); setViewMode('list'); fetchRecords(); }
@@ -199,6 +202,19 @@ export default function EcopackChecksPage() {
             return d.getFullYear() === printMonth.getFullYear() && d.getMonth() === printMonth.getMonth();
         })
         .sort((a, b) => new Date(a.check_date).getTime() - new Date(b.check_date).getTime());
+
+    const usedRecordIds = new Set<string>();
+    const inspectionRows: InspectionRow[] = completedPlans.map(plan => {
+        const record = testRecords.find(item =>
+            item.production_plan_id === plan.id ||
+            (!item.production_plan_id && item.check_date === plan.production_date && item.lot_code === plan.lot_code && item.product_name === plan.product_name)
+        ) ?? null;
+        if (record) usedRecordIds.add(record.id);
+        return { key: `plan-${plan.id}`, plan, record };
+    });
+    testRecords.forEach(record => {
+        if (!usedRecordIds.has(record.id)) inspectionRows.push({ key: `record-${record.id}`, plan: null, record });
+    });
 
     if (viewMode as string === 'print') {
         const y = printMonth.getFullYear();
@@ -250,7 +266,7 @@ export default function EcopackChecksPage() {
                             <tr className="bg-gray-100">
                                 <th className="border border-black py-0.5 w-[7%] font-medium leading-tight">製造月日</th>
                                 <th className="border border-black py-0.5 w-[23%] font-medium leading-tight">製造名<hr className="border-black my-0.5" />Lot №.</th>
-                                <th className="border border-black py-0.5 w-[8%] font-medium leading-tight">予定製造数</th>
+                                <th className="border border-black py-0.5 w-[8%] font-medium leading-tight">製造実績数</th>
                                 <th className="border border-black py-0.5 w-[8%] font-medium leading-tight text-[9px]">シール可否<hr className="border-black my-0.5" />NG数/検査数</th>
                                 <th className="border border-black py-0.5 w-[7%] font-medium leading-tight text-[8px]">酸素濃度(%)</th>
                                 <th className="border border-black py-0.5 w-[9%] font-medium leading-tight">検査者</th>
@@ -366,11 +382,6 @@ export default function EcopackChecksPage() {
                     </h1>
                     {!canEdit && <Badge variant="outline" className="bg-slate-100 text-slate-500 border-slate-300 px-3 py-1 shadow-sm hidden md:flex"><Lock className="w-3 h-3 mr-1" /> 閲覧モード</Badge>}
                 </div>
-                {viewMode === 'list' && canEdit && (
-                    <Button onClick={handleOpenInput} className="bg-teal-600 hover:bg-teal-700 text-white font-bold shadow-sm h-10 w-full sm:w-auto">
-                        <Plus className="h-4 w-4 mr-2" /> 新規検査を入力
-                    </Button>
-                )}
                 {viewMode === 'input' && (
                     <Button variant="outline" onClick={() => setViewMode('list')} className="font-bold border-slate-300 h-10">
                         <ArrowLeft className="h-4 w-4 mr-2" /> 一覧に戻る
@@ -381,7 +392,7 @@ export default function EcopackChecksPage() {
             {viewMode === 'list' ? (
                 <Card className="shadow-sm border-slate-200">
                     <CardHeader className="bg-slate-50 border-b py-4 flex flex-row items-center justify-between">
-                        <CardTitle className="text-lg text-slate-800">検査記録一覧</CardTitle>
+                        <CardTitle className="text-lg text-slate-800">製造実績・検査一覧</CardTitle>
                         <Button variant="outline" onClick={() => setViewMode('print')} className="h-9 px-4 border-slate-300 font-bold bg-white shadow-sm"><Printer className="h-4 w-4 mr-2" /> PDF帳票を出力 (月指定)</Button>
                     </CardHeader>
                     <CardContent className="p-0">
@@ -392,36 +403,48 @@ export default function EcopackChecksPage() {
                                         <TableHead className="w-28 pl-4">製造日</TableHead>
                                         <TableHead className="w-48">Lot番号</TableHead>
                                         <TableHead>製品名</TableHead>
-                                        <TableHead className="w-32 text-right pr-4">予定数(個/箱)</TableHead>
+                                        <TableHead className="w-32 text-right pr-4">実績数(個/箱)</TableHead>
                                         <TableHead className="w-40 text-center">アクション</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
                                     {loading ? <TableRow><TableCell colSpan={5} className="h-32 text-center"><Loader2 className="animate-spin h-6 w-6 text-slate-400 mx-auto" /></TableCell></TableRow> : (
-                                        testRecords.map(rec => (
-                                            <TableRow key={rec.id} className="hover:bg-slate-50">
-                                                <TableCell className="pl-4 font-bold text-slate-600">{new Date(rec.check_date).toLocaleDateString()}</TableCell>
-                                                <TableCell className="font-black text-teal-700 tracking-widest">{rec.lot_code}</TableCell>
-                                                <TableCell className="font-bold text-slate-800">{rec.product_name}</TableCell>
+                                        inspectionRows.map(row => {
+                                            const rec = row.record;
+                                            const plan = row.plan;
+                                            const date = rec?.check_date ?? plan?.production_date ?? "";
+                                            const lot = rec?.lot_code ?? plan?.lot_code ?? "";
+                                            const product = rec?.product_name ?? plan?.product_name ?? "";
+                                            const qty = rec?.planned_qty ?? plan?.actual_qty ?? 0;
+                                            return (
+                                            <TableRow key={row.key} className="hover:bg-slate-50">
+                                                <TableCell className="pl-4 font-bold text-slate-600">{date ? new Date(date).toLocaleDateString() : "-"}</TableCell>
+                                                <TableCell className="font-black text-teal-700 tracking-widest">{lot}</TableCell>
+                                                <TableCell className="font-bold text-slate-800">{product}</TableCell>
                                                 <TableCell className="text-right pr-4 text-xs font-bold text-slate-600">
                                                     {/* ★修正: ピース数を2で割ってから24で割る */}
-                                                    {Math.floor((rec.planned_qty / 2) / 24)} c/s <span className="font-normal">({rec.planned_qty} 個)</span>
+                                                    {Math.floor((qty / 2) / (plan?.unit_per_cs ?? 24))} c/s <span className="font-normal">({qty} 個)</span>
                                                 </TableCell>
                                                 <TableCell className="text-center">
                                                     <div className="flex justify-center gap-2">
                                                         {canEdit && (
                                                             <>
-                                                                <Button variant="outline" size="sm" onClick={() => handleEdit(rec)} className="h-8 px-3 border-blue-200 text-blue-600 hover:bg-blue-50"><Edit className="h-4 w-4" /></Button>
-                                                                <Button variant="outline" size="sm" onClick={() => handleDelete(rec)} className="h-8 px-3 border-red-200 text-red-600 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
+                                                                <Badge variant="outline" className={rec ? "text-green-700 border-green-300 bg-green-50" : "text-amber-700 border-amber-300 bg-amber-50"}>{rec ? "入力済" : "未入力"}</Badge>
+                                                                <Button variant="outline" size="sm" onClick={() => plan ? handleStartPlan(plan) : rec && handleEdit(rec)} className="h-8 px-3 border-blue-200 text-blue-600 hover:bg-blue-50">
+                                                                    {rec ? <Edit className="h-4 w-4" /> : <><Plus className="h-4 w-4 mr-1" />入力</>}
+                                                                </Button>
+                                                                {rec && <Button variant="outline" size="sm" onClick={() => handleDelete(rec)} className="h-8 px-3 border-red-200 text-red-600 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>}
                                                             </>
                                                         )}
+                                                        {!canEdit && <Badge variant="outline" className={rec ? "text-green-700 border-green-300 bg-green-50" : "text-amber-700 border-amber-300 bg-amber-50"}>{rec ? "入力済" : "未入力"}</Badge>}
                                                     </div>
                                                 </TableCell>
                                             </TableRow>
-                                        ))
+                                            );
+                                        })
                                     )}
-                                    {testRecords.length === 0 && !loading && (
-                                        <TableRow><TableCell colSpan={5} className="text-center py-12 text-slate-500 bg-slate-50">記録がありません。</TableCell></TableRow>
+                                    {inspectionRows.length === 0 && !loading && (
+                                        <TableRow><TableCell colSpan={5} className="text-center py-12 text-slate-500 bg-slate-50">完了済みの製造実績がありません。</TableCell></TableRow>
                                     )}
                                 </TableBody>
                             </Table>
@@ -433,35 +456,20 @@ export default function EcopackChecksPage() {
                     <Card className="shadow-sm border-slate-200">
                         <CardHeader className="bg-teal-50/50 border-b pb-4">
                             <CardTitle className="text-lg text-teal-900 flex items-center gap-2">
-                                <CalendarDays className="h-5 w-5 text-teal-600" /> 対象Lotと基本情報の入力
+                                <CalendarDays className="h-5 w-5 text-teal-600" /> 製造実績から検査入力
                             </CardTitle>
                         </CardHeader>
                         <CardContent className="pt-6 space-y-6">
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div><label className="block text-sm font-bold mb-1 text-slate-700">製造日 (検査日)</label><Input type="date" value={testDate} onChange={(e) => setTestDate(e.target.value)} className="h-12 text-lg font-bold bg-white border-teal-300 shadow-sm" /></div>
-                                <div>
-                                    <label className="block text-sm font-bold mb-1 text-slate-700">製造Lotを選択 (必須)</label>
-                                    <select value={lotCode} onChange={(e) => handleLotSelect(e.target.value)} className="w-full h-12 text-base font-bold bg-white border-2 border-teal-300 rounded-md px-3 shadow-sm focus:ring-teal-500">
-                                        <option value="">-- この日製造されたLot --</option>
-                                        {availableLots.map(l => <option key={l.lot_code} value={l.lot_code}>{l.lot_code} ({l.product_name})</option>)}
-                                    </select>
-                                    {availableLots.length === 0 && <p className="text-[10px] text-red-500 mt-1">※この日に製造されたLotはありません。</p>}
-                                </div>
+                                <div><label className="block text-sm font-bold mb-1 text-slate-700">Lot № (編集可)</label><Input value={lotCode} onChange={e => setLotCode(e.target.value)} className="h-12 text-lg font-bold bg-white border-teal-300 shadow-sm" /></div>
                             </div>
 
                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-4 border-t">
                                 <div className="sm:col-span-2">
-                                    <label className="block text-xs font-bold text-slate-500 mb-1">予定製造数 (総個数)</label>
-                                    <div className="flex items-center gap-2">
-                                        <Input type="number" min="0" value={plannedQty} onChange={e => setPlannedQty(e.target.value === "" ? "" : Number(e.target.value))} className="h-10 text-lg font-bold text-right" />
-                                        <span className="font-bold text-slate-500">個</span>
-                                    </div>
-                                    {/* ▼ 修正: ピース数を2で割ってパックにし、さらにunit_per_csで割ってケース数を出す */}
-                                    {plannedQty !== "" && (
-                                        <p className="text-xs text-right text-slate-500 font-bold mt-1">
-                                            ≒ {Math.floor((Number(plannedQty) / 2) / unitPerCs)} c/s
-                                        </p>
-                                    )}
+                                    <label className="block text-xs font-bold text-slate-500 mb-1">製品名</label>
+                                    <div className="h-10 flex items-center px-3 rounded-md bg-slate-100 font-bold text-slate-700">{productName}</div>
+                                    <p className="text-xs text-right text-slate-500 font-bold mt-1">製造実績: {plannedQty} 個（約 {Math.floor((Number(plannedQty) / 2) / unitPerCs)} c/s）</p>
                                 </div>
                                 <div><label className="block text-xs font-bold text-slate-500 mb-1">酸素濃度 (%)</label><Input type="number" step="0.1" value={oxygenLevel} onChange={e => setOxygenLevel(e.target.value === "" ? "" : Number(e.target.value))} className="h-10 text-lg font-bold text-right" placeholder="12.5以下..." /></div>
                                 <div><label className="block text-xs font-bold text-slate-500 mb-1">不適合品廃棄数</label><Input type="number" min="0" value={defectiveQty} onChange={e => setDefectiveQty(e.target.value === "" ? "" : Number(e.target.value))} className="h-10 text-lg font-bold text-right text-red-600" /></div>
