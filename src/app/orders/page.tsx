@@ -679,17 +679,21 @@ export default function OrdersPage() {
                 <TableHeader className="bg-slate-100">
                   <TableRow>
                     <TableHead className="font-bold text-slate-700">発注№</TableHead>
-                    <TableHead className="font-bold text-slate-700">出荷先</TableHead>
+                    <TableHead className="font-bold text-slate-700">受注先</TableHead>
                     <TableHead className="font-bold text-slate-700">製造種類</TableHead>
+                    <TableHead className="font-bold text-slate-700 whitespace-nowrap">受注数(c/s)</TableHead>
                     <TableHead className="font-bold text-slate-700">製造予定日</TableHead>
                     <TableHead className="font-bold text-slate-700">出荷予定日</TableHead>
                     <TableHead className="font-bold text-slate-700">着日</TableHead>
+                    <TableHead className="font-bold text-slate-700">備考</TableHead>
                     <TableHead className="orders-print-hide w-20"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {orderGroups.flatMap((group) => group.items.map((item) => {
                     const itemProductionDates = productionDates[item.id] ?? [];
+                    const unitPerCs = item.products?.unit_per_cs || 24;
+                    const { cs, p } = pcsToDisplay(item.quantity, unitPerCs);
                     return (
                       <TableRow key={item.id}>
                         <TableCell className="font-medium">{group.customerOrderNo || "—"}</TableCell>
@@ -698,9 +702,13 @@ export default function OrdersPage() {
                           <div className="font-medium">{item.products?.name || "—"}</div>
                           {item.products?.variant_name && <div className="text-xs text-slate-500">{item.products.variant_name}</div>}
                         </TableCell>
+                        <TableCell className="whitespace-nowrap">
+                          {cs} c/s{p > 0 && ` ${p} p`}
+                        </TableCell>
                         <TableCell>{itemProductionDates.length > 0 ? itemProductionDates.map(formatListDate).join("、") : "未定"}</TableCell>
                         <TableCell>{formatListDate(group.plannedShipDate)}</TableCell>
                         <TableCell>{formatListDate(group.desiredShipDate)}</TableCell>
+                        <TableCell>{item.remarks || "—"}</TableCell>
                         <TableCell className="orders-print-hide">
                           <div className="flex gap-1">
                             <Button variant="ghost" size="icon" onClick={() => setPrintGroup(group)} title="受注書を印刷"><Printer className="h-4 w-4" /></Button>
@@ -710,8 +718,8 @@ export default function OrdersPage() {
                       </TableRow>
                     );
                   }))}
-                  {loading && orderGroups.length === 0 && <TableRow><TableCell colSpan={7} className="py-12 text-center"><Loader2 className="animate-spin w-8 h-8 text-slate-400 mx-auto" /></TableCell></TableRow>}
-                  {!loading && orderGroups.length === 0 && <TableRow><TableCell colSpan={7} className="py-12 text-center text-slate-500">受注データがありません。</TableCell></TableRow>}
+                  {loading && orderGroups.length === 0 && <TableRow><TableCell colSpan={9} className="py-12 text-center"><Loader2 className="animate-spin w-8 h-8 text-slate-400 mx-auto" /></TableCell></TableRow>}
+                  {!loading && orderGroups.length === 0 && <TableRow><TableCell colSpan={9} className="py-12 text-center text-slate-500">受注データがありません。</TableCell></TableRow>}
                 </TableBody>
               </Table>
             </div>
