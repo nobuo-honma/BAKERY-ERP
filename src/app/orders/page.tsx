@@ -144,7 +144,11 @@ export default function OrdersPage() {
           groups[gId].status = o.status;
         }
       });
-      setOrderGroups(Object.values(groups));
+      setOrderGroups(
+        Object.values(groups)
+          .filter((group) => group.status !== "shipped")
+          .sort((a, b) => (a.plannedShipDate || "").localeCompare(b.plannedShipDate || ""))
+      );
     }
 
     if (cData) setCustomers(cData);
@@ -267,8 +271,8 @@ export default function OrdersPage() {
 
   const formatListDate = (date: string | null | undefined) => {
     if (!date) return "未設定";
-    const [year, month, day] = date.slice(0, 10).split("-");
-    return year && month && day ? `${year}/${Number(month)}/${Number(day)}` : date;
+    const [, month, day] = date.slice(0, 10).split("-");
+    return month && day ? `${Number(month)}月${Number(day)}日` : date;
   };
 
   const handleSaveOrder = async () => {
@@ -778,8 +782,8 @@ export default function OrdersPage() {
                   })}
                 </div>
                 <div className="px-4 py-3 border-t bg-slate-50 rounded-b-lg text-xs text-slate-500 space-y-1">
-                  <div className="flex justify-between"><span>出荷予定:</span><span className={`font-bold ${isLate ? 'text-red-600' : 'text-blue-800'}`}>{new Date(group.plannedShipDate).toLocaleDateString()} {isLate && '(遅延!)'}</span></div>
-                  <div className="flex justify-between"><span>納入期限(着):</span><span className="font-bold text-slate-700">{new Date(group.desiredShipDate).toLocaleDateString()}</span></div>
+                  <div className="flex justify-between"><span>出荷予定:</span><span className={`font-bold ${isLate ? 'text-red-600' : 'text-blue-800'}`}>{formatListDate(group.plannedShipDate)} {isLate && '(遅延!)'}</span></div>
+                  <div className="flex justify-between"><span>納入期限(着):</span><span className="font-bold text-slate-700">{formatListDate(group.desiredShipDate)}</span></div>
                 </div>
               </CardContent>
             </Card>
