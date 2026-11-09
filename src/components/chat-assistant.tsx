@@ -49,7 +49,7 @@ export function ChatAssistant() {
   if (!isOpen) {
     return (
       <Button
-        className="fixed bottom-6 right-6 rounded-full w-14 h-14 shadow-lg flex items-center justify-center z-50 transition-transform hover:scale-110"
+        className="fixed bottom-6 right-6 rounded-full w-14 h-14 shadow-lg flex items-center justify-center z-50 transition-transform hover:scale-110 print:hidden"
         onClick={() => setIsOpen(true)}
       >
         <MessageCircle className="h-6 w-6" />
@@ -58,7 +58,7 @@ export function ChatAssistant() {
   }
 
   return (
-    <Card className="fixed bottom-6 right-6 w-87.5 h-125 flex flex-col shadow-2xl z-50 animate-in slide-in-from-bottom-5">
+    <Card className="fixed bottom-6 right-6 w-87.5 h-125 flex flex-col shadow-2xl z-50 animate-in slide-in-from-bottom-5 print:hidden">
       <CardHeader className="flex flex-row items-center justify-between p-4 border-b bg-muted/50 rounded-t-xl">
         <CardTitle className="text-lg font-medium flex items-center gap-2">
           <MessageCircle className="h-5 w-5 text-primary" />
