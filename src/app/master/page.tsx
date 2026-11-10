@@ -14,7 +14,7 @@ import { useAuth } from "@/contexts/AuthContext";
 type Product = { id: string; name: string; variant_name: string; unit_per_kg: number; unit_per_cs: number; };
 type Item = { id: string; name: string; item_type: string; unit_size: number; unit: string; unit_price: number; safety_stock: number; };
 type Bom = { id: string; product_id: string; item_id: string; usage_rate: number; unit: string; basis_type: string; products?: { name: string; variant_name: string }; items?: { name: string }; };
-type Customer = { id: string; name: string; contact_name: string; postal_code: string; address: string; phone: string; fax: string; notes: string; };
+type Customer = { id: string; name: string; short_name: string | null; contact_name: string; postal_code: string; address: string; phone: string; fax: string; notes: string; };
 
 function EditableCell({ value, onSave, type = "text", placeholder = "", alignRight = false }: { value: string | number | null | undefined, onSave: (val: string | number) => void, type?: "text" | "number", placeholder?: string, alignRight?: boolean }) {
   const { canEdit } = useAuth();
@@ -271,6 +271,7 @@ export default function MasterPage() {
                 <TableRow>
                   <TableHead className="w-25 pl-4">出荷先 ID</TableHead>
                   <TableHead className="w-62.5">出荷先名</TableHead>
+                  <TableHead className="w-37.5">略称</TableHead>
                   <TableHead className="w-37.5">担当者名</TableHead>
                   <TableHead className="w-30">郵便番号</TableHead>
                   <TableHead className="w-62.5">住所</TableHead>
@@ -284,6 +285,7 @@ export default function MasterPage() {
                   <TableRow key={customer.id} className="hover:bg-slate-50">
                     <TableCell className="font-medium text-blue-600 truncate pl-4" title={customer.id}>{customer.id}</TableCell>
                     <TableCell className="font-bold"><EditableCell value={customer.name} onSave={(val) => handleUpdate("customers", customer.id, "name", val)} /></TableCell>
+                    <TableCell><EditableCell value={customer.short_name} placeholder="- 未設定 -" onSave={(val) => handleUpdate("customers", customer.id, "short_name", val)} /></TableCell>
                     <TableCell><EditableCell value={customer.contact_name} placeholder="- 空白 -" onSave={(val) => handleUpdate("customers", customer.id, "contact_name", val)} /></TableCell>
                     <TableCell><EditableCell value={customer.postal_code} placeholder="- 空白 -" onSave={(val) => handleUpdate("customers", customer.id, "postal_code", val)} /></TableCell>
                     <TableCell><EditableCell value={customer.address} placeholder="- 空白 -" onSave={(val) => handleUpdate("customers", customer.id, "address", val)} /></TableCell>
@@ -293,7 +295,7 @@ export default function MasterPage() {
                   </TableRow>
                 ))}
                 {customers.length === 0 && (
-                  <TableRow><TableCell colSpan={8} className="text-center text-slate-500 py-12">出荷先データがありません。SQLでデータを登録してください。</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={9} className="text-center text-slate-500 py-12">出荷先データがありません。SQLでデータを登録してください。</TableCell></TableRow>
                 )}
               </TableBody>
             </Table>
@@ -380,6 +382,7 @@ export default function MasterPage() {
               <>
                 <div><label className="block text-xs font-bold text-slate-500 mb-1">出荷先 ID <span className="text-red-500">*</span></label><Input value={newData.id || ""} onChange={e => setNewData({ ...newData, id: e.target.value })} placeholder="例: CUST-001" /></div>
                 <div><label className="block text-xs font-bold text-slate-500 mb-1">出荷先名 <span className="text-red-500">*</span></label><Input value={newData.name || ""} onChange={e => setNewData({ ...newData, name: e.target.value })} placeholder="例: 株式会社サンプル" /></div>
+                <div><label className="block text-xs font-bold text-slate-500 mb-1">略称</label><Input value={newData.short_name || ""} onChange={e => setNewData({ ...newData, short_name: e.target.value })} placeholder="一覧表示用（任意）" /></div>
                 <div className="grid grid-cols-2 gap-4">
                   <div><label className="block text-xs font-bold text-slate-500 mb-1">担当者名</label><Input value={newData.contact_name || ""} onChange={e => setNewData({ ...newData, contact_name: e.target.value })} /></div>
                   <div><label className="block text-xs font-bold text-slate-500 mb-1">電話番号</label><Input value={newData.phone || ""} onChange={e => setNewData({ ...newData, phone: e.target.value })} /></div>

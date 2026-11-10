@@ -7,6 +7,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 
+const suggestedQuestions = [
+  "現在、製造に必要な材料が不足している製品は？",
+  "今月の製造実績を計画と比較して分析して",
+  "在庫不足が発生する可能性のある品目を教えて",
+  "受注残と製造計画を比較して",
+  "納期に間に合わない可能性がある注文は？",
+];
+
 export function ChatAssistant() {
   const [isOpen, setIsOpen] = useState(false);
   const [inputValue, setInputValue] = useState("");
@@ -71,13 +79,32 @@ export function ChatAssistant() {
 
       <CardContent className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.length === 0 ? (
-          <div className="text-center text-muted-foreground text-sm mt-8 flex flex-col items-center gap-2">
-            <MessageCircle className="h-8 w-8 text-muted-foreground/50" />
-            <p>
-              業務について何でも質問してください。
-              <br />
-              例: 「今日の出荷予定は？」
-            </p>
+          <div className="text-muted-foreground text-sm mt-4 flex flex-col gap-3">
+            <div className="text-center flex flex-col items-center gap-2">
+              <MessageCircle className="h-8 w-8 text-muted-foreground/50" />
+              <p>
+                Supabaseの最新データに基づいて分析します。
+                <br />
+                製品・品目・BOM・受注・製造計画/実績・在庫・出荷・入荷が対象です。
+              </p>
+            </div>
+            <div className="flex flex-col gap-2">
+              {suggestedQuestions.map((question) => (
+                <Button
+                  key={question}
+                  type="button"
+                  variant="outline"
+                  className="h-auto justify-start whitespace-normal text-left text-xs"
+                  disabled={isLoading}
+                  onClick={() => {
+                    clearError();
+                    void sendMessage({ text: question });
+                  }}
+                >
+                  {question}
+                </Button>
+              ))}
+            </div>
           </div>
         ) : (
           messages.map((m) => {

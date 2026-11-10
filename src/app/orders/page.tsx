@@ -15,7 +15,7 @@ type Order = {
   id: string; order_date: string; planned_ship_date: string; desired_ship_date: string;
   quantity: number; status: string; product_id: string; customer_id: string; customer_order_no?: string;
   unit_price?: number; remarks?: string;
-  customers?: { name: string; address?: string };
+  customers?: { name: string; short_name?: string | null; address?: string };
   products?: { name: string; variant_name: string; unit_per_cs: number };
 };
 type Customer = { id: string; name: string; address?: string };
@@ -31,7 +31,7 @@ type BomWithStock = {
   items: { name: string; item_type: string; item_stocks: { quantity: number }[] }
 };
 type OrderGroup = {
-  groupId: string; customerName: string; customerAddress: string; customerId: string; customerOrderNo: string;
+  groupId: string; customerName: string; customerShortName: string; customerAddress: string; customerId: string; customerOrderNo: string;
   orderDate: string; plannedShipDate: string; desiredShipDate: string; status: string; items: Order[];
 };
 
@@ -82,7 +82,7 @@ export default function OrdersPage() {
 
   const fetchData = useCallback(async () => {
     setLoading(true);
-    const { data: oData } = await supabase.from("orders").select("*, customers(name, address), products(name, variant_name, unit_per_kg, unit_per_cs)").order("order_date", { ascending: false });
+    const { data: oData } = await supabase.from("orders").select("*, customers(name, short_name, address), products(name, variant_name, unit_per_kg, unit_per_cs)").order("order_date", { ascending: false });
     const { data: cData } = await supabase.from("customers").select("id, name, address");
     const { data: pData } = await supabase.from("products").select("*");
 
@@ -132,6 +132,7 @@ export default function OrdersPage() {
           groups[gId] = {
             groupId: gId,
             customerName: o.customers?.name || "",
+            customerShortName: o.customers?.short_name || "",
             customerAddress: o.customers?.address || "",
             customerId: o.customer_id,
             customerOrderNo: o.customer_order_no || "", orderDate: o.order_date,
@@ -701,7 +702,7 @@ export default function OrdersPage() {
                     return (
                       <TableRow key={item.id}>
                         <TableCell className="font-medium">{group.customerOrderNo || "—"}</TableCell>
-                        <TableCell>{group.customerName || "—"}</TableCell>
+                        <TableCell>{group.customerShortName || group.customerName || "—"}</TableCell>
                         <TableCell>
                           <div className="font-medium">{item.products?.name || "—"}</div>
                           {item.products?.variant_name && <div className="text-xs text-slate-500">{item.products.variant_name}</div>}
