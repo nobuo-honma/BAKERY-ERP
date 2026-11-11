@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, type CSSProperties } from "react";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -35,8 +35,15 @@ type OrderGroup = {
   customerName: string; items: Order[]; isLate: boolean;
 };
 type PrintGroup = {
-  orderIdPrefix: string; customerName: string; customerOrderNo: string;
+  customerName: string; customerOrderNo: string;
   shipDate: string; desiredShipDate: string; shipments: Shipment[];
+};
+type PrintRow = {
+  productId: string; name: string; variant: string; lots: Shipment[];
+  qtyCs: number; qtyPiece: number;
+};
+type PrintTicket = PrintGroup & {
+  key: string; rows: PrintRow[];
 };
 
 // ============================================================
@@ -51,6 +58,30 @@ function pcsToDisplay(totalPcs: number, unitPerCs: number): { cs: number; p: num
 
 function displayToPcs(cs: number, p: number, unitPerCs: number): number {
   return (cs * unitPerCs) + (p * 2);
+}
+
+function formatShipmentQuantity(cs: number, pieces: number): string {
+  return [
+    cs > 0 ? `${cs} c/s` : "",
+    pieces > 0 ? `${pieces} p` : ""
+  ].filter(Boolean).join(" ");
+}
+
+function PrintInput({ value, ariaLabel, className = "", style }: {
+  value: string;
+  ariaLabel: string;
+  className?: string;
+  style?: CSSProperties;
+}) {
+  return (
+    <input
+      type="text"
+      aria-label={ariaLabel}
+      defaultValue={value}
+      className={`block w-full min-w-0 border-b border-dotted border-slate-400 bg-transparent text-inherit outline-none focus:border-blue-500 focus:bg-yellow-50 print:appearance-none print:border-0 print:bg-transparent print:p-0 print:shadow-none ${className}`}
+      style={style}
+    />
+  );
 }
 
 // 印刷用：登録された日時情報から「JSTローカル時間」を考慮して複数行表示 (13:00 などの時間も含めて動的描画)
@@ -303,7 +334,7 @@ export default function ShipmentsPage() {
   };
 
   // ============================================================
-  // 印刷（PDF管理票）モード (3段完全再現 ＋ 印鑑欄20mm ＋ 10行固定)
+  // 印刷（PDF管理票）モード
   // ============================================================
   if (viewMode === 'print') {
     const pGroups: Record<string, PrintGroup> = {};
@@ -311,22 +342,60 @@ export default function ShipmentsPage() {
     filteredShipments.forEach(s => {
       const parts = s.order_id.split('-');
       const oPrefix = parts.length > 3 ? parts.slice(0, 3).join('-') : s.order_id;
-      const gKey = s.orders?.customer_order_no
+      const groupKey = s.orders?.customer_order_no
         ? `${s.orders.customer_order_no}_${s.ship_date.split('T')[0]}`
         : `${oPrefix}_${s.ship_date.split('T')[0]}`;
 
-      if (!pGroups[gKey]) {
-        pGroups[gKey] = {
-          orderIdPrefix: oPrefix, customerName: s.orders?.customers?.name || "",
+      if (!pGroups[groupKey]) {
+        pGroups[groupKey] = {
+          customerName: s.orders?.customers?.name || "",
           customerOrderNo: s.orders?.customer_order_no || "",
           shipDate: s.ship_date, desiredShipDate: s.orders?.desired_ship_date || "",
           shipments: []
         };
       }
-      pGroups[gKey].shipments.push(s);
+      pGroups[groupKey].shipments.push(s);
     });
 
-    const printChunks = Object.values(pGroups);
+    const printChunks: PrintTicket[] = [];
+    Object.entries(pGroups).forEach(([groupKey, group]) => {
+      const products: Record<string, { productId: string; name: string; variant: string; lots: Shipment[] }> = {};
+      group.shipments.forEach(s => {
+        const productId = s.orders?.product_id || "";
+        if (!products[productId]) {
+          products[productId] = {
+            productId,
+            name: s.orders?.products?.name || "",
+            variant: s.orders?.products?.variant_name || "",
+            lots: []
+          };
+        }
+        products[productId].lots.push(s);
+      });
+
+      const rows = Object.values(products).flatMap(product => {
+        const productRows: PrintRow[] = [];
+        for (let i = 0; i < product.lots.length; i += 2) {
+          const lots = product.lots.slice(i, i + 2);
+          productRows.push({
+            ...product,
+            lots,
+            qtyCs: lots.reduce((total, shipment) => total + shipment.qty_cs, 0),
+            qtyPiece: lots.reduce((total, shipment) => total + shipment.qty_piece, 0)
+          });
+        }
+        return productRows;
+      });
+
+      for (let i = 0; i < rows.length; i += 10) {
+        printChunks.push({
+          ...group,
+          key: `${groupKey}_${i / 10}`,
+          rows: rows.slice(i, i + 10)
+        });
+      }
+    });
+
     const itemsPerPage = 3;
     const pagesCount = Math.max(1, Math.ceil(printChunks.length / itemsPerPage));
     const chunkedPages = [];
@@ -346,6 +415,8 @@ export default function ShipmentsPage() {
 
         <div className="w-[210mm] print:w-full flex justify-between items-center mb-4 print-hide gap-4">
           <Button variant="outline" onClick={() => setViewMode('list')} className="bg-white text-slate-700 font-bold border-slate-300"><ArrowLeft className="h-4 w-4 mr-2" /> 戻る</Button>
+
+          <span className="text-xs text-slate-600">管理票の入力内容は印刷用のみで、出荷実績・在庫には反映されません。</span>
 
           <div className="flex items-center gap-3 bg-white px-3 py-1.5 rounded-lg border border-slate-300 shadow-sm flex-1 max-w-sm justify-between">
             <span className="text-xs font-bold text-slate-500 whitespace-nowrap">出荷日の選択:</span>
@@ -370,35 +441,14 @@ export default function ShipmentsPage() {
             className={`w-[210mm] h-[297mm] bg-white p-6 print:p-0 shadow-xl print:shadow-none text-black font-sans box-border flex flex-col justify-between ${pageIdx < chunkedPages.length - 1 ? 'page-break mb-8 print:mb-0' : ''}`}
           >
             {pageChunks.map((group, gIdx) => {
-              const productSummary: Record<string, { product_id: string, name: string, variant: string, totalCs: number, totalP: number, lots: Shipment[] }> = {};
-
-              if (group) {
-                group.shipments.forEach(s => {
-                  const pId = s.orders?.product_id || "";
-                  if (!productSummary[pId]) {
-                    productSummary[pId] = {
-                      product_id: pId, // マスタの製品IDをマージ用キーとして活用
-                      name: s.orders?.products?.name || "",
-                      variant: s.orders?.products?.variant_name || "",
-                      totalCs: 0,
-                      totalP: 0,
-                      lots: []
-                    };
-                  }
-                  productSummary[pId].totalCs += s.qty_cs;
-                  productSummary[pId].totalP += s.qty_piece;
-                  productSummary[pId].lots.push(s);
-                });
-              }
-
-              const rows = Object.values(productSummary);
-              const shipNotes = group?.shipments[0]?.orders?.customer_order_no ? `発注注番: ${group.customerOrderNo}` : "";
+              const rows = group?.rows || [];
+              const shipNotes = group?.customerOrderNo ? `発注№: ${group.customerOrderNo}` : "";
 
               return (
-                <div key={gIdx} className="flex-1 flex flex-col justify-between relative overflow-hidden py-1 border-b last:border-b-0 border-dashed border-slate-300">
+                <div key={group?.key || gIdx} className="flex-1 flex flex-col justify-between relative overflow-hidden py-1 border-b last:border-b-0 border-dashed border-slate-300">
                   {/* --- ヘッダー領域 --- */}
-                  <div className="flex justify-between items-end shrink-0">
-                    <h1 className="text-xl font-bold tracking-[0.4em] ml-2">出 荷 管 理 票</h1>
+                  <div className="relative flex justify-end items-end shrink-0">
+                    <h1 className="absolute left-[45%] -translate-x-1/2 text-2xl font-bold tracking-[0.4em] whitespace-nowrap">出 荷 管 理 票</h1>
                     <table className="border-collapse border border-black text-center text-[7px] leading-tight w-48 shrink-0">
                       <tbody>
                         <tr>
@@ -428,24 +478,32 @@ export default function ShipmentsPage() {
                     </thead>
                     <tbody>
                       <tr style={{ height: "18mm" }}>
-                        <td className="border border-black text-center font-bold text-[15px] leading-tight whitespace-pre-wrap py-1">
-                          {group ? formatShipDate(group.shipDate) : ""}
+                        <td className="border border-black text-center font-bold text-[15px] leading-tight py-1">
+                          {group && (
+                            <div className="flex h-full flex-col justify-center">
+                              {formatShipDate(group.shipDate).split("\n").map((line, index) => (
+                                <PrintInput
+                                  key={index}
+                                  value={line}
+                                  ariaLabel={`出荷日 ${index + 1}段目`}
+                                  className="border-0 text-center leading-tight"
+                                />
+                              ))}
+                            </div>
+                          )}
                         </td>
                         <td className="border border-black text-center font-bold text-[15px] leading-tight py-1">
-                          {group ? formatDesiredDate(group.desiredShipDate) : ""}
+                          {group && <PrintInput value={formatDesiredDate(group.desiredShipDate)} ariaLabel="着予定日" className="text-center" />}
                         </td>
-                        {/* ★ 出荷先のフォントサイズを文字数に応じて自動縮小表示 */}
                         <td className="border border-black px-2.5 font-black tracking-wide leading-tight align-middle">
                           <div style={{ containerType: "inline-size", width: "100%" }}>
-                            <div
-                              className="whitespace-nowrap overflow-hidden"
-                              style={{
-                                fontSize: (group && group.customerName)
-                                  ? `min(25px, 100cqi / ${group.customerName.length})`
-                                  : "25px"
-                              }}
-                            >
-                              {group ? group.customerName : ""}
+                            <div className="whitespace-nowrap overflow-hidden">
+                              {group && <PrintInput
+                                value={group.customerName}
+                                ariaLabel="出荷先"
+                                className="border-0 text-left font-black tracking-wide"
+                                style={{ fontSize: `min(25px, 100cqi / ${Math.max(group.customerName.length, 1)})` }}
+                              />}
                             </div>
                           </div>
                         </td>
@@ -475,49 +533,44 @@ export default function ShipmentsPage() {
                         const lot1 = row?.lots[0];
                         const lot2 = row?.lots[1];
 
-                        const productId = row ? row.product_id : "";
+                        const productId = row ? row.productId : "";
                         const productName = row ? (row.variant || row.name) : "";
                         const displayType = productId ? `${productId}（${productName}）` : productName;
-
-                        const isRowEmpty = !row;
+                        const rowQuantity = row ? formatShipmentQuantity(row.qtyCs, row.qtyPiece) : "";
 
                         return (
                           <tr key={i} className="h-3.5">
                             {/* 注番 */}
                             <td className="border border-black text-center font-bold text-[8px] px-0.5 truncate overflow-hidden whitespace-nowrap">
-                              {i === 0 && group ? (group.customerOrderNo || group.orderIdPrefix.slice(-4)) : ""}
+                              <PrintInput value={i === 0 && group ? group.customerOrderNo : ""} ariaLabel={`注番 ${i + 1}行目`} className="text-center font-bold" />
                             </td>
                             {/* 出荷種類 */}
                             <td className="border border-black px-1 font-bold text-[9px] truncate overflow-hidden whitespace-nowrap">
-                              {displayType}
+                              <PrintInput value={displayType} ariaLabel={`出荷種類 ${i + 1}行目`} className="font-bold" />
                             </td>
                             {/* 出荷数 */}
                             <td className="border border-black text-right pr-4 font-bold relative text-[9px] h-3.5 py-0">
-                              {row ? row.totalCs : ""}
-                              {!isRowEmpty && <span className="absolute right-0.5 bottom-0 text-[6px] font-normal text-slate-400 scale-[0.8] origin-right">c/s</span>}
+                              <PrintInput value={rowQuantity} ariaLabel={`出荷数 ${i + 1}行目`} className="text-right font-bold" />
                             </td>
                             {/* LotNo 1 */}
                             <td className="border border-black text-center font-bold text-[8px] tracking-wider truncate overflow-hidden">
-                              {lot1 ? lot1.lot_code : ""}
+                              <PrintInput value={lot1?.lot_code || ""} ariaLabel={`LotNo 1 ${i + 1}行目`} className="text-center font-bold tracking-wider" />
                             </td>
                             {/* 数量 1 */}
                             <td className="border border-black text-right pr-4 font-bold relative text-[9px] h-3.5 py-0">
-                              {lot1 ? lot1.qty_cs : ""}
-                              {!isRowEmpty && lot1 && <span className="absolute right-0.5 bottom-0 text-[6px] font-normal text-slate-400 scale-[0.8] origin-right">c/s</span>}
+                              <PrintInput value={lot1 ? formatShipmentQuantity(lot1.qty_cs, lot1.qty_piece) : ""} ariaLabel={`Lot数量 1 ${i + 1}行目`} className="text-right font-bold" />
                             </td>
                             {/* LotNo 2 */}
                             <td className="border border-black text-center font-bold text-[8px] tracking-wider truncate overflow-hidden">
-                              {lot2 ? lot2.lot_code : ""}
+                              <PrintInput value={lot2?.lot_code || ""} ariaLabel={`LotNo 2 ${i + 1}行目`} className="text-center font-bold tracking-wider" />
                             </td>
                             {/* 数量 2 */}
                             <td className="border border-black text-right pr-4 font-bold relative text-[9px] h-3.5 py-0">
-                              {lot2 ? lot2.qty_cs : ""}
-                              {!isRowEmpty && lot2 && <span className="absolute right-0.5 bottom-0 text-[6px] font-normal text-slate-400 scale-[0.8] origin-right">c/s</span>}
+                              <PrintInput value={lot2 ? formatShipmentQuantity(lot2.qty_cs, lot2.qty_piece) : ""} ariaLabel={`Lot数量 2 ${i + 1}行目`} className="text-right font-bold" />
                             </td>
                             {/* 数量確認欄 */}
                             <td className="border border-black relative text-right pr-4 h-3.5 py-0 bg-slate-50/50 print:bg-transparent">
-                              {row ? row.totalCs : ""}
-                              {!isRowEmpty && <span className="absolute right-0.5 bottom-0 text-[6px] font-normal text-slate-400 scale-[0.8] origin-right">c/s</span>}
+                              <PrintInput value={rowQuantity} ariaLabel={`数量確認欄 ${i + 1}行目`} className="text-right font-bold" />
                             </td>
                           </tr>
                         );
@@ -528,7 +581,7 @@ export default function ShipmentsPage() {
                   {/* --- 備考枠 (テーブルの下部) --- */}
                   <div className="border border-black border-t-0 p-1 flex h-6 text-[8px] shrink-0">
                     <span className="font-bold mr-2 shrink-0">備考</span>
-                    <span className="text-slate-700 truncate">{shipNotes}</span>
+                    <PrintInput value={shipNotes} ariaLabel="備考" className="text-slate-700" />
                   </div>
                 </div>
               );
