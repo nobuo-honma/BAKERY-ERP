@@ -527,6 +527,14 @@ export default function OrdersPage() {
     );
   }
 
+  const orderListRows = orderGroups.flatMap((group) => group.items.map((item) => ({ group, item })));
+  const firstRowByCustomerOrderNo = new Map<string, number>();
+  orderListRows.forEach(({ group }, index) => {
+    if (group.customerOrderNo && !firstRowByCustomerOrderNo.has(group.customerOrderNo)) {
+      firstRowByCustomerOrderNo.set(group.customerOrderNo, index);
+    }
+  });
+
   // =======================================================================
   // 通常画面 (リスト・入力)
   // =======================================================================
@@ -683,6 +691,7 @@ export default function OrdersPage() {
               <Table>
                 <TableHeader className="bg-slate-100">
                   <TableRow>
+                    <TableHead className="w-12 font-bold text-slate-700">No.</TableHead>
                     <TableHead className="font-bold text-slate-700">発注№</TableHead>
                     <TableHead className="font-bold text-slate-700">受注先</TableHead>
                     <TableHead className="font-bold text-slate-700">製造種類</TableHead>
@@ -695,14 +704,16 @@ export default function OrdersPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {orderGroups.flatMap((group) => group.items.map((item) => {
+                  {orderListRows.map(({ group, item }, index) => {
                     const itemProductionDates = productionDates[item.id] ?? [];
                     const unitPerCs = item.products?.unit_per_cs || 24;
                     const { cs, p } = pcsToDisplay(item.quantity, unitPerCs);
+                    const showOrderDetails = !group.customerOrderNo || firstRowByCustomerOrderNo.get(group.customerOrderNo) === index;
                     return (
                       <TableRow key={item.id}>
-                        <TableCell className="font-medium">{group.customerOrderNo || "—"}</TableCell>
-                        <TableCell>{group.customerShortName || group.customerName || "—"}</TableCell>
+                        <TableCell className="text-center text-slate-500">{index + 1}</TableCell>
+                        <TableCell className="font-medium">{showOrderDetails ? group.customerOrderNo || "—" : ""}</TableCell>
+                        <TableCell>{showOrderDetails ? group.customerShortName || group.customerName || "—" : ""}</TableCell>
                         <TableCell>
                           <div className="font-medium">{item.products?.name || "—"}</div>
                           {item.products?.variant_name && <div className="text-xs text-slate-500">{item.products.variant_name}</div>}
@@ -722,9 +733,9 @@ export default function OrdersPage() {
                         </TableCell>
                       </TableRow>
                     );
-                  }))}
-                  {loading && orderGroups.length === 0 && <TableRow><TableCell colSpan={9} className="py-12 text-center"><Loader2 className="animate-spin w-8 h-8 text-slate-400 mx-auto" /></TableCell></TableRow>}
-                  {!loading && orderGroups.length === 0 && <TableRow><TableCell colSpan={9} className="py-12 text-center text-slate-500">受注データがありません。</TableCell></TableRow>}
+                  })}
+                  {loading && orderGroups.length === 0 && <TableRow><TableCell colSpan={10} className="py-12 text-center"><Loader2 className="animate-spin w-8 h-8 text-slate-400 mx-auto" /></TableCell></TableRow>}
+                  {!loading && orderGroups.length === 0 && <TableRow><TableCell colSpan={10} className="py-12 text-center text-slate-500">受注データがありません。</TableCell></TableRow>}
                 </TableBody>
               </Table>
             </div>
