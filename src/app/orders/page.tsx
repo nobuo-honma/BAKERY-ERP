@@ -878,14 +878,14 @@ export default function OrdersPage() {
                                   ) : (
                                     <>
                                       <span>{formatListDate(displayedDate)}</span>
-                                      {entry.overrideDate && <span className="text-[10px] text-slate-500">(受注個別)</span>}
+                                      {entry.overrideDate && <span className="text-[10px] text-slate-500 print:hidden">(受注個別)</span>}
                                       {isEditable && (
                                         <Button
                                           variant="ghost"
                                           size="icon"
                                           onClick={() => startEditingProductionDate(item, entry)}
                                           title="製造予定日を編集"
-                                          className="h-7 w-7"
+                                          className="h-7 w-7 print:hidden"
                                         >
                                           <Edit className="h-3.5 w-3.5" />
                                         </Button>
