@@ -14,9 +14,17 @@ import { useAuth } from "@/contexts/AuthContext";
 type Order = {
   id: string; order_date: string; planned_ship_date: string; desired_ship_date: string;
   quantity: number; status: string; product_id: string; customer_id: string; customer_order_no?: string;
-  unit_price?: number; remarks?: string;
+  unit_price?: number; remarks?: string; production_date_override?: string | null;
   customers?: { name: string; short_name?: string | null; address?: string };
   products?: { name: string; variant_name: string; unit_per_cs: number };
+};
+type ProductionDateEntry = {
+  key: string;
+  productionPlanId: string | null;
+  productionDate: string | null;
+  overrideDate: string | null;
+  plannedUnits: number;
+  status: string | null;
 };
 type Customer = { id: string; name: string; address?: string };
 type Product = { id: string; name: string; variant_name: string; unit_per_kg: number; unit_per_cs: number };
@@ -56,7 +64,10 @@ function displayToPcs(cs: number, p: number, unitPerCs: number): number {
 export default function OrdersPage() {
   const { canEdit } = useAuth();
   const [orderGroups, setOrderGroups] = useState<OrderGroup[]>([]);
-  const [productionDates, setProductionDates] = useState<Record<string, string[]>>({});
+  const [productionDates, setProductionDates] = useState<Record<string, ProductionDateEntry[]>>({});
+  const [editingProductionDateKey, setEditingProductionDateKey] = useState<string | null>(null);
+  const [productionDateDraft, setProductionDateDraft] = useState("");
+  const [savingProductionDateKey, setSavingProductionDateKey] = useState<string | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -87,31 +98,49 @@ export default function OrdersPage() {
     const { data: pData } = await supabase.from("products").select("*");
 
     const orderIds = (oData ?? []).map((order: Order) => order.id);
-    const datesByOrder: Record<string, Set<string>> = {};
+    const datesByOrder: Record<string, Map<string, ProductionDateEntry>> = {};
     if (orderIds.length > 0) {
       const [{ data: planLinks, error: linksError }, { data: directPlans, error: directPlansError }] = await Promise.all([
-        supabase.from("production_plan_orders").select("order_id, production_plan_id").in("order_id", orderIds),
-        supabase.from("production_plans").select("id, order_id, production_date").in("order_id", orderIds)
+        supabase.from("production_plan_orders").select("order_id, production_plan_id, production_date_override, planned_units").in("order_id", orderIds),
+        supabase.from("production_plans").select("id, order_id, production_date, planned_units, status").in("order_id", orderIds)
       ]);
 
-      let linkedPlans: Array<{ id: string; production_date: string }> = [];
+      let linkedPlans: Array<{ id: string; production_date: string; planned_units: number; status: string }> = [];
       let linkedPlansError: { message: string } | null = null;
       const planIds = [...new Set((planLinks ?? []).map((link) => link.production_plan_id))];
       if (planIds.length > 0) {
-        const result = await supabase.from("production_plans").select("id, production_date").in("id", planIds);
+        const result = await supabase.from("production_plans").select("id, production_date, planned_units, status").in("id", planIds);
         linkedPlansError = result.error;
         linkedPlans = result.data ?? [];
       }
 
-      const addProductionDate = (orderId: string, productionDate: string) => {
-        if (!datesByOrder[orderId]) datesByOrder[orderId] = new Set();
-        datesByOrder[orderId].add(productionDate);
+      const addProductionDate = (orderId: string, entry: ProductionDateEntry) => {
+        if (!datesByOrder[orderId]) datesByOrder[orderId] = new Map();
+        datesByOrder[orderId].set(entry.key, entry);
       };
-      (directPlans ?? []).forEach((plan) => addProductionDate(plan.order_id, plan.production_date));
-      const linkedDates = new Map(linkedPlans.map((plan) => [plan.id, plan.production_date]));
+      const linkedPlansById = new Map(linkedPlans.map((plan) => [plan.id, plan]));
       (planLinks ?? []).forEach((link) => {
-        const productionDate = linkedDates.get(link.production_plan_id);
-        if (productionDate) addProductionDate(link.order_id, productionDate);
+        const plan = linkedPlansById.get(link.production_plan_id);
+        if (plan) addProductionDate(link.order_id, {
+          key: `plan:${link.production_plan_id}`,
+          productionPlanId: link.production_plan_id,
+          productionDate: plan.production_date,
+          overrideDate: link.production_date_override,
+          plannedUnits: link.planned_units,
+          status: plan.status
+        });
+      });
+      (directPlans ?? []).forEach((plan) => {
+        if (!datesByOrder[plan.order_id]?.has(`plan:${plan.id}`)) {
+          addProductionDate(plan.order_id, {
+            key: `plan:${plan.id}`,
+            productionPlanId: plan.id,
+            productionDate: plan.production_date,
+            overrideDate: null,
+            plannedUnits: plan.planned_units,
+            status: plan.status
+          });
+        }
       });
 
       if (linksError || directPlansError || linkedPlansError) {
@@ -119,9 +148,24 @@ export default function OrdersPage() {
         alert(`製造予定日の取得に失敗しました。一覧に製造予定日が表示されない場合があります。\n${errorMessage}`);
       }
     }
-    setProductionDates(Object.fromEntries(
-      Object.entries(datesByOrder).map(([orderId, dates]) => [orderId, [...dates].sort()])
-    ));
+    const productionDateEntries = Object.fromEntries(
+      Object.entries(datesByOrder).map(([orderId, entries]) => [orderId, [...entries.values()].sort((a, b) =>
+        (a.overrideDate || a.productionDate || "").localeCompare(b.overrideDate || b.productionDate || "")
+      )])
+    );
+    (oData ?? []).forEach((order: Order) => {
+      if (!productionDateEntries[order.id]?.length) {
+        productionDateEntries[order.id] = [{
+          key: `order:${order.id}`,
+          productionPlanId: null,
+          productionDate: null,
+          overrideDate: order.production_date_override ?? null,
+          plannedUnits: 0,
+          status: null
+        }];
+      }
+    });
+    setProductionDates(productionDateEntries);
 
     if (oData) {
       const groups: Record<string, OrderGroup> = {};
@@ -276,6 +320,63 @@ export default function OrdersPage() {
     return month && day ? `${Number(month)}月${Number(day)}日` : date;
   };
 
+  const startEditingProductionDate = (item: Order, entry: ProductionDateEntry) => {
+    const key = `${item.id}:${entry.key}`;
+    setEditingProductionDateKey(key);
+    setProductionDateDraft(entry.overrideDate || entry.productionDate || "");
+  };
+
+  const handleUpdateProductionDate = async (
+    item: Order,
+    entry: ProductionDateEntry,
+    productionDate: string | null
+  ) => {
+    if (!canEdit || (entry.status !== null && entry.status !== "planned")) return;
+    if (productionDate !== null && !productionDate) {
+      alert("製造予定日を入力してください。");
+      return;
+    }
+
+    const key = `${item.id}:${entry.key}`;
+    setSavingProductionDateKey(key);
+    try {
+      if (entry.productionPlanId) {
+        const { data: updatedLink, error: updateError } = await supabase
+          .from("production_plan_orders")
+          .update({ production_date_override: productionDate })
+          .eq("order_id", item.id)
+          .eq("production_plan_id", entry.productionPlanId)
+          .select("production_plan_id")
+          .maybeSingle();
+        if (updateError) throw updateError;
+
+        if (!updatedLink) {
+          const { error: insertError } = await supabase.from("production_plan_orders").insert({
+            order_id: item.id,
+            production_plan_id: entry.productionPlanId,
+            planned_units: entry.plannedUnits,
+            production_date_override: productionDate
+          });
+          if (insertError) throw insertError;
+        }
+      } else {
+        const { error } = await supabase
+          .from("orders")
+          .update({ production_date_override: productionDate })
+          .eq("id", item.id);
+        if (error) throw error;
+      }
+
+      setEditingProductionDateKey(null);
+      await fetchData();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "不明なエラーが発生しました。";
+      alert(`製造予定日の更新に失敗しました: ${message}`);
+    } finally {
+      setSavingProductionDateKey(null);
+    }
+  };
+
   const handleSaveOrder = async () => {
     if (!formData.customerId || !formData.shipDate || !formData.plannedShipDate) {
       alert("出荷予定日や着予定日などの必須項目を入力してください。");
@@ -321,6 +422,7 @@ export default function OrdersPage() {
           quantity: totalPcs,
           unit_price: Number(detail.unitPrice) || 0,
           remarks: detail.remarks || null,
+          production_date_override: editingGroup?.items.find(item => item.id === detail.id)?.production_date_override ?? null,
           status: editingGroup?.items.find(item => item.id === detail.id)?.status || "received"
         };
       });
@@ -721,7 +823,80 @@ export default function OrdersPage() {
                         <TableCell className="whitespace-nowrap">
                           {cs} c/s{p > 0 && ` ${p} p`}
                         </TableCell>
-                        <TableCell>{itemProductionDates.length > 0 ? itemProductionDates.map(formatListDate).join("、") : "未定"}</TableCell>
+                        <TableCell className="min-w-52">
+                          <div className="flex flex-col gap-1">
+                            {itemProductionDates.map((entry) => {
+                              const dateKey = `${item.id}:${entry.key}`;
+                              const isEditing = editingProductionDateKey === dateKey;
+                              const isSaving = savingProductionDateKey === dateKey;
+                              const isEditable = canEdit && (entry.status === null || entry.status === "planned");
+                              const displayedDate = entry.overrideDate || entry.productionDate;
+
+                              return (
+                                <div key={entry.key} className="flex items-center gap-1 whitespace-nowrap">
+                                  {isEditing ? (
+                                    <>
+                                      <Input
+                                        type="date"
+                                        value={productionDateDraft}
+                                        onChange={(event) => setProductionDateDraft(event.target.value)}
+                                        disabled={isSaving}
+                                        className="h-8 w-36"
+                                        aria-label="製造予定日"
+                                      />
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        onClick={() => void handleUpdateProductionDate(item, entry, productionDateDraft)}
+                                        disabled={!productionDateDraft || isSaving}
+                                        title="保存"
+                                      >
+                                        {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                                      </Button>
+                                      {entry.overrideDate && (
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() => void handleUpdateProductionDate(item, entry, null)}
+                                          disabled={isSaving}
+                                          title="製造計画の日付に戻す"
+                                          className="px-1 text-xs"
+                                        >
+                                          計画日
+                                        </Button>
+                                      )}
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        onClick={() => setEditingProductionDateKey(null)}
+                                        disabled={isSaving}
+                                        title="キャンセル"
+                                      >
+                                        <X className="h-4 w-4" />
+                                      </Button>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <span>{formatListDate(displayedDate)}</span>
+                                      {entry.overrideDate && <span className="text-[10px] text-slate-500">(受注個別)</span>}
+                                      {isEditable && (
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          onClick={() => startEditingProductionDate(item, entry)}
+                                          title="製造予定日を編集"
+                                          className="h-7 w-7"
+                                        >
+                                          <Edit className="h-3.5 w-3.5" />
+                                        </Button>
+                                      )}
+                                    </>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </TableCell>
                         <TableCell>{formatListDate(group.plannedShipDate)}</TableCell>
                         <TableCell>{formatListDate(group.desiredShipDate)}</TableCell>
                         <TableCell>{item.remarks || "—"}</TableCell>
