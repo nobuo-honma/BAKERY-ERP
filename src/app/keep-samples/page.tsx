@@ -54,7 +54,7 @@ function formatKeepSampleLot(lotCode: string) {
 
 export default function KeepSamplesPage() {
   const { canEdit } = useAuth();
-  const [viewMode, setViewMode] = useState<'list' | 'print' | 'print_label'>('list');
+  const [viewMode, setViewMode] = useState<'list' | 'print' | 'print_label' | 'print_checklist'>('list');
   const [samples, setSamples] = useState<KeepSample[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -447,6 +447,16 @@ export default function KeepSamplesPage() {
     return chunks;
   }, [samples, viewMode, printMonth]);
 
+  const checklistChunks = useMemo(() => {
+    if (viewMode !== 'print_checklist') return [];
+
+    const chunks: KeepSample[][] = [];
+    for (let i = 0; i < samples.length; i += 20) {
+      chunks.push(samples.slice(i, i + 20));
+    }
+    return chunks;
+  }, [samples, viewMode]);
+
   // =======================================================================
   // ラベル印刷画面 (横20cm × 縦9cm, A4縦に3枚配置)
   // =======================================================================
@@ -628,6 +638,76 @@ export default function KeepSamplesPage() {
   }
 
   // =======================================================================
+  // チェック用一覧表 印刷画面 (A4横・1ページ20件)
+  // =======================================================================
+  if (viewMode === 'print_checklist') {
+    return (
+      <div className="bg-slate-200 min-h-screen py-8 print:p-0 print:bg-white flex flex-col items-center">
+        <style dangerouslySetInnerHTML={{ __html: `@media print { header, nav { display: none !important; } main { padding: 0 !important; margin: 0 !important; max-width: 100% !important; background: white !important; } @page { size: A4 landscape; margin: 10mm; } body { background-color: white !important; color: black !important; } .print-hide { display: none !important; } .checklist-page-break { page-break-after: always; } .checklist-table thead { display: table-header-group; } .checklist-table tr { page-break-inside: avoid; } }` }} />
+        <div className="w-[297mm] print:w-full flex justify-between mb-4 print-hide">
+          <Button variant="outline" onClick={() => setViewMode('list')} className="bg-white text-slate-700 font-bold border-slate-300"><ArrowLeft className="h-4 w-4 mr-2" /> 戻る</Button>
+          <Button onClick={() => window.print()} className="bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-lg"><Printer className="h-5 w-5 mr-2" /> 印刷する (PDFに保存)</Button>
+        </div>
+
+        {checklistChunks.length === 0 ? (
+          <div className="w-[297mm] bg-white p-8 text-center text-slate-500 font-bold shadow-xl">キープサンプルのデータがありません。</div>
+        ) : (
+          checklistChunks.map((chunk, pageIdx) => (
+            <section key={pageIdx} className={`w-[297mm] min-h-[210mm] print:w-full print:min-h-0 bg-white p-8 print:p-0 shadow-xl print:shadow-none text-black font-sans box-border ${pageIdx < checklistChunks.length - 1 ? 'checklist-page-break mb-8 print:mb-0' : ''}`}>
+              <div className="flex items-end justify-between border-b-2 border-black pb-2 mb-4">
+                <div>
+                  <h1 className="text-2xl font-bold">キープサンプル チェック用一覧表</h1>
+                  <p className="text-xs mt-1">対象件数: {samples.length} 件　／　確認日:　　　年　　　月　　　日</p>
+                </div>
+                <div className="text-sm">確認者:　　　　　　　　　</div>
+              </div>
+
+              <table className="checklist-table w-full border-collapse text-[10px]">
+                <thead>
+                  <tr className="bg-slate-100 print:bg-white">
+                    <th className="border border-black p-1 w-8">No.</th>
+                    <th className="border border-black p-1">管理番号</th>
+                    <th className="border border-black p-1">製品名 / 種類</th>
+                    <th className="border border-black p-1">Lot番号</th>
+                    <th className="border border-black p-1 w-20">製造日</th>
+                    <th className="border border-black p-1 w-20">賞味期限</th>
+                    <th className="border border-black p-1 w-14">保存数</th>
+                    <th className="border border-black p-1 w-14">使用数</th>
+                    <th className="border border-black p-1 w-14">残数</th>
+                    <th className="border border-black p-1 w-12">確認</th>
+                    <th className="border border-black p-1 w-28">備考</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {chunk.map((sample, index) => (
+                    <tr key={sample.id} className="h-7">
+                      <td className="border border-black p-1 text-center">{pageIdx * 20 + index + 1}</td>
+                      <td className="border border-black p-1 font-bold">{sample.management_no}</td>
+                      <td className="border border-black p-1">
+                        {sample.products?.name}
+                        {sample.products?.variant_name ? ` / ${sample.products.variant_name}` : ""}
+                      </td>
+                      <td className="border border-black p-1">{formatKeepSampleLot(sample.lot_code)}</td>
+                      <td className="border border-black p-1 text-center">{new Date(sample.production_date).toLocaleDateString('ja-JP')}</td>
+                      <td className="border border-black p-1 text-center">{new Date(sample.expiry_date).toLocaleDateString('ja-JP')}</td>
+                      <td className="border border-black p-1 text-center">{sample.saved_quantity}</td>
+                      <td className="border border-black p-1 text-center">{sample.used_quantity}</td>
+                      <td className="border border-black p-1 text-center font-bold">{sample.saved_quantity - sample.used_quantity}</td>
+                      <td className="border border-black p-1 text-center"><span className="inline-block w-4 h-4 border border-black align-middle" /></td>
+                      <td className="border border-black p-1"></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="mt-2 text-right text-xs">{pageIdx + 1} / {checklistChunks.length} ページ</div>
+            </section>
+          ))
+        )}
+      </div>
+    );
+  }
+
+  // =======================================================================
   // 管理記録 印刷画面 (A4横・1ページ4データ表示)
   // =======================================================================
   if (viewMode === 'print') {
@@ -776,6 +856,9 @@ export default function KeepSamplesPage() {
           )}
           <Button onClick={() => setViewMode('print')} variant="outline" className="border-blue-200 text-blue-700 hover:bg-blue-50 font-bold shadow-sm h-10 w-full sm:w-auto">
             <Printer className="h-4 w-4 mr-2" /> 管理記録(PDF)作成
+          </Button>
+          <Button onClick={() => setViewMode('print_checklist')} variant="outline" className="border-emerald-200 text-emerald-700 hover:bg-emerald-50 font-bold shadow-sm h-10 w-full sm:w-auto">
+            <Printer className="h-4 w-4 mr-2" /> チェック用一覧表
           </Button>
         </div>
       </div>
