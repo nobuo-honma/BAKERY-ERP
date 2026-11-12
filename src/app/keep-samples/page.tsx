@@ -148,6 +148,31 @@ export default function KeepSamplesPage() {
     setIsProcessing(false);
   };
 
+  const handleDeleteSelectedSamples = async () => {
+    if (!canEdit) return;
+
+    const idsToDelete = samples
+      .filter(sample => selectedSampleIds.has(sample.id))
+      .map(sample => sample.id);
+    if (idsToDelete.length === 0) return;
+
+    if (!confirm(`選択した ${idsToDelete.length} 件のキープサンプル記録を完全に削除しますか？\n（※製品在庫は戻りません。記録のみ削除されます）`)) return;
+
+    setIsProcessing(true);
+    try {
+      const { error } = await supabase.from("keep_samples").delete().in("id", idsToDelete);
+      if (error) throw error;
+
+      setSelectedSampleIds(new Set());
+      await fetchSamples();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "不明なエラー";
+      alert("一括削除エラー: " + message);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const handleSaveNewSample = async () => {
     if (!newProductId || !newLotCode || !newSavedQty || !newProductionDate || !newExpiryDate) {
       alert("すべての必須項目を入力してください。");
@@ -736,6 +761,12 @@ export default function KeepSamplesPage() {
           {selectedSampleIds.size > 0 && (
             <Button onClick={() => setViewMode('print_label')} className="bg-slate-800 hover:bg-slate-900 text-white font-bold shadow-sm h-10">
               <QrCode className="h-4 w-4 mr-2" /> 選択した {selectedSampleIds.size} 件のラベルを作成
+            </Button>
+          )}
+          {canEdit && selectedSampleIds.size > 0 && (
+            <Button onClick={handleDeleteSelectedSamples} disabled={isProcessing} variant="outline" className="border-red-200 text-red-600 hover:bg-red-50 font-bold shadow-sm h-10">
+              {isProcessing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Trash2 className="h-4 w-4 mr-2" />}
+              選択した {selectedSampleIds.size} 件を削除
             </Button>
           )}
           {canEdit && (
