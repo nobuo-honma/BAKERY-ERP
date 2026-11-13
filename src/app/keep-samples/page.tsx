@@ -47,7 +47,7 @@ function formatKeepSampleLot(lotCode: string) {
   const firstChar = lotCode.charAt(0);
   const dayIndex = DAY_KATAKANA_MAP.indexOf(firstChar);
   if (dayIndex > 0) {
-    return dayIndex.toString() + lotCode.slice(1);
+    return dayIndex.toString().padStart(2, "0") + lotCode.slice(1);
   }
   return lotCode;
 }
