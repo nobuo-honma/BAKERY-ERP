@@ -689,7 +689,8 @@ export default function OrdersPage() {
               <span className="text-lg font-black text-slate-800 tracking-tight">受注・製造スケジュール進捗表</span>
               <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600 sm:ml-2">
                 <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 bg-emerald-600 rounded-xs shadow-2xs"></span>製造完了</span>
-                <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 bg-amber-400 rounded-xs shadow-2xs"></span>残作業量</span>
+                <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 bg-amber-400 rounded-xs shadow-2xs"></span>製造中</span>
+                <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 bg-slate-100 border border-slate-300 border-dashed rounded-xs"></span>未開始(予定)</span>
                 <span className="flex items-center gap-1.5"><Truck className="w-3.5 h-3.5 text-blue-600" />出荷予定日</span>
                 <span className="flex items-center gap-1 text-slate-400"><span className="inline-block w-4 border-t-2 border-dashed border-slate-400"></span>出荷までの猶予</span>
               </div>
@@ -854,18 +855,30 @@ export default function OrdersPage() {
                         const shipYmd = group.plannedShipDate || group.desiredShipDate || null;
 
                         // 進捗率・完了数・残り作業量の算出
-                        const totalPlanned = entries.reduce((sum, e) => sum + (e.plannedUnits || 0), 0);
+                        const hasInProgress = entries.some((e) => e.status === "in_progress");
                         const completedUnits = entries
                           .filter((e) => e.status === "completed")
                           .reduce((sum, e) => sum + (e.plannedUnits || 0), 0);
 
+                        // 進捗率は実績ベース（出荷済は100%、完了個数/受注数。未着手は必ず0%）
                         let progressPct = 0;
                         if (item.status === "shipped") {
                           progressPct = 100;
                         } else if (item.quantity > 0 && completedUnits > 0) {
                           progressPct = Math.min(100, Math.round((completedUnits / item.quantity) * 100));
-                        } else if (item.status === "in_production" || totalPlanned > 0) {
-                          progressPct = entries.some((e) => e.status === "in_progress") ? 50 : 25;
+                        }
+
+                        // 製造状態（未計画・未開始・製造中・完了）
+                        type MfgState = "unplanned" | "not_started" | "in_progress" | "completed";
+                        let mfgState: MfgState = "unplanned";
+                        if (item.status === "shipped" || progressPct === 100) {
+                          mfgState = "completed";
+                        } else if (!hasMfgPlan) {
+                          mfgState = "unplanned";
+                        } else if (hasInProgress || completedUnits > 0) {
+                          mfgState = "in_progress";
+                        } else {
+                          mfgState = "not_started"; // 計画はあるが、まだ製造未開始
                         }
 
                         // 残り作業量（ピース数 → cs / p）
@@ -883,8 +896,6 @@ export default function OrdersPage() {
                         // 製造期間の日数と完了日数換算
                         const mfgStartDt = mfgStartYmd ? parseLocalDate(mfgStartYmd) : null;
                         const mfgEndDt = mfgEndYmd ? parseLocalDate(mfgEndYmd) : null;
-                        const mfgSpanDays = mfgStartDt && mfgEndDt ? Math.max(1, Math.round((mfgEndDt.getTime() - mfgStartDt.getTime()) / 86400000) + 1) : 0;
-                        const completedDaysCount = Math.round((mfgSpanDays * progressPct) / 100);
 
                         return (
                           <tr key={item.id} className="border-b border-slate-200 hover:bg-slate-50/90 bg-white">
@@ -903,11 +914,16 @@ export default function OrdersPage() {
                               {cs} c/s {p > 0 && <span className="text-[10px] text-slate-500">{p}p</span>}
                             </td>
 
-                            {/* 3. 進捗率（% とプログレスバー） */}
+                            {/* 3. 進捗率（% とプログレスバー & 状態ラベル） */}
                             <td style={{ left: 256 }} className="sticky z-10 bg-white py-1.5 px-2 text-center border-r border-slate-200 w-24 min-w-24">
                               <div className="flex flex-col items-center gap-1">
                                 <div className="flex items-center justify-between w-full text-[11px] font-bold">
-                                  <span className={progressPct === 100 ? "text-emerald-700 font-black" : progressPct > 0 ? "text-blue-700" : "text-slate-400"}>
+                                  <span className={
+                                    mfgState === "completed" ? "text-emerald-700 font-black" :
+                                    mfgState === "in_progress" ? "text-amber-700 font-bold" :
+                                    mfgState === "not_started" ? "text-slate-500 font-bold" :
+                                    "text-slate-400"
+                                  }>
                                     {progressPct}%
                                   </span>
                                   <span className="text-[9px] text-slate-400 font-normal">
@@ -916,26 +932,36 @@ export default function OrdersPage() {
                                 </div>
                                 <div className="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden">
                                   <div
-                                    className={`h-full ${progressPct === 100 ? "bg-emerald-600" : "bg-blue-600"}`}
+                                    className={`h-full ${
+                                      mfgState === "completed" ? "bg-emerald-600" :
+                                      mfgState === "in_progress" ? "bg-amber-500" :
+                                      "bg-slate-300"
+                                    }`}
                                     style={{ width: `${progressPct}%` }}
                                   />
+                                </div>
+                                <div className="text-[9px] leading-none">
+                                  {mfgState === "completed" && <span className="text-emerald-700 font-bold">完了</span>}
+                                  {mfgState === "in_progress" && <span className="text-amber-600 font-bold">製造中</span>}
+                                  {mfgState === "not_started" && <span className="text-slate-400 font-medium">未開始</span>}
+                                  {mfgState === "unplanned" && <span className="text-slate-400 font-medium">未計画</span>}
                                 </div>
                               </div>
                             </td>
 
                             {/* 4. 残り作業量 */}
                             <td style={{ left: 352 }} className="sticky z-10 bg-white py-2 px-2 text-center border-r border-slate-200 w-24 min-w-24 whitespace-nowrap">
-                              {progressPct === 100 || remainingUnits === 0 ? (
+                              {mfgState === "completed" || remainingUnits === 0 ? (
                                 <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
                                   完了
                                 </span>
                               ) : (
                                 <div className="text-right">
-                                  <span className="font-bold text-amber-700 text-xs">
+                                  <span className={`font-bold text-xs ${mfgState === "in_progress" ? "text-amber-700" : "text-slate-700"}`}>
                                     残 {remainingPcsDisplay.cs} <span className="text-[10px] font-normal">c/s</span>
                                   </span>
                                   {remainingPcsDisplay.p > 0 && (
-                                    <span className="text-[10px] text-amber-600 ml-0.5">{remainingPcsDisplay.p}p</span>
+                                    <span className="text-[10px] text-slate-500 ml-0.5">{remainingPcsDisplay.p}p</span>
                                   )}
                                 </div>
                               )}
@@ -989,10 +1015,13 @@ export default function OrdersPage() {
                               const curTime = d.date.getTime();
                               const isShipDay = shipYmd && d.ymd === shipYmd;
 
+                              // その日の計画エントリ
+                              const dayEntries = entries.filter((e) => (e.overrideDate || e.productionDate) === d.ymd);
+                              const isDayCompleted = dayEntries.length > 0 && dayEntries.every((e) => e.status === "completed");
+                              const isDayInProgress = dayEntries.some((e) => e.status === "in_progress");
+
                               // 製造期間判定
                               const inMfgRange = hasMfgPlan && mfgStartDt && mfgEndDt && curTime >= mfgStartDt.getTime() && curTime <= mfgEndDt.getTime();
-                              const mfgOffset = inMfgRange && mfgStartDt ? Math.round((curTime - mfgStartDt.getTime()) / 86400000) : -1;
-                              const isCompletedPortion = inMfgRange && (progressPct === 100 || mfgOffset < completedDaysCount);
                               const isMfgStart = inMfgRange && d.ymd === mfgStartYmd;
                               const isMfgEnd = inMfgRange && d.ymd === mfgEndYmd;
 
@@ -1005,13 +1034,18 @@ export default function OrdersPage() {
                               // 出荷日を超過して製造している危険状態
                               const isOverdueMfg = inMfgRange && shipDateObj && curTime > shipDateObj.getTime() && remainingUnits > 0;
 
+                              // そのセル（日）のバー表示スタイル
+                              const isBarCompleted = mfgState === "completed" || isDayCompleted;
+                              const isBarInProgress = !isBarCompleted && (isDayInProgress || (mfgState === "in_progress" && dayEntries.length === 0));
+                              const isBarNotStarted = !isBarCompleted && !isBarInProgress;
+
                               return (
                                 <td
                                   key={d.ymd}
                                   className={`p-0 border-r border-slate-200 relative h-10 ${
                                     d.isToday ? "bg-amber-50/70" : d.isWeekend ? "bg-slate-50/60" : ""
                                   }`}
-                                  title={`${item.products?.name}\n製造: ${hasMfgPlan ? `${formatShortMD(mfgStartYmd)}〜${formatShortMD(mfgEndYmd)}` : "未計画"}\n進捗: ${progressPct}%\n残作業: ${remainingUnits === 0 ? "完了" : `${remainingPcsDisplay.cs}c/s`}\n出荷予定: ${formatShortMD(shipYmd)}`}
+                                  title={`${item.products?.name}\n製造: ${hasMfgPlan ? `${formatShortMD(mfgStartYmd)}〜${formatShortMD(mfgEndYmd)}` : "未計画"}\n進捗: ${progressPct}% (${mfgState === "completed" ? "完了" : mfgState === "in_progress" ? "製造中" : mfgState === "not_started" ? "未開始" : "未計画"})\n残作業: ${remainingUnits === 0 ? "完了" : `${remainingPcsDisplay.cs}c/s`}\n出荷予定: ${formatShortMD(shipYmd)}`}
                                 >
                                   {/* 製造バー */}
                                   {inMfgRange && (
@@ -1019,15 +1053,17 @@ export default function OrdersPage() {
                                       className={`h-6 my-auto w-full flex items-center justify-center text-[10px] shadow-2xs ${
                                         isOverdueMfg
                                           ? "bg-rose-500 text-white font-bold"
-                                          : isCompletedPortion
+                                          : isBarCompleted
                                           ? "bg-emerald-600 text-white font-bold"
-                                          : "bg-amber-400 text-amber-950 font-bold"
+                                          : isBarInProgress
+                                          ? "bg-amber-400 text-amber-950 font-bold"
+                                          : "bg-slate-100 text-slate-500 border border-slate-300 border-dashed"
                                       } ${isMfgStart ? "rounded-l-xs" : ""} ${isMfgEnd ? "rounded-r-xs" : ""}`}
                                     >
-                                      {/* 1日だけ、または開始日セルに%を表示 */}
+                                      {/* 1日だけ、または開始日セルに状態/パーセントを表示 */}
                                       {(isMfgStart || mfgStartYmd === mfgEndYmd) && (
-                                        <span className="truncate px-0.5 select-none text-[9px]">
-                                          {progressPct}%
+                                        <span className="truncate px-0.5 select-none text-[9px] font-medium">
+                                          {mfgState === "completed" ? "100%" : mfgState === "not_started" ? "予定" : progressPct > 0 ? `${progressPct}%` : "製造中"}
                                         </span>
                                       )}
                                     </div>
@@ -1045,7 +1081,7 @@ export default function OrdersPage() {
                                     <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
                                       <div
                                         className={`w-6 h-6 rounded-full flex items-center justify-center shadow-sm pointer-events-auto ${
-                                          progressPct === 100 || item.status === "shipped"
+                                          mfgState === "completed"
                                             ? "bg-emerald-600 text-white"
                                             : isLate
                                             ? "bg-rose-600 text-white animate-pulse"
