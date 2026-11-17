@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, Fragment } from "react";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   ShoppingCart, Plus, Calculator, Loader2, Save, Lock, Edit, Trash2, X,
-  FileText, Printer, LayoutGrid, List, CheckCircle2, ChevronLeft, ChevronRight, Calendar
+  FileText, Printer, LayoutGrid, List, CheckCircle2, ChevronLeft, ChevronRight, Calendar, Truck
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -683,13 +683,15 @@ export default function OrdersPage() {
       {/* ★ ガントチャート形式の進捗表ビュー */}
       {displayMode === "progress" && (
         <Card className="shadow-sm border-slate-300 overflow-hidden bg-white">
-          {/* 上部コントロールバー（プロジェクト開始日・週表示切り替え） */}
+          {/* 上部コントロールバー（プロジェクト開始日・週表示切り替え & 凡例） */}
           <div className="p-4 border-b border-slate-200 bg-slate-50/70 flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3">
               <span className="text-lg font-black text-slate-800 tracking-tight">受注・製造スケジュール進捗表</span>
-              <div className="flex items-center gap-3 text-xs text-slate-600 ml-2">
-                <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 bg-neutral-400 rounded-xs"></span>完了分</span>
-                <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 bg-purple-700 rounded-xs"></span>予定・残工程</span>
+              <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600 sm:ml-2">
+                <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 bg-emerald-600 rounded-xs shadow-2xs"></span>製造完了</span>
+                <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 bg-amber-400 rounded-xs shadow-2xs"></span>残作業量</span>
+                <span className="flex items-center gap-1.5"><Truck className="w-3.5 h-3.5 text-blue-600" />出荷予定日</span>
+                <span className="flex items-center gap-1 text-slate-400"><span className="inline-block w-4 border-t-2 border-dashed border-slate-400"></span>出荷までの猶予</span>
               </div>
             </div>
 
@@ -739,7 +741,7 @@ export default function OrdersPage() {
               <thead>
                 {/* 1段目: 週の開始日ヘッダー */}
                 <tr className="bg-slate-100 border-b border-slate-300">
-                  <th colSpan={5} className="sticky left-0 z-20 bg-white border-r border-slate-300 p-1.5 text-right text-[11px] font-normal text-slate-500">
+                  <th colSpan={6} style={{ left: 0 }} className="sticky z-20 bg-white border-r border-slate-300 p-1.5 text-right text-[11px] font-normal text-slate-500 w-2xl min-w-2xl">
                     表示期間: {formatShortMD(ganttTimeline.days[0]?.ymd)} 〜 {formatShortMD(ganttTimeline.days[ganttTimeline.days.length - 1]?.ymd)}
                   </th>
                   {ganttTimeline.weeks.map((week, wIdx) => (
@@ -755,7 +757,7 @@ export default function OrdersPage() {
 
                 {/* 2段目: 日付数字 (1〜31) */}
                 <tr className="bg-slate-50 border-b border-slate-300">
-                  <th colSpan={5} className="sticky left-0 z-20 bg-slate-50 border-r border-slate-300"></th>
+                  <th colSpan={6} style={{ left: 0 }} className="sticky z-20 bg-slate-50 border-r border-slate-300 w-2xl min-w-2xl"></th>
                   {ganttTimeline.days.map((d) => (
                     <th
                       key={d.ymd}
@@ -768,22 +770,25 @@ export default function OrdersPage() {
                   ))}
                 </tr>
 
-                {/* 3段目: ダークグレーのタスク列見出し ＆ 曜日 (月〜日) */}
+                {/* 3段目: ダークグレーの見出し ＆ 曜日 (月〜日) */}
                 <tr className="bg-neutral-700 text-white border-b border-neutral-800">
-                  <th className="sticky left-0 z-20 bg-neutral-700 py-2 px-3 text-left font-bold w-48 min-w-48 border-r border-neutral-600">
+                  <th style={{ left: 0 }} className="sticky z-20 bg-neutral-700 py-2 px-3 text-left font-bold w-44 min-w-44 border-r border-neutral-600">
                     タスク（製品・種類）
                   </th>
-                  <th className="sticky left-48 z-20 bg-neutral-700 py-2 px-2 text-right font-bold w-24 min-w-24 border-r border-neutral-600">
-                    数量
+                  <th style={{ left: 176 }} className="sticky z-20 bg-neutral-700 py-2 px-2 text-right font-bold w-20 min-w-20 border-r border-neutral-600">
+                    受注数
                   </th>
-                  <th className="sticky left-72 z-20 bg-neutral-700 py-2 px-2 text-center font-bold w-16 min-w-16 border-r border-neutral-600">
-                    進捗状況
+                  <th style={{ left: 256 }} className="sticky z-20 bg-neutral-700 py-2 px-2 text-center font-bold w-24 min-w-24 border-r border-neutral-600">
+                    進捗率
                   </th>
-                  <th className="sticky left-88 z-20 bg-neutral-700 py-2 px-2 text-center font-bold w-16 min-w-16 border-r border-neutral-600">
-                    開始
+                  <th style={{ left: 352 }} className="sticky z-20 bg-neutral-700 py-2 px-2 text-center font-bold w-24 min-w-24 border-r border-neutral-600">
+                    残り作業量
                   </th>
-                  <th className="sticky left-104 z-20 bg-neutral-700 py-2 px-2 text-center font-bold w-16 min-w-16 border-r border-neutral-500">
-                    終了
+                  <th style={{ left: 448 }} className="sticky z-20 bg-neutral-700 py-2 px-2 text-center font-bold w-28 min-w-28 border-r border-neutral-600">
+                    製造期間
+                  </th>
+                  <th style={{ left: 560 }} className="sticky z-20 bg-neutral-700 py-2 px-2 text-center font-bold w-28 min-w-28 border-r border-neutral-500">
+                    出荷予定日
                   </th>
                   {ganttTimeline.days.map((d) => (
                     <th
@@ -802,10 +807,10 @@ export default function OrdersPage() {
                 {orderGroups.map((group, gIdx) => {
                   const pColor = phaseColors[gIdx % phaseColors.length];
                   return (
-                    <>
+                    <Fragment key={`group-container-${group.groupId}`}>
                       {/* フェーズ（受注先グループ）行 */}
                       <tr key={`phase-${group.groupId}`} className={`${pColor.bg} ${pColor.text} border-b ${pColor.border}`}>
-                        <td colSpan={5} className={`sticky left-0 z-10 ${pColor.bg} py-2 px-3 font-black text-xs border-r border-slate-300`}>
+                        <td colSpan={6} style={{ left: 0 }} className={`sticky z-10 ${pColor.bg} py-2 px-3 font-black text-xs border-r border-slate-300 w-2xl min-w-2xl max-w-2xl`}>
                           <div className="flex items-center justify-between gap-2">
                             <span className="truncate">
                               {group.customerName}
@@ -835,17 +840,20 @@ export default function OrdersPage() {
                         const { cs, p } = pcsToDisplay(item.quantity, unitPerCs);
                         const entries = productionDates[item.id] ?? [];
 
-                        // 開始日: 製造予定日の最も早い日（無ければ受注日）
+                        // 製造計画のある日付一覧（昇順）
                         const validPlanDates = entries
                           .map((e) => e.overrideDate || e.productionDate)
                           .filter((d): d is string => Boolean(d))
                           .sort();
-                        const startYmd = validPlanDates[0] || group.orderDate;
 
-                        // 終了日: 工場出荷予定日（無ければ納入期限、それも無ければ開始日）
-                        const endYmd = group.plannedShipDate || group.desiredShipDate || startYmd;
+                        const hasMfgPlan = validPlanDates.length > 0;
+                        const mfgStartYmd = hasMfgPlan ? validPlanDates[0] : null;
+                        const mfgEndYmd = hasMfgPlan ? validPlanDates[validPlanDates.length - 1] : null;
 
-                        // 進捗率の算出
+                        // 出荷予定日（無ければ納入期限）
+                        const shipYmd = group.plannedShipDate || group.desiredShipDate || null;
+
+                        // 進捗率・完了数・残り作業量の算出
                         const totalPlanned = entries.reduce((sum, e) => sum + (e.plannedUnits || 0), 0);
                         const completedUnits = entries
                           .filter((e) => e.status === "completed")
@@ -860,15 +868,28 @@ export default function OrdersPage() {
                           progressPct = entries.some((e) => e.status === "in_progress") ? 50 : 25;
                         }
 
-                        const startDt = parseLocalDate(startYmd);
-                        const endDt = parseLocalDate(endYmd < startYmd ? startYmd : endYmd);
-                        const totalSpanDays = Math.max(1, Math.round((endDt.getTime() - startDt.getTime()) / 86400000) + 1);
-                        const completedDaysCount = Math.round((totalSpanDays * progressPct) / 100);
+                        // 残り作業量（ピース数 → cs / p）
+                        const effectiveCompletedUnits = item.status === "shipped" ? item.quantity : Math.min(item.quantity, completedUnits);
+                        const remainingUnits = Math.max(0, item.quantity - effectiveCompletedUnits);
+                        const remainingPcsDisplay = pcsToDisplay(remainingUnits, unitPerCs);
+
+                        // 出荷日までの残日数（カウントダウン）
+                        const today = new Date();
+                        today.setHours(0, 0, 0, 0);
+                        const shipDateObj = shipYmd ? parseLocalDate(shipYmd) : null;
+                        const daysUntilShip = shipDateObj ? Math.round((shipDateObj.getTime() - today.getTime()) / 86400000) : null;
+                        const isLate = daysUntilShip !== null && daysUntilShip < 0 && item.status !== "shipped" && remainingUnits > 0;
+
+                        // 製造期間の日数と完了日数換算
+                        const mfgStartDt = mfgStartYmd ? parseLocalDate(mfgStartYmd) : null;
+                        const mfgEndDt = mfgEndYmd ? parseLocalDate(mfgEndYmd) : null;
+                        const mfgSpanDays = mfgStartDt && mfgEndDt ? Math.max(1, Math.round((mfgEndDt.getTime() - mfgStartDt.getTime()) / 86400000) + 1) : 0;
+                        const completedDaysCount = Math.round((mfgSpanDays * progressPct) / 100);
 
                         return (
                           <tr key={item.id} className="border-b border-slate-200 hover:bg-slate-50/90 bg-white">
-                            {/* タスク名 */}
-                            <td className="sticky left-0 z-10 bg-white py-2 pl-6 pr-2 border-r border-slate-200 w-48 min-w-48">
+                            {/* 1. タスク名（製品名・規格） */}
+                            <td style={{ left: 0 }} className="sticky z-10 bg-white py-2 pl-6 pr-2 border-r border-slate-200 w-44 min-w-44">
                               <div className="font-bold text-slate-800 truncate" title={item.products?.name}>
                                 {item.products?.name || "-"}
                               </div>
@@ -877,57 +898,164 @@ export default function OrdersPage() {
                               )}
                             </td>
 
-                            {/* 数量 */}
-                            <td className="sticky left-48 z-10 bg-white py-2 px-2 text-right font-bold text-slate-700 border-r border-slate-200 w-24 min-w-24 whitespace-nowrap">
-                              {cs} c/s {p > 0 && <span className="text-[10px]">{p}p</span>}
+                            {/* 2. 受注数量 */}
+                            <td style={{ left: 176 }} className="sticky z-10 bg-white py-2 px-2 text-right font-bold text-slate-700 border-r border-slate-200 w-20 min-w-20 whitespace-nowrap">
+                              {cs} c/s {p > 0 && <span className="text-[10px] text-slate-500">{p}p</span>}
                             </td>
 
-                            {/* 進捗状況（%表示＋グレー背景バー） */}
-                            <td className="sticky left-72 z-10 bg-white py-1.5 px-1.5 text-center border-r border-slate-200 w-16 min-w-16">
-                              {progressPct > 0 ? (
-                                <div className="w-full bg-neutral-200 rounded-xs py-0.5 font-bold text-neutral-800 text-[11px]">
-                                  {progressPct}%
+                            {/* 3. 進捗率（% とプログレスバー） */}
+                            <td style={{ left: 256 }} className="sticky z-10 bg-white py-1.5 px-2 text-center border-r border-slate-200 w-24 min-w-24">
+                              <div className="flex flex-col items-center gap-1">
+                                <div className="flex items-center justify-between w-full text-[11px] font-bold">
+                                  <span className={progressPct === 100 ? "text-emerald-700 font-black" : progressPct > 0 ? "text-blue-700" : "text-slate-400"}>
+                                    {progressPct}%
+                                  </span>
+                                  <span className="text-[9px] text-slate-400 font-normal">
+                                    {pcsToDisplay(effectiveCompletedUnits, unitPerCs).cs}/{cs}cs
+                                  </span>
                                 </div>
-                              ) : (
-                                <span className="text-[10px] text-slate-400">
-                                  {validPlanDates.length === 0 ? "未計画" : "0%"}
+                                <div className="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden">
+                                  <div
+                                    className={`h-full ${progressPct === 100 ? "bg-emerald-600" : "bg-blue-600"}`}
+                                    style={{ width: `${progressPct}%` }}
+                                  />
+                                </div>
+                              </div>
+                            </td>
+
+                            {/* 4. 残り作業量 */}
+                            <td style={{ left: 352 }} className="sticky z-10 bg-white py-2 px-2 text-center border-r border-slate-200 w-24 min-w-24 whitespace-nowrap">
+                              {progressPct === 100 || remainingUnits === 0 ? (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                                  完了
                                 </span>
+                              ) : (
+                                <div className="text-right">
+                                  <span className="font-bold text-amber-700 text-xs">
+                                    残 {remainingPcsDisplay.cs} <span className="text-[10px] font-normal">c/s</span>
+                                  </span>
+                                  {remainingPcsDisplay.p > 0 && (
+                                    <span className="text-[10px] text-amber-600 ml-0.5">{remainingPcsDisplay.p}p</span>
+                                  )}
+                                </div>
                               )}
                             </td>
 
-                            {/* 開始日 */}
-                            <td className="sticky left-88 z-10 bg-white py-2 px-1 text-center text-slate-700 font-medium border-r border-slate-200 w-16 min-w-16">
-                              {formatShortMD(startYmd)}
+                            {/* 5. 製造期間 (開始 〜 終了予定) */}
+                            <td style={{ left: 448 }} className="sticky z-10 bg-white py-2 px-1 text-center text-slate-700 text-xs font-medium border-r border-slate-200 w-28 min-w-28">
+                              {hasMfgPlan ? (
+                                mfgStartYmd === mfgEndYmd ? (
+                                  <span className="font-bold">{formatShortMD(mfgStartYmd)}</span>
+                                ) : (
+                                  <div className="leading-tight">
+                                    <span className="font-bold">{formatShortMD(mfgStartYmd)}</span>
+                                    <span className="text-slate-400 mx-0.5">〜</span>
+                                    <span className="font-bold">{formatShortMD(mfgEndYmd)}</span>
+                                  </div>
+                                )
+                              ) : (
+                                <span className="text-[10px] text-slate-400">未計画</span>
+                              )}
                             </td>
 
-                            {/* 終了日 */}
-                            <td className="sticky left-104 z-10 bg-white py-2 px-1 text-center text-slate-700 font-medium border-r border-slate-300 w-16 min-w-16">
-                              {formatShortMD(endYmd)}
+                            {/* 6. 出荷予定日 & 残日数 */}
+                            <td style={{ left: 560 }} className="sticky z-10 bg-white py-2 px-1.5 text-center text-slate-700 border-r border-slate-300 w-28 min-w-28">
+                              {shipYmd ? (
+                                <div className="flex flex-col items-center">
+                                  <span className="font-bold text-xs">{formatShortMD(shipYmd)}</span>
+                                  {item.status === "shipped" ? (
+                                    <span className="text-[9px] text-emerald-600 font-bold">出荷済</span>
+                                  ) : isLate ? (
+                                    <span className="text-[9px] bg-rose-100 text-rose-700 px-1 rounded font-bold">
+                                      遅延!
+                                    </span>
+                                  ) : daysUntilShip === 0 ? (
+                                    <span className="text-[9px] bg-amber-100 text-amber-800 px-1 rounded font-bold">
+                                      本日出荷
+                                    </span>
+                                  ) : daysUntilShip !== null ? (
+                                    <span className="text-[9px] text-slate-500 font-medium">
+                                      あと{daysUntilShip}日
+                                    </span>
+                                  ) : null}
+                                </div>
+                              ) : (
+                                <span className="text-[10px] text-slate-400">-</span>
+                              )}
                             </td>
 
                             {/* 日別ガントバー描画セル */}
                             {ganttTimeline.days.map((d) => {
                               const curTime = d.date.getTime();
-                              const inRange = curTime >= startDt.getTime() && curTime <= endDt.getTime();
-                              const dayOffset = Math.round((curTime - startDt.getTime()) / 86400000);
-                              const isCompletedPortion = inRange && dayOffset < completedDaysCount;
-                              const isStart = d.ymd === formatDateYMD(startDt);
-                              const isEnd = d.ymd === formatDateYMD(endDt);
+                              const isShipDay = shipYmd && d.ymd === shipYmd;
+
+                              // 製造期間判定
+                              const inMfgRange = hasMfgPlan && mfgStartDt && mfgEndDt && curTime >= mfgStartDt.getTime() && curTime <= mfgEndDt.getTime();
+                              const mfgOffset = inMfgRange && mfgStartDt ? Math.round((curTime - mfgStartDt.getTime()) / 86400000) : -1;
+                              const isCompletedPortion = inMfgRange && (progressPct === 100 || mfgOffset < completedDaysCount);
+                              const isMfgStart = inMfgRange && d.ymd === mfgStartYmd;
+                              const isMfgEnd = inMfgRange && d.ymd === mfgEndYmd;
+
+                              // 製造終了後〜出荷予定日までの猶予期間（リードタイムライン）
+                              const inLeadTime = hasMfgPlan && mfgEndDt && shipDateObj && curTime > mfgEndDt.getTime() && curTime < shipDateObj.getTime();
+
+                              // 未計画時（受注日〜出荷予定日までの猶予ライン）
+                              const inUnplannedLeadTime = !hasMfgPlan && shipDateObj && group.orderDate && curTime >= parseLocalDate(group.orderDate).getTime() && curTime < shipDateObj.getTime();
+
+                              // 出荷日を超過して製造している危険状態
+                              const isOverdueMfg = inMfgRange && shipDateObj && curTime > shipDateObj.getTime() && remainingUnits > 0;
 
                               return (
                                 <td
                                   key={d.ymd}
-                                  className={`p-0 border-r border-slate-200 relative h-9 ${
+                                  className={`p-0 border-r border-slate-200 relative h-10 ${
                                     d.isToday ? "bg-amber-50/70" : d.isWeekend ? "bg-slate-50/60" : ""
                                   }`}
-                                  title={`${item.products?.name} (${formatShortMD(startYmd)} 〜 ${formatShortMD(endYmd)}) 進捗:${progressPct}%`}
+                                  title={`${item.products?.name}\n製造: ${hasMfgPlan ? `${formatShortMD(mfgStartYmd)}〜${formatShortMD(mfgEndYmd)}` : "未計画"}\n進捗: ${progressPct}%\n残作業: ${remainingUnits === 0 ? "完了" : `${remainingPcsDisplay.cs}c/s`}\n出荷予定: ${formatShortMD(shipYmd)}`}
                                 >
-                                  {inRange && (
+                                  {/* 製造バー */}
+                                  {inMfgRange && (
                                     <div
-                                      className={`h-6 my-auto w-full ${
-                                        isCompletedPortion ? "bg-neutral-400" : "bg-purple-700"
-                                      } ${isStart ? "rounded-l-xs" : ""} ${isEnd ? "rounded-r-xs" : ""}`}
-                                    />
+                                      className={`h-6 my-auto w-full flex items-center justify-center text-[10px] shadow-2xs ${
+                                        isOverdueMfg
+                                          ? "bg-rose-500 text-white font-bold"
+                                          : isCompletedPortion
+                                          ? "bg-emerald-600 text-white font-bold"
+                                          : "bg-amber-400 text-amber-950 font-bold"
+                                      } ${isMfgStart ? "rounded-l-xs" : ""} ${isMfgEnd ? "rounded-r-xs" : ""}`}
+                                    >
+                                      {/* 1日だけ、または開始日セルに%を表示 */}
+                                      {(isMfgStart || mfgStartYmd === mfgEndYmd) && (
+                                        <span className="truncate px-0.5 select-none text-[9px]">
+                                          {progressPct}%
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+
+                                  {/* 製造終了〜出荷日までのリードタイム点線ライン */}
+                                  {(inLeadTime || inUnplannedLeadTime) && (
+                                    <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 flex items-center pointer-events-none">
+                                      <div className={`w-full border-t-2 border-dashed ${inUnplannedLeadTime ? "border-slate-300" : "border-slate-400"}`} />
+                                    </div>
+                                  )}
+
+                                  {/* 出荷日マーカー（トラックアイコン） */}
+                                  {isShipDay && (
+                                    <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
+                                      <div
+                                        className={`w-6 h-6 rounded-full flex items-center justify-center shadow-sm pointer-events-auto ${
+                                          progressPct === 100 || item.status === "shipped"
+                                            ? "bg-emerald-600 text-white"
+                                            : isLate
+                                            ? "bg-rose-600 text-white animate-pulse"
+                                            : "bg-blue-600 text-white"
+                                        }`}
+                                        title={`出荷予定日: ${formatShortMD(shipYmd)}${remainingUnits > 0 ? ` (残り作業: ${remainingPcsDisplay.cs}c/s)` : " (製造完了)"}`}
+                                      >
+                                        <Truck className="w-3.5 h-3.5" />
+                                      </div>
+                                    </div>
                                   )}
                                 </td>
                               );
@@ -935,13 +1063,13 @@ export default function OrdersPage() {
                           </tr>
                         );
                       })}
-                    </>
+                    </Fragment>
                   );
                 })}
 
                 {!loading && orderGroups.length === 0 && (
                   <tr>
-                    <td colSpan={5 + ganttTimeline.days.length} className="text-center py-16 text-slate-400 font-bold">
+                    <td colSpan={6 + ganttTimeline.days.length} className="text-center py-16 text-slate-400 font-bold">
                       表示する受注・進捗データがありません。
                     </td>
                   </tr>
